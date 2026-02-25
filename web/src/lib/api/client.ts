@@ -1,6 +1,6 @@
 import type { AuthResponse, Permission, Role, User } from "@/lib/api/generated/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
 export class APIClient {
   private accessToken: string | null = null;
