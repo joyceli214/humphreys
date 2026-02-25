@@ -26,3 +26,10 @@ Monorepo containing:
 - Access token: JWT (15m), returned in login/refresh response body.
 - Refresh token: opaque random token in secure HttpOnly cookie (`refresh_token`), rotated on refresh.
 - CSRF: mutating cookie-authenticated endpoints require matching `X-CSRF-Token` header and `csrf_token` cookie.
+
+## Railway deployment
+- Config-as-code files:
+  - `api/railway.toml`
+  - `web/railway.toml`
+- Full guide:
+  - `docs/railway-setup.md`

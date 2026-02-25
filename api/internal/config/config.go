@@ -10,6 +10,7 @@ import (
 type Config struct {
 	AppEnv             string
 	ServerAddr         string
+	DatabaseURLRaw     string
 	DBHost             string
 	DBPort             int
 	DBUser             string
@@ -31,7 +32,8 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		AppEnv:          env("APP_ENV", "development"),
-		ServerAddr:      env("SERVER_ADDR", ":8080"),
+		ServerAddr:      resolveServerAddr(),
+		DatabaseURLRaw:  env("DATABASE_URL", ""),
 		DBHost:          env("DB_HOST", "localhost"),
 		DBPort:          envInt("DB_PORT", 5432),
 		DBUser:          env("DB_USER", "postgres"),
@@ -58,7 +60,20 @@ func Load() (Config, error) {
 }
 
 func (c Config) DatabaseURL() string {
+	if c.DatabaseURLRaw != "" {
+		return c.DatabaseURLRaw
+	}
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", c.DBUser, c.DBPassword, c.DBHost, c.DBPort, c.DBName, c.DBSSLMode)
+}
+
+func resolveServerAddr() string {
+	if explicit := env("SERVER_ADDR", ""); explicit != "" {
+		return explicit
+	}
+	if port := env("PORT", ""); port != "" {
+		return ":" + port
+	}
+	return ":8080"
 }
 
 func env(key, fallback string) string {
