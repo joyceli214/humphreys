@@ -1,9 +1,9 @@
 [build]
-builder = "NIXPACKS"
-buildCommand = "cd api && go build -o bin/server ./cmd/server"
+builder = "RAILPACK"
+buildCommand = "go build -o bin/server ./cmd/server"
 
 [deploy]
-startCommand = "cd api && ./bin/server"
+startCommand = "./bin/server"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
