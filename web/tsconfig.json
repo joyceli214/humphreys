@@ -16,5 +16,5 @@
     }
   },
   "include": ["src", "vite.config.ts", "vitest.config.ts"],
-  "exclude": ["src/app"]
+  "exclude": ["src/app", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }
