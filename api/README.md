@@ -6,6 +6,8 @@
 3. `go mod tidy`
 4. `go run ./cmd/server`
 
+Default migration directory is `./migrations` (override with `MIGRATIONS_DIR`).
+
 ## Highlights
 - JWT access token (15m default)
 - Rotating refresh token in HttpOnly cookie

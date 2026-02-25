@@ -49,7 +49,7 @@ func Load() (Config, error) {
 		OwnerEmail:      env("OWNER_EMAIL", "owner@example.com"),
 		OwnerPassword:   env("OWNER_PASSWORD", "ChangeMe123!"),
 		OwnerFullName:   env("OWNER_FULL_NAME", "Owner"),
-		MigrationsDir:   env("MIGRATIONS_DIR", "../infra/migrations"),
+		MigrationsDir:   env("MIGRATIONS_DIR", "./migrations"),
 	}
 
 	if cfg.JWTSecret == "" {
@@ -67,11 +67,11 @@ func (c Config) DatabaseURL() string {
 }
 
 func resolveServerAddr() string {
-	if explicit := env("SERVER_ADDR", ""); explicit != "" {
-		return explicit
-	}
 	if port := env("PORT", ""); port != "" {
 		return ":" + port
+	}
+	if explicit := env("SERVER_ADDR", ""); explicit != "" {
+		return explicit
 	}
 	return ":8080"
 }
