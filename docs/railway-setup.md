@@ -33,7 +33,7 @@ Notes:
 - API listens on Railway `PORT` automatically if `SERVER_ADDR` is not set.
 
 ### Web service variables
-- `NEXT_PUBLIC_API_BASE_URL=<your api service domain>`
+- `VITE_API_BASE_URL=<your api service domain>`
 
 Use Railway's generated public domains, for example:
 - API: `https://api-production-xxxx.up.railway.app`
@@ -41,7 +41,7 @@ Use Railway's generated public domains, for example:
 
 Then set:
 - API `CORS_ORIGIN` to web domain
-- Web `NEXT_PUBLIC_API_BASE_URL` to API domain
+- Web `VITE_API_BASE_URL` to API domain
 
 ## 4) Deploy order
 
@@ -58,8 +58,13 @@ Configured in `railway.toml`:
 
 ## 5.1) Web runtime
 
-Web service uses Vite preview in production:
-- `npm run start -- --host 0.0.0.0 --port $PORT`
+Web service is deployed with Railpack:
+- Build: `npm ci && npm run build`
+- Start: `npx serve --single --listen $PORT dist`
+
+Notes:
+- `--single` enables SPA fallback to `index.html`
+- No Dockerfile/Caddyfile is required for this setup
 
 ## 6) Notes on migrations
 
