@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16
+    container_name: admin_panel_db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ""
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: admin_panel
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

@@ -1,0 +1,25 @@
+# OS
+.DS_Store
+
+# Node
+node_modules/
+.next/
+dist/
+coverage/
+
+# Go
+bin/
+*.test
+*.out
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
