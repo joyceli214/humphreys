@@ -1,9 +1,9 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "if [ -d web ]; then cd web; fi; npm ci && npm run build"
+buildCommand = "npm ci && npm run build"
 
 [deploy]
-startCommand = "if [ -d web ]; then cd web; fi; npm run start -- --hostname 0.0.0.0 --port $PORT"
+startCommand = "npm run start -- --hostname 0.0.0.0 --port $PORT"
 healthcheckPath = "/"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
