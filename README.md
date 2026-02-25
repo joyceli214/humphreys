@@ -1,7 +1,7 @@
 # Admin Panel V1 Monorepo
 
 Monorepo containing:
-- `web/`: Next.js admin dashboard (shadcn-style components)
+- `web/`: React + Vite admin dashboard (shadcn-style components)
 - `api/`: Go REST API with JWT access + rotating refresh token auth
 - `infra/`: PostgreSQL migrations and local stack
 - `openapi.yaml`: API contract source for generated TypeScript types

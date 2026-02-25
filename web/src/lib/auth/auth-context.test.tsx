@@ -2,18 +2,16 @@ import React from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import { AuthProvider } from "@/lib/auth/auth-context";
-import { vi } from "vitest";
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() })
-}));
+import { MemoryRouter } from "react-router-dom";
 
 describe("AuthProvider", () => {
   it("renders children", () => {
     render(
-      <AuthProvider>
-        <div>child</div>
-      </AuthProvider>
+      <MemoryRouter>
+        <AuthProvider>
+          <div>child</div>
+        </AuthProvider>
+      </MemoryRouter>
     );
     expect(screen.getByText("child")).toBeInTheDocument();
   });

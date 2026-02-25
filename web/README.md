@@ -1,7 +1,7 @@
-# Web (Next.js + shadcn-style)
+# Web (React + Vite + shadcn-style)
 
 ## Setup
-1. `cp .env.example .env.local`
+1. `cp .env.example .env`
 2. `npm install`
 3. `npm run dev`
 

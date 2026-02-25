@@ -56,6 +56,11 @@ Configured in `railway.toml`:
 - API: `/healthz`
 - Web: `/`
 
+## 5.1) Web runtime
+
+Web service uses Vite preview in production:
+- `npm run start -- --host 0.0.0.0 --port $PORT`
+
 ## 6) Notes on migrations
 
 API runs migrations on startup (`infra/migrations`).

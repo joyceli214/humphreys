@@ -5,22 +5,22 @@ import { Topbar } from "@/components/layout/topbar";
 import { useAuth } from "@/lib/auth/auth-context";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useLocation, useNavigate } from "react-router-dom";
 import { firstReadableRoute, requiredReadPermissionForPath } from "@/lib/auth/authorization";
 
 export function ProtectedShell({ children }: { children: ReactNode }) {
   const { loading, user, scope, hasPermission } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const pathname = usePathname();
-  const router = useRouter();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
 
   const routePermission = requiredReadPermissionForPath(pathname);
 
   useEffect(() => {
     if (!loading && routePermission && !hasPermission(routePermission)) {
-      router.replace(firstReadableRoute(scope));
+      navigate(firstReadableRoute(scope), { replace: true });
     }
-  }, [hasPermission, loading, routePermission, router, scope]);
+  }, [hasPermission, loading, navigate, routePermission, scope]);
 
   if (loading) {
     return <div className="min-h-[100dvh] bg-background flex items-center justify-center">Loading session...</div>;

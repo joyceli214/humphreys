@@ -1,9 +1,8 @@
 "use client";
 
-import React from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import type { User } from "@/lib/api/generated/types";
 import { apiClient } from "@/lib/api/client";
 import { firstReadableRoute } from "@/lib/auth/authorization";
@@ -21,7 +20,7 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [scope, setScope] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       apiClient.setAccessToken(null);
       setUser(null);
       setScope([]);
-      router.push("/login");
+      navigate("/login");
     }
   };
 
@@ -56,18 +55,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         apiClient.setAccessToken(auth.access_token);
         setUser(auth.user);
         setScope(auth.scope ?? []);
-        router.push(firstReadableRoute(auth.scope ?? []));
+        navigate(firstReadableRoute(auth.scope ?? []));
       },
       logout: async () => {
         await apiClient.logout();
         apiClient.setAccessToken(null);
         setUser(null);
         setScope([]);
-        router.push("/login");
+        navigate("/login");
       },
       refreshSession
     }),
-    [loading, router, scope, user]
+    [loading, navigate, scope, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

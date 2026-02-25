@@ -1,13 +1,12 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth/auth-context";
 import { visibleNavEntries } from "@/lib/auth/authorization";
 
 export function AppSidebar({ className, onNavigate }: { className?: string; onNavigate?: () => void }) {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { scope } = useAuth();
   const visibleLinks = visibleNavEntries(scope);
   return (
@@ -20,7 +19,7 @@ export function AppSidebar({ className, onNavigate }: { className?: string; onNa
         {visibleLinks.map((link) => (
           <Link
             key={link.href}
-            href={link.href}
+            to={link.href}
             onClick={onNavigate}
             className={cn(
               "block rounded-md px-3 py-2 text-sm font-medium",
