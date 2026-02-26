@@ -1,13 +1,28 @@
-package handlers
+package catalog
 
 import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type Handler struct {
+	service *Service
+}
+
+func New(db *pgxpool.Pool) *Handler {
+	return &Handler{
+		service: NewService(NewRepository(db)),
+	}
+}
+
+func NewWithService(service *Service) *Handler {
+	return &Handler{service: service}
+}
+
 func (h *Handler) ListResources(c *gin.Context) {
-	resources, err := h.Store.ListResources(c.Request.Context())
+	resources, err := h.service.ListResources(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list resources"})
 		return
@@ -16,7 +31,7 @@ func (h *Handler) ListResources(c *gin.Context) {
 }
 
 func (h *Handler) ListPermissions(c *gin.Context) {
-	permissions, err := h.Store.ListPermissions(c.Request.Context())
+	permissions, err := h.service.ListPermissions(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list permissions"})
 		return

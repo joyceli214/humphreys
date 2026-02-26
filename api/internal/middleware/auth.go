@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"humphreys/api/internal/security"
+	authsecurity "humphreys/api/internal/modules/auth/security"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,7 +19,7 @@ func Auth(secret string) gin.HandlerFunc {
 			return
 		}
 		raw := strings.TrimSpace(header[len("Bearer "):])
-		claims, err := security.ParseAccessToken(secret, raw)
+		claims, err := authsecurity.ParseAccessToken(secret, raw)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
@@ -29,12 +29,12 @@ func Auth(secret string) gin.HandlerFunc {
 	}
 }
 
-func Claims(c *gin.Context) (*security.Claims, bool) {
+func Claims(c *gin.Context) (*authsecurity.Claims, bool) {
 	value, ok := c.Get(claimsContextKey)
 	if !ok {
 		return nil, false
 	}
-	claims, ok := value.(*security.Claims)
+	claims, ok := value.(*authsecurity.Claims)
 	return claims, ok
 }
 

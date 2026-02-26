@@ -1,13 +1,27 @@
-package handlers
+package users
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
-	"humphreys/api/internal/security"
-
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type Handler struct {
+	service *Service
+}
+
+func New(db *pgxpool.Pool) *Handler {
+	return &Handler{
+		service: NewService(NewRepository(db)),
+	}
+}
+
+func NewWithService(service *Service) *Handler {
+	return &Handler{service: service}
+}
 
 type createUserRequest struct {
 	Email    string   `json:"email" binding:"required,email"`
@@ -37,7 +51,7 @@ func (h *Handler) ListUsers(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
-	users, err := h.Store.ListUsers(c.Request.Context(), q, status, page, pageSize)
+	users, err := h.service.ListUsers(c.Request.Context(), q, status, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
 		return
@@ -51,15 +65,8 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if req.Status == "" {
-		req.Status = "active"
-	}
-	hash, err := security.HashPassword(req.Password)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
-		return
-	}
-	user, err := h.Store.CreateUser(c.Request.Context(), req.Email, hash, req.FullName, req.Status, req.RoleIDs)
+
+	user, err := h.service.CreateUser(c.Request.Context(), req.Email, req.Password, req.FullName, req.Status, req.RoleIDs)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -68,7 +75,7 @@ func (h *Handler) CreateUser(c *gin.Context) {
 }
 
 func (h *Handler) GetUser(c *gin.Context) {
-	user, err := h.Store.GetUserByID(c.Request.Context(), c.Param("id"))
+	user, err := h.service.GetUser(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
@@ -82,16 +89,7 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	var passHash *string
-	if req.Password != nil && *req.Password != "" {
-		hash, err := security.HashPassword(*req.Password)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
-			return
-		}
-		passHash = &hash
-	}
-	user, err := h.Store.UpdateUser(c.Request.Context(), c.Param("id"), req.Email, req.FullName, passHash)
+	user, err := h.service.UpdateUser(c.Request.Context(), c.Param("id"), req.Email, req.FullName, req.Password)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -105,11 +103,11 @@ func (h *Handler) UpdateUserStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if req.Status != "active" && req.Status != "disabled" && req.Status != "deleted" {
+	user, err := h.service.UpdateUserStatus(c.Request.Context(), c.Param("id"), req.Status)
+	if errors.Is(err, ErrInvalidStatus) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid status"})
 		return
 	}
-	user, err := h.Store.SetUserStatus(c.Request.Context(), c.Param("id"), req.Status)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -123,13 +121,13 @@ func (h *Handler) SetUserRoles(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if err := h.Store.SetUserRoles(c.Request.Context(), c.Param("id"), req.RoleIDs); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	user, err := h.service.SetUserRoles(c.Request.Context(), c.Param("id"), req.RoleIDs)
+	if errors.Is(err, ErrUserNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-	user, err := h.Store.GetUserByID(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, user)

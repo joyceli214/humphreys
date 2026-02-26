@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"humphreys/api/internal/security"
+	authsecurity "humphreys/api/internal/modules/auth/security"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,8 +15,8 @@ func TestRequirePermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
-		tok, _, _ := security.NewAccessToken("secret", time.Minute, "u1", []string{"r1"}, []string{"users:read"})
-		claims, _ := security.ParseAccessToken("secret", tok)
+		tok, _, _ := authsecurity.NewAccessToken("secret", time.Minute, "u1", []string{"r1"}, []string{"users:read"})
+		claims, _ := authsecurity.ParseAccessToken("secret", tok)
 		c.Set("auth_claims", claims)
 		c.Next()
 	})

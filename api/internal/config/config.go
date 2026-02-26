@@ -45,7 +45,7 @@ func Load() (Config, error) {
 		RefreshTokenTTL: time.Duration(envInt("REFRESH_TOKEN_TTL_HOURS", 720)) * time.Hour,
 		CookieSecure:    envBool("COOKIE_SECURE", false),
 		CookieDomain:    env("COOKIE_DOMAIN", ""),
-		CORSOrigin:      env("CORS_ORIGIN", "http://localhost:3000"),
+		CORSOrigin:      env("CORS_ORIGIN", "http://localhost:5173"),
 		OwnerEmail:      env("OWNER_EMAIL", "owner@example.com"),
 		OwnerPassword:   env("OWNER_PASSWORD", "ChangeMe123!"),
 		OwnerFullName:   env("OWNER_FULL_NAME", "Owner"),
