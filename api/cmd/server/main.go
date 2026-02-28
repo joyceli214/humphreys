@@ -18,6 +18,7 @@ import (
 	"humphreys/api/internal/modules/catalog"
 	"humphreys/api/internal/modules/roles"
 	"humphreys/api/internal/modules/users"
+	"humphreys/api/internal/modules/workorders"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -56,6 +57,7 @@ func main() {
 	usersHandler := users.New(pool)
 	rolesHandler := roles.New(pool)
 	catalogHandler := catalog.New(pool)
+	workOrdersHandler := workorders.New(pool)
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -72,6 +74,7 @@ func main() {
 	users.RegisterRoutes(authed, usersHandler)
 	roles.RegisterRoutes(authed, rolesHandler)
 	catalog.RegisterRoutes(authed, catalogHandler)
+	workorders.RegisterRoutes(authed, workOrdersHandler)
 
 	srv := &http.Server{Addr: cfg.ServerAddr, Handler: r}
 	go func() {

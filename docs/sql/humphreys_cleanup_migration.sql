@@ -523,19 +523,7 @@ WITH src AS (
         '\\s+',
         ' ',
         'g'
-      ) LIKE '%humphreys%'
-      AND REGEXP_REPLACE(
-        LOWER(BTRIM(COALESCE(ci."FirstName", '') || ' ' || COALESCE(ci."LastName", ''))),
-        '\\s+',
-        ' ',
-        'g'
-      ) !~ '(^| )mr\\.?( |$)'
-      AND REGEXP_REPLACE(
-        LOWER(BTRIM(COALESCE(ci."FirstName", '') || ' ' || COALESCE(ci."LastName", ''))),
-        '\\s+',
-        ' ',
-        'g'
-      ) !~ '(^| )mrs\\.?( |$)'
+      ) LIKE '%humphrey%'
       THEN 1
       ELSE 2
     END::BIGINT AS job_type_id,
@@ -802,13 +790,32 @@ WHERE wo.reference_id = ci."CustomerID"::INTEGER
     OR wo.work_done IS DISTINCT FROM humphreys_clean.to_markdown(ci."Details")
   );
 
+UPDATE humphreys_clean.work_orders wo
+SET job_type_id = jt.job_type_id
+FROM "Customer Information" ci
+JOIN humphreys_clean.job_types jt
+  ON jt.job_type_key = 'stock'
+WHERE wo.reference_id = ci."CustomerID"::INTEGER
+  AND REGEXP_REPLACE(
+        LOWER(BTRIM(COALESCE(ci."FirstName", '') || ' ' || COALESCE(ci."LastName", ''))),
+        '\\s+',
+        ' ',
+        'g'
+      ) LIKE '%humphrey%';
+
 UPDATE humphreys_clean.work_orders
 SET customer_id = NULL;
+
+ALTER TABLE humphreys_clean.customers
+  ADD COLUMN IF NOT EXISTS source_reference_id INTEGER;
+ALTER TABLE humphreys_clean.customers
+  ADD COLUMN IF NOT EXISTS source_match_key TEXT;
 
 DELETE FROM humphreys_clean.customers;
 
 WITH customer_source AS (
   SELECT
+    ci."CustomerID"::INTEGER AS reference_id,
     lower(
       NULLIF(
         (
@@ -828,10 +835,47 @@ WITH customer_source AS (
     NULLIF(BTRIM(ci."Apartment or Suite"), '') AS address_line_2,
     NULLIF(BTRIM(ci."City"), '') AS city,
     NULLIF(BTRIM(ci."Province"), '') AS province,
-    NULLIF(BTRIM(ci."Extension"::TEXT), '') AS extension_text
+    NULLIF(BTRIM(ci."Extension"::TEXT), '') AS extension_text,
+    NULLIF(
+      regexp_replace(
+        lower(BTRIM(COALESCE(ci."FirstName", '') || ' ' || COALESCE(ci."LastName", ''))),
+        '\s+',
+        ' ',
+        'g'
+      ),
+      ''
+    ) AS name_key,
+    NULLIF(
+      regexp_replace(
+        lower(
+          BTRIM(
+            COALESCE(ci."Address", '') || ' ' ||
+            COALESCE(ci."Apartment or Suite", '') || ' ' ||
+            COALESCE(ci."City", '') || ' ' ||
+            COALESCE(ci."Province", '')
+          )
+        ),
+        '\s+',
+        ' ',
+        'g'
+      ),
+      ''
+    ) AS address_key
   FROM "Customer Information" ci
+), customer_with_keys AS (
+  SELECT
+    cs.*,
+    COALESCE(cs.home_phone, cs.work_phone) AS phone_key,
+    CASE
+      WHEN cs.email IS NOT NULL AND COALESCE(cs.home_phone, cs.work_phone) IS NOT NULL
+        THEN 'email_phone:' || cs.email || '|' || COALESCE(cs.home_phone, cs.work_phone)
+      ELSE 'reference:' || cs.reference_id::TEXT
+    END AS dedupe_key
+  FROM customer_source cs
 ), grouped_customers AS (
-  SELECT DISTINCT ON (email, phone_key)
+  SELECT DISTINCT ON (dedupe_key)
+    source_reference_id,
+    dedupe_key,
     email,
     first_name,
     last_name,
@@ -845,13 +889,23 @@ WITH customer_source AS (
     phone_key
   FROM (
     SELECT
-      cs.*,
-      COALESCE(cs.home_phone, cs.work_phone) AS phone_key
-    FROM customer_source cs
+      cwk.*,
+      CASE
+        WHEN cwk.dedupe_key LIKE 'reference:%' THEN cwk.reference_id
+        ELSE NULL
+      END AS source_reference_id
+    FROM customer_with_keys cwk
   ) x
-  ORDER BY email, phone_key, LENGTH(COALESCE(first_name, '') || COALESCE(last_name, '')) DESC
+  ORDER BY dedupe_key,
+           (email IS NOT NULL)::INT DESC,
+           (phone_key IS NOT NULL)::INT DESC,
+           LENGTH(COALESCE(first_name, '') || COALESCE(last_name, '')) DESC,
+           COALESCE(first_name, ''),
+           COALESCE(last_name, '')
 )
 INSERT INTO humphreys_clean.customers (
+  source_reference_id,
+  source_match_key,
   email,
   first_name,
   last_name,
@@ -864,6 +918,8 @@ INSERT INTO humphreys_clean.customers (
   extension_text
 )
 SELECT
+  source_reference_id,
+  dedupe_key AS source_match_key,
   email,
   first_name,
   last_name,
@@ -893,30 +949,69 @@ WITH work_order_contacts AS (
     COALESCE(
       NULLIF(regexp_replace(NULLIF(BTRIM(ci."Home Phone"), ''), '[^0-9]', '', 'g'), ''),
       NULLIF(regexp_replace(NULLIF(BTRIM(ci."Work Phone"), ''), '[^0-9]', '', 'g'), '')
-    ) AS phone_key
+    ) AS phone_key,
+    NULLIF(
+      regexp_replace(
+        lower(BTRIM(COALESCE(ci."FirstName", '') || ' ' || COALESCE(ci."LastName", ''))),
+        '\s+',
+        ' ',
+        'g'
+      ),
+      ''
+    ) AS name_key,
+    NULLIF(
+      regexp_replace(
+        lower(
+          BTRIM(
+            COALESCE(ci."Address", '') || ' ' ||
+            COALESCE(ci."Apartment or Suite", '') || ' ' ||
+            COALESCE(ci."City", '') || ' ' ||
+            COALESCE(ci."Province", '')
+          )
+        ),
+        '\s+',
+        ' ',
+        'g'
+      ),
+      ''
+    ) AS address_key
   FROM humphreys_clean.work_orders wo
   JOIN "Customer Information" ci
     ON ci."CustomerID" = wo.reference_id
-), customer_keys AS (
-  SELECT
-    MIN(c.customer_id) AS customer_id,
-    COALESCE(c.email, '') AS email_key,
-    COALESCE(COALESCE(c.home_phone, c.work_phone), '') AS phone_key
-  FROM humphreys_clean.customers c
-  GROUP BY COALESCE(c.email, ''), COALESCE(COALESCE(c.home_phone, c.work_phone), '')
-), matched AS (
+), work_order_keys AS (
   SELECT
     woc.reference_id,
-    ck.customer_id
+    CASE
+      WHEN woc.email IS NOT NULL AND woc.phone_key IS NOT NULL
+        THEN 'email_phone:' || woc.email || '|' || woc.phone_key
+      ELSE 'reference:' || woc.reference_id::TEXT
+    END AS match_key
   FROM work_order_contacts woc
-  JOIN customer_keys ck
-    ON ck.email_key = COALESCE(woc.email, '')
-   AND ck.phone_key = COALESCE(woc.phone_key, '')
+), matched AS (
+  SELECT
+    wok.reference_id,
+    c.customer_id
+  FROM work_order_keys wok
+  JOIN humphreys_clean.customers c
+    ON c.source_match_key = wok.match_key
 )
 UPDATE humphreys_clean.work_orders wo
 SET customer_id = m.customer_id
 FROM matched m
 WHERE wo.reference_id = m.reference_id;
+
+UPDATE humphreys_clean.work_orders wo
+SET customer_id = NULL
+WHERE wo.job_type_id IN (
+  SELECT jt.job_type_id
+  FROM humphreys_clean.job_types jt
+  WHERE jt.job_type_key = 'stock'
+);
+
+ALTER TABLE humphreys_clean.customers
+  DROP COLUMN IF EXISTS source_reference_id;
+ALTER TABLE humphreys_clean.customers
+  DROP COLUMN IF EXISTS source_match_key;
 
 -- Backfill missing created_at using nearest reference_id with a known created_at.
 WITH nearest_created AS (

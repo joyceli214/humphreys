@@ -1,4 +1,4 @@
-import type { AuthResponse, Permission, Role, User } from "@/lib/api/generated/types";
+import type { AuthResponse, Permission, Role, User, WorkOrderDetail, WorkOrderListItem } from "@/lib/api/generated/types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
@@ -95,6 +95,14 @@ export class APIClient {
 
   listPermissions() {
     return this.request<{ items: Permission[] }>("/permissions");
+  }
+
+  listWorkOrders(params: URLSearchParams) {
+    return this.request<{ items: WorkOrderListItem[] }>(`/work-orders?${params.toString()}`);
+  }
+
+  getWorkOrderDetail(referenceID: number) {
+    return this.request<WorkOrderDetail>(`/work-orders/${referenceID}`);
   }
 }
 

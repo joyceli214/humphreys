@@ -3,6 +3,8 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { firstReadableRoute } from "@/lib/auth/authorization";
 import { ProtectedShell } from "@/components/layout/protected-shell";
 import LoginPage from "@/pages/login-page";
+import WorkOrdersPage from "@/pages/work-orders-page";
+import WorkOrderDetailPage from "@/pages/work-order-detail-page";
 import UsersPage from "@/pages/users-page";
 import RolesPage from "@/pages/roles-page";
 
@@ -17,6 +19,22 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/work-orders"
+        element={
+          <ProtectedShell>
+            <WorkOrdersPage />
+          </ProtectedShell>
+        }
+      />
+      <Route
+        path="/work-orders/:referenceId"
+        element={
+          <ProtectedShell>
+            <WorkOrderDetailPage />
+          </ProtectedShell>
+        }
+      />
       <Route
         path="/users"
         element={
