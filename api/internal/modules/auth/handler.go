@@ -144,16 +144,29 @@ func (h *Handler) Me(c *gin.Context) {
 }
 
 func (h *Handler) setRefreshCookie(c *gin.Context, token string) {
+	h.applyCookiePolicy(c)
 	c.SetCookie("refresh_token", token, h.cfg.refreshTTLSeconds, "/", h.cfg.domain, h.cfg.secure, true)
 }
 
 func (h *Handler) setCSRFCookie(c *gin.Context) string {
+	h.applyCookiePolicy(c)
 	csrf := strings.ReplaceAll(uuid.NewString(), "-", "")
 	c.SetCookie("csrf_token", csrf, h.cfg.refreshTTLSeconds, "/", h.cfg.domain, h.cfg.secure, false)
 	return csrf
 }
 
 func (h *Handler) clearCookies(c *gin.Context) {
+	h.applyCookiePolicy(c)
 	c.SetCookie("refresh_token", "", -1, "/", h.cfg.domain, h.cfg.secure, true)
 	c.SetCookie("csrf_token", "", -1, "/", h.cfg.domain, h.cfg.secure, false)
+}
+
+func (h *Handler) applyCookiePolicy(c *gin.Context) {
+	// For secure production deployments (frontend/backend on different origins),
+	// SameSite=None ensures browser includes cookies on credentialed cross-origin calls.
+	if h.cfg.secure {
+		c.SetSameSite(http.SameSiteNoneMode)
+		return
+	}
+	c.SetSameSite(http.SameSiteLaxMode)
 }
