@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useAlerts } from "@/lib/alerts/alert-context";
 
 function statusClass(status: string) {
   if (status === "active") return "bg-emerald-100 text-emerald-700";
@@ -19,6 +20,7 @@ function statusClass(status: string) {
 
 export default function UsersPage() {
   const { hasPermission } = useAuth();
+  const alerts = useAlerts();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [search, setSearch] = useState("");
@@ -39,6 +41,8 @@ export default function UsersPage() {
       } else {
         setRoles([]);
       }
+    } catch (err) {
+      alerts.error("Failed to load users", err instanceof Error ? err.message : "Request failed");
     } finally {
       setLoading(false);
     }
@@ -67,8 +71,13 @@ export default function UsersPage() {
           <UserCreateDialog
             roles={roles}
             onCreate={async (payload) => {
-              await apiClient.createUser(payload);
-              await load();
+              try {
+                await apiClient.createUser(payload);
+                await load();
+                alerts.success("User created");
+              } catch (err) {
+                alerts.error("Failed to create user", err instanceof Error ? err.message : "Request failed");
+              }
             }}
           />
         )}
@@ -124,8 +133,13 @@ export default function UsersPage() {
                           size="sm"
                           onClick={async () => {
                             const next = user.status === "active" ? "disabled" : "active";
-                            await apiClient.updateUserStatus(user.id, next);
-                            await load();
+                            try {
+                              await apiClient.updateUserStatus(user.id, next);
+                              await load();
+                              alerts.success(`User ${next === "active" ? "activated" : "disabled"}`);
+                            } catch (err) {
+                              alerts.error("Failed to update status", err instanceof Error ? err.message : "Request failed");
+                            }
                           }}
                         >
                           {user.status === "active" ? "Disable" : "Activate"}
@@ -136,8 +150,13 @@ export default function UsersPage() {
                           user={user}
                           roles={roles}
                           onSave={async (roleIDs) => {
-                            await apiClient.setUserRoles(user.id, roleIDs);
-                            await load();
+                            try {
+                              await apiClient.setUserRoles(user.id, roleIDs);
+                              await load();
+                              alerts.success("User roles updated");
+                            } catch (err) {
+                              alerts.error("Failed to update roles", err instanceof Error ? err.message : "Request failed");
+                            }
                           }}
                         />
                       )}

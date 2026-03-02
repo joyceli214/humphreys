@@ -9,10 +9,36 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
+import { useAlerts } from "@/lib/alerts/alert-context";
+
+function parseLocalDate(value: string) {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (dateOnly) {
+    const year = Number(dateOnly[1]);
+    const monthIndex = Number(dateOnly[2]) - 1;
+    const day = Number(dateOnly[3]);
+    return new Date(year, monthIndex, day);
+  }
+
+  const dateTime =
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(?:Z|[+\-]\d{2}:?\d{2})?$/.exec(value);
+  if (dateTime) {
+    const year = Number(dateTime[1]);
+    const monthIndex = Number(dateTime[2]) - 1;
+    const day = Number(dateTime[3]);
+    const hour = Number(dateTime[4]);
+    const minute = Number(dateTime[5]);
+    const second = Number(dateTime[6] ?? '0');
+    const millisecond = Number((dateTime[7] ?? '0').padEnd(3, '0'));
+    return new Date(year, monthIndex, day, hour, minute, second, millisecond);
+  }
+
+  return new Date(value);
+}
 
 function formatDateTime(value: string | null) {
   if (!value) return "-";
-  const date = new Date(value);
+  const date = parseLocalDate(value);
   if (Number.isNaN(date.getTime())) return "-";
   return new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
@@ -31,6 +57,8 @@ function statusClass(status: string) {
 
 export default function WorkOrdersPage() {
   const { hasPermission } = useAuth();
+  const alerts = useAlerts();
+  const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const [items, setItems] = useState<WorkOrderListItem[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
@@ -48,6 +76,8 @@ export default function WorkOrdersPage() {
       });
       const res = await apiClient.listWorkOrders(params);
       setItems(res.items);
+    } catch (err) {
+      alerts.error("Failed to load work orders", err instanceof Error ? err.message : "Request failed");
     } finally {
       setLoading(false);
     }
@@ -67,7 +97,11 @@ export default function WorkOrdersPage() {
     <section className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold">Work Orders</h1>
-        <p className="text-sm text-muted-foreground">Browse imported service work orders and open full details.</p>
+        <p className="text-sm text-muted-foreground">
+          {canViewSensitive
+            ? "Browse imported service work orders and open full details."
+            : "Browse work orders with a simplified, staff-safe view."}
+        </p>
       </div>
 
       <div className="rounded-lg border border-border bg-white p-4 space-y-3">
@@ -82,7 +116,11 @@ export default function WorkOrdersPage() {
           }}
         >
           <Input
-            placeholder="Search reference, customer, email, item, model, serial"
+            placeholder={
+              canViewSensitive
+                ? "Search reference, customer, email, item, model, serial"
+                : "Search reference, item, model, serial"
+            }
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
           />
@@ -93,7 +131,7 @@ export default function WorkOrdersPage() {
           <thead>
             <tr>
               <Th className="w-[110px]">Ref #</Th>
-              <Th>Customer</Th>
+              {canViewSensitive && <Th>Customer</Th>}
               <Th>Status</Th>
               <Th>Job Type</Th>
               <Th>Item</Th>
@@ -104,24 +142,26 @@ export default function WorkOrdersPage() {
           <tbody>
             {loading && (
               <tr>
-                <Td colSpan={7}>Loading work orders...</Td>
+                <Td colSpan={canViewSensitive ? 7 : 6}>Loading work orders...</Td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <Td colSpan={7}>No work orders found.</Td>
+                <Td colSpan={canViewSensitive ? 7 : 6}>No work orders found.</Td>
               </tr>
             )}
             {!loading &&
               items.map((item) => (
                 <tr key={item.reference_id}>
                   <Td>{item.reference_id}</Td>
-                  <Td>
-                    <div className="space-y-1">
-                      <p>{item.customer_name ?? "-"}</p>
-                      {item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
-                    </div>
-                  </Td>
+                  {canViewSensitive && (
+                    <Td>
+                      <div className="space-y-1">
+                        <p>{item.customer_name ?? "-"}</p>
+                        {item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
+                      </div>
+                    </Td>
+                  )}
                   <Td>
                     <Badge className={statusClass(item.status)}>{item.status}</Badge>
                   </Td>

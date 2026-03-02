@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useAlerts } from "@/lib/alerts/alert-context";
 
 export default function RolesPage() {
   const { hasPermission } = useAuth();
+  const alerts = useAlerts();
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [permissionDrafts, setPermissionDrafts] = useState<Record<string, string[]>>({});
@@ -21,19 +23,23 @@ export default function RolesPage() {
   const canDeleteRoles = hasPermission("roles:delete");
 
   const load = async () => {
-    const r = await apiClient.listRoles();
-    setRoles(r.items);
-    if (canReadPermissions) {
-      const p = await apiClient.listPermissions();
-      setPermissions(p.items);
-    } else {
-      setPermissions([]);
+    try {
+      const r = await apiClient.listRoles();
+      setRoles(r.items);
+      if (canReadPermissions) {
+        const p = await apiClient.listPermissions();
+        setPermissions(p.items);
+      } else {
+        setPermissions([]);
+      }
+      setPermissionDrafts(
+        Object.fromEntries(
+          r.items.map((role) => [role.id, (role.permissions ?? []).map((perm) => perm.id)])
+        )
+      );
+    } catch (err) {
+      alerts.error("Failed to load roles", err instanceof Error ? err.message : "Request failed");
     }
-    setPermissionDrafts(
-      Object.fromEntries(
-        r.items.map((role) => [role.id, (role.permissions ?? []).map((perm) => perm.id)])
-      )
-    );
   };
 
   useEffect(() => {
@@ -52,10 +58,15 @@ export default function RolesPage() {
 
   const createRole = async (e: FormEvent) => {
     e.preventDefault();
-    await apiClient.createRole({ name, description });
-    setName("");
-    setDescription("");
-    await load();
+    try {
+      await apiClient.createRole({ name, description });
+      setName("");
+      setDescription("");
+      await load();
+      alerts.success("Role created");
+    } catch (err) {
+      alerts.error("Failed to create role", err instanceof Error ? err.message : "Request failed");
+    }
   };
 
   if (!hasPermission("roles:read")) {
@@ -143,15 +154,28 @@ export default function RolesPage() {
                   <Button
                     variant="outline"
                     onClick={async () => {
-                      await apiClient.setRolePermissions(role.id, permissionDrafts[role.id] ?? []);
-                      await load();
+                      try {
+                        await apiClient.setRolePermissions(role.id, permissionDrafts[role.id] ?? []);
+                        await load();
+                        alerts.success("Permissions saved");
+                      } catch (err) {
+                        alerts.error("Failed to save permissions", err instanceof Error ? err.message : "Request failed");
+                      }
                     }}
                   >
                     Save Permissions
                   </Button>
                 )}
                 {canDeleteRoles && (
-                  <Button variant="outline" onClick={async () => { await apiClient.deleteRole(role.id); await load(); }}>
+                  <Button variant="outline" onClick={async () => {
+                    try {
+                      await apiClient.deleteRole(role.id);
+                      await load();
+                      alerts.success("Role deleted");
+                    } catch (err) {
+                      alerts.error("Failed to delete role", err instanceof Error ? err.message : "Request failed");
+                    }
+                  }}>
                     Delete Role
                   </Button>
                 )}

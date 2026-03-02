@@ -7,7 +7,7 @@ down:
 	docker compose down
 
 api:
-	cd api && go run ./cmd/server
+	cd api && (command -v air >/dev/null 2>&1 && air || go run ./cmd/server)
 
 web:
 	cd web && npm install && npm run dev

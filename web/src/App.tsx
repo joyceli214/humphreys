@@ -5,6 +5,7 @@ import { ProtectedShell } from "@/components/layout/protected-shell";
 import LoginPage from "@/pages/login-page";
 import WorkOrdersPage from "@/pages/work-orders-page";
 import WorkOrderDetailPage from "@/pages/work-order-detail-page";
+import PartsPurchaseRequestsPage from "@/pages/parts-purchase-requests-page";
 import UsersPage from "@/pages/users-page";
 import RolesPage from "@/pages/roles-page";
 
@@ -32,6 +33,14 @@ export default function App() {
         element={
           <ProtectedShell>
             <WorkOrderDetailPage />
+          </ProtectedShell>
+        }
+      />
+      <Route
+        path="/parts-purchase-requests"
+        element={
+          <ProtectedShell>
+            <PartsPurchaseRequestsPage />
           </ProtectedShell>
         }
       />

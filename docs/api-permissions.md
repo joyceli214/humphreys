@@ -16,3 +16,21 @@
 
 - `GET /resources` -> `resources:read`
 - `GET /permissions` -> `permissions:read`
+
+- `GET /work-orders` -> `work_orders:read`
+- `GET /work-orders/:reference_id` -> `work_orders:read` (`work_orders_sensitive:read` controls visibility of customer/line-item/price data)
+- `PATCH /work-orders/:reference_id/status` -> `work_orders_status:update`
+- `PATCH /work-orders/:reference_id/equipment` -> `work_orders:update`
+- `PATCH /work-orders/:reference_id/work-notes` -> `work_orders:update`
+- `PATCH /work-orders/:reference_id/line-items` -> `work_orders:update`
+- `PATCH /work-orders/:reference_id/totals` -> `work_orders:update`
+- `PATCH /work-orders/:reference_id/customer` -> `work_orders:update`
+- `GET /work-orders/:reference_id/repair-logs` -> `repair_logs:read`
+- `POST /work-orders/:reference_id/repair-logs` -> `repair_logs:create`
+- `PATCH /work-orders/:reference_id/repair-logs/:repair_log_id` -> `repair_logs:update`
+- `DELETE /work-orders/:reference_id/repair-logs/:repair_log_id` -> `repair_logs:delete`
+- `GET /work-orders/:reference_id/parts-purchase-requests` -> `parts_purchase_requests:read`
+- `GET /parts-purchase-requests` -> `parts_purchase_requests:read` + `work_orders_sensitive:read` (admin-only dashboard list)
+- `POST /work-orders/:reference_id/parts-purchase-requests` -> `parts_purchase_requests:create`
+- `PATCH /work-orders/:reference_id/parts-purchase-requests/:parts_purchase_request_id` -> `parts_purchase_requests:update`
+- `DELETE /work-orders/:reference_id/parts-purchase-requests/:parts_purchase_request_id` -> `parts_purchase_requests:delete`

@@ -74,27 +74,66 @@ export interface WorkOrderDetail {
   original_job_id: number | null;
   created_at: string | null;
   updated_at: string | null;
+  status_id: number | null;
   status_key: string | null;
   status_name: string | null;
+  status_updated_at: string | null;
+  job_type_id: number | null;
   job_type_key: string | null;
   job_type_name: string | null;
   customer: WorkOrderCustomer;
   item_id: number | null;
   item_name: string | null;
+  brand_ids: number[];
   brand_names: string[];
   model_number: string | null;
   serial_number: string | null;
   remote_control_qty: number;
   cable_qty: number;
   cord_qty: number;
+  dvd_vhs_qty: number;
   album_cd_cassette_qty: number;
   problem_description: string | null;
+  worker_ids: number[];
   worker_names: string[];
   work_done: string | null;
+  payment_method_ids: number[];
   payment_method_names: string[];
   parts_total: number | null;
   delivery_total: number | null;
   labour_total: number | null;
   deposit: number;
   line_items: WorkOrderLineItem[];
+}
+
+export interface RepairLog {
+  repair_log_id: number;
+  reference_id: number;
+  repair_date: string | null;
+  hours_used: number;
+  details: string;
+  created_by_user_id: string;
+  created_by_name: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PartsPurchaseRequest {
+  parts_purchase_request_id: number;
+  reference_id: number;
+  source: "online" | "supplier";
+  source_url: string | null;
+  status: "draft" | "waiting_approval" | "ordered" | "used";
+  total_price: number;
+  item_name: string;
+  quantity: number;
+  created_by_user_id: string;
+  created_by_name: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface LookupOption {
+  id: number;
+  label: string;
 }

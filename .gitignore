@@ -11,6 +11,7 @@ coverage/
 bin/
 *.test
 *.out
+api/tmp/
 
 # Env
 .env

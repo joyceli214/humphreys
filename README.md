@@ -18,9 +18,17 @@ Monorepo containing:
 2. Configure env:
    - copy `api/.env.example` to `api/.env`
 3. Run API:
-   - `cd api && go run ./cmd/server`
+   - for hot restart (recommended): install `air` once, then run `make api`
+   - fallback without hot restart: `cd api && go run ./cmd/server`
 4. Run web:
    - `cd web && npm install && npm run dev`
+
+## API hot restart
+- Install watcher once:
+  - `go install github.com/air-verse/air@latest`
+- Run:
+  - `make api`
+- `make api` uses `air` automatically when available, otherwise falls back to `go run ./cmd/server`.
 
 ## API auth model
 - Access token: JWT (15m), returned in login/refresh response body.

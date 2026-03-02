@@ -2,22 +2,23 @@ import { FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useAlerts } from "@/lib/alerts/alert-context";
 
 export default function LoginPage() {
   const { login } = useAuth();
+  const alerts = useAlerts();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError("");
     try {
       await login(email, password);
+      alerts.success("Signed in", "Welcome back.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      alerts.error("Login failed", err instanceof Error ? err.message : "Login failed");
     } finally {
       setSubmitting(false);
     }
@@ -38,7 +39,6 @@ export default function LoginPage() {
           <label className="mb-1 block text-sm">Password</label>
           <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
         <Button className="w-full" type="submit" disabled={submitting}>
           {submitting ? "Signing in..." : "Sign in"}
         </Button>

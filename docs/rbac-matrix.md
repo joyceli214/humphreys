@@ -5,6 +5,11 @@
 - roles
 - permissions
 - resources
+- work_orders
+- work_orders_status
+- work_orders_sensitive
+- repair_logs
+- parts_purchase_requests
 
 ## Actions
 - create

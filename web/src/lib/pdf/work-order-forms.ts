@@ -20,9 +20,34 @@ function address(item: WorkOrderDetail) {
   return parts.length ? parts.join(", ") : "-";
 }
 
+function parseLocalDate(value: string) {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (dateOnly) {
+    const year = Number(dateOnly[1]);
+    const monthIndex = Number(dateOnly[2]) - 1;
+    const day = Number(dateOnly[3]);
+    return new Date(year, monthIndex, day);
+  }
+
+  const dateTime =
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(?:Z|[+\-]\d{2}:?\d{2})?$/.exec(value);
+  if (dateTime) {
+    const year = Number(dateTime[1]);
+    const monthIndex = Number(dateTime[2]) - 1;
+    const day = Number(dateTime[3]);
+    const hour = Number(dateTime[4]);
+    const minute = Number(dateTime[5]);
+    const second = Number(dateTime[6] ?? '0');
+    const millisecond = Number((dateTime[7] ?? '0').padEnd(3, '0'));
+    return new Date(year, monthIndex, day, hour, minute, second, millisecond);
+  }
+
+  return new Date(value);
+}
+
 function dateOnly(value: string | null) {
   if (!value) return "-";
-  const d = new Date(value);
+  const d = parseLocalDate(value);
   if (Number.isNaN(d.getTime())) return "-";
   return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 }
@@ -37,6 +62,7 @@ function accessories(item: WorkOrderDetail) {
     `Remote Control: ${item.remote_control_qty}`,
     `Cables: ${item.cable_qty}`,
     `Cord: ${item.cord_qty}`,
+    `DVDs/VHS: ${item.dvd_vhs_qty ?? 0}`,
     `Albums/CDs/Cassettes: ${item.album_cd_cassette_qty}`
   ].join(" | ");
 }

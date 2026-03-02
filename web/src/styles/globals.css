@@ -28,3 +28,13 @@ body {
 body {
   @apply bg-background text-foreground antialiased;
 }
+
+.mdxeditor .mdxeditor-root-contenteditable ul {
+  list-style: disc !important;
+  padding-left: 1.5rem !important;
+}
+
+.mdxeditor .mdxeditor-root-contenteditable ol {
+  list-style: decimal !important;
+  padding-left: 1.5rem !important;
+}

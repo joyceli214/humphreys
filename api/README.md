@@ -4,7 +4,10 @@
 1. `cp .env.example .env`
 2. Start DB: `docker compose up -d db`
 3. `go mod tidy`
-4. `go run ./cmd/server`
+4. Hot restart dev server:
+   - Install once: `go install github.com/air-verse/air@latest`
+   - Run: `air`
+5. Fallback without watcher: `go run ./cmd/server`
 
 Default migration directory is `./migrations` (override with `MIGRATIONS_DIR`).
 
