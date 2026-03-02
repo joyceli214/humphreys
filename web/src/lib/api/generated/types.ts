@@ -27,6 +27,7 @@ export interface User {
 
 export interface AuthResponse {
   access_token: string;
+  csrf_token: string;
   expires_in: number;
   scope: string[];
   user: User;

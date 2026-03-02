@@ -33,6 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setScope(auth.scope ?? []);
     } catch {
       apiClient.setAccessToken(null);
+      apiClient.setCSRFToken(null);
       setUser(null);
       setScope([]);
       navigate("/login");
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout: async () => {
         await apiClient.logout();
         apiClient.setAccessToken(null);
+        apiClient.setCSRFToken(null);
         setUser(null);
         setScope([]);
         navigate("/login");

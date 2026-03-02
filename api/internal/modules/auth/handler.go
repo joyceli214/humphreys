@@ -64,10 +64,11 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 	h.setRefreshCookie(c, session.RefreshToken)
-	h.setCSRFCookie(c)
+	csrfToken := h.setCSRFCookie(c)
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token": session.AccessToken,
+		"csrf_token":   csrfToken,
 		"expires_in":   session.ExpiresIn,
 		"scope":        session.Scope,
 		"user":         session.User,
@@ -103,10 +104,11 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 	h.setRefreshCookie(c, session.RefreshToken)
-	h.setCSRFCookie(c)
+	csrfToken := h.setCSRFCookie(c)
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token": session.AccessToken,
+		"csrf_token":   csrfToken,
 		"expires_in":   session.ExpiresIn,
 		"scope":        session.Scope,
 		"user":         session.User,
@@ -145,9 +147,10 @@ func (h *Handler) setRefreshCookie(c *gin.Context, token string) {
 	c.SetCookie("refresh_token", token, h.cfg.refreshTTLSeconds, "/", h.cfg.domain, h.cfg.secure, true)
 }
 
-func (h *Handler) setCSRFCookie(c *gin.Context) {
+func (h *Handler) setCSRFCookie(c *gin.Context) string {
 	csrf := strings.ReplaceAll(uuid.NewString(), "-", "")
 	c.SetCookie("csrf_token", csrf, h.cfg.refreshTTLSeconds, "/", h.cfg.domain, h.cfg.secure, false)
+	return csrf
 }
 
 func (h *Handler) clearCookies(c *gin.Context) {

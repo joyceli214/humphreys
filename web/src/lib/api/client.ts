@@ -15,6 +15,7 @@ const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export class APIClient {
   private accessToken: string | null = null;
+  private csrfToken: string | null = null;
   private refreshInFlight: Promise<boolean> | null = null;
   private refreshRequestInFlight: Promise<AuthResponse> | null = null;
   private recentRefresh: { ts: number; data: AuthResponse } | null = null;
@@ -24,11 +25,17 @@ export class APIClient {
     this.accessToken = token;
   }
 
+  setCSRFToken(token: string | null) {
+    this.csrfToken = token;
+  }
+
   private async request<T>(path: string, init?: RequestInit, allowRefreshRetry = true): Promise<T> {
     const headers = new Headers(init?.headers);
     headers.set("Content-Type", "application/json");
     if (this.accessToken) headers.set("Authorization", `Bearer ${this.accessToken}`);
-    const csrf = typeof document !== "undefined" ? document.cookie.split(";").find((c) => c.trim().startsWith("csrf_token="))?.split("=")[1] : "";
+    const csrf =
+      this.csrfToken ??
+      (typeof document !== "undefined" ? document.cookie.split(";").find((c) => c.trim().startsWith("csrf_token="))?.split("=")[1] : "");
     if (csrf && init?.method && ["POST", "PATCH", "DELETE"].includes(init.method.toUpperCase())) {
       headers.set("X-CSRF-Token", csrf);
     }
@@ -59,7 +66,10 @@ export class APIClient {
   }
 
   login(email: string, password: string) {
-    return this.request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+    return this.request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }).then((auth) => {
+      this.csrfToken = auth.csrf_token;
+      return auth;
+    });
   }
 
   refresh() {
@@ -73,6 +83,7 @@ export class APIClient {
 
     this.refreshRequestInFlight = this.request<AuthResponse>("/auth/refresh", { method: "POST" }, false)
       .then((auth) => {
+        this.csrfToken = auth.csrf_token;
         this.recentRefresh = { ts: Date.now(), data: auth };
         return auth;
       })
@@ -89,6 +100,7 @@ export class APIClient {
 
   logout() {
     this.recentRefresh = null;
+    this.csrfToken = null;
     return this.request<void>("/auth/logout", { method: "POST" });
   }
 
@@ -378,6 +390,7 @@ export class APIClient {
         return true;
       } catch {
         this.setAccessToken(null);
+        this.setCSRFToken(null);
         this.recentRefresh = null;
         return false;
       } finally {
