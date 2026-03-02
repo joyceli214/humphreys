@@ -60,7 +60,8 @@ func main() {
 	workOrdersHandler := workorders.New(pool)
 
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(middleware.ErrorLogger())
 	r.Use(middleware.CORS(cfg.CORSOrigin))
 	r.Use(middleware.CSRFMiddleware(auth.CSRFExemptPaths()))
 

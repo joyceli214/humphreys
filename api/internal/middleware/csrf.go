@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -21,11 +22,30 @@ func CSRFMiddleware(exemptPaths map[string]struct{}) gin.HandlerFunc {
 
 		cookie, err := c.Cookie("csrf_token")
 		if err != nil || cookie == "" {
+			log.Printf(
+				"[csrf] missing csrf cookie method=%s path=%s host=%s origin=%s referer=%s has_csrf_header=%t",
+				method,
+				c.Request.URL.Path,
+				c.Request.Host,
+				c.GetHeader("Origin"),
+				c.GetHeader("Referer"),
+				c.GetHeader("X-CSRF-Token") != "",
+			)
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing csrf cookie"})
 			return
 		}
 		header := c.GetHeader("X-CSRF-Token")
 		if header == "" || header != cookie {
+			log.Printf(
+				"[csrf] invalid csrf token method=%s path=%s host=%s origin=%s referer=%s header_present=%t cookie_present=%t",
+				method,
+				c.Request.URL.Path,
+				c.Request.Host,
+				c.GetHeader("Origin"),
+				c.GetHeader("Referer"),
+				header != "",
+				cookie != "",
+			)
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid csrf token"})
 			return
 		}
