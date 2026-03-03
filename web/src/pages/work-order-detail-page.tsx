@@ -2294,7 +2294,11 @@ export default function WorkOrderDetailPage() {
               <h2 className="font-semibold text-destructive">Danger Zone</h2>
               <p className="text-sm text-muted-foreground">Deleting this job is permanent and cannot be undone.</p>
             </div>
-            <Button variant="destructive" onClick={() => setDeleteWorkOrderOpen(true)}>
+            <Button
+              variant="outline"
+              className="border-destructive text-destructive hover:bg-destructive/10"
+              onClick={() => setDeleteWorkOrderOpen(true)}
+            >
               Delete Job
             </Button>
           </div>
