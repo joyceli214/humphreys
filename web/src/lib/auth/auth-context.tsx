@@ -59,12 +59,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         navigate(firstReadableRoute(auth.scope ?? []));
       },
       logout: async () => {
-        await apiClient.logout();
-        apiClient.setAccessToken(null);
-        apiClient.setCSRFToken(null);
-        setUser(null);
-        setScope([]);
-        navigate("/login");
+        try {
+          await apiClient.logout();
+        } catch {
+          // Even if backend logout fails (e.g. expired session / CSRF mismatch),
+          // force local sign-out so the user is not stuck on protected pages.
+        } finally {
+          apiClient.setAccessToken(null);
+          apiClient.setCSRFToken(null);
+          setUser(null);
+          setScope([]);
+          navigate("/login");
+        }
       },
       refreshSession
     }),

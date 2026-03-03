@@ -100,8 +100,6 @@ export class APIClient {
   }
 
   logout() {
-    this.recentRefresh = null;
-    this.csrfToken = null;
     return this.request<void>("/auth/logout", { method: "POST" });
   }
 
