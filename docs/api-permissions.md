@@ -18,6 +18,9 @@
 - `GET /permissions` -> `permissions:read`
 
 - `GET /work-orders` -> `work_orders:read`
+- `GET /work-orders/customers` -> `work_orders:create` (admin-only customer search for create flow)
+- `POST /work-orders` -> `work_orders:create` (admin-only create flow)
+- `DELETE /work-orders/:reference_id` -> `work_orders:create` (admin-only)
 - `GET /work-orders/:reference_id` -> `work_orders:read` (`work_orders_sensitive:read` controls visibility of customer/line-item/price data)
 - `PATCH /work-orders/:reference_id/status` -> `work_orders_status:update`
 - `PATCH /work-orders/:reference_id/equipment` -> `work_orders:update`

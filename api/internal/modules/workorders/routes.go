@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	permCreate           = "work_orders:create"
 	permRead             = "work_orders:read"
 	permUpdate           = "work_orders:update"
 	permStatusUpdate     = "work_orders_status:update"
@@ -30,6 +31,9 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	)
 
 	group := authed.Group("/work-orders")
+	group.GET("/customers", middleware.RequirePermission(permCreate), h.ListCustomers)
+	group.POST("", middleware.RequirePermission(permCreate), h.CreateWorkOrder)
+	group.DELETE("/:reference_id", middleware.RequirePermission(permCreate), h.DeleteWorkOrder)
 	group.GET("", middleware.RequirePermission(permRead), h.ListWorkOrders)
 	group.GET("/:reference_id", middleware.RequirePermission(permRead), h.GetWorkOrder)
 	group.PATCH("/:reference_id/status", middleware.RequirePermission(permStatusUpdate), h.UpdateStatus)

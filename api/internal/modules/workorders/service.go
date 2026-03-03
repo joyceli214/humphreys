@@ -16,6 +16,14 @@ var ErrWorkOrderNotFound = errors.New("work order not found")
 var ErrLineItemNotFound = errors.New("line item not found")
 var ErrInvalidEmailFormat = errors.New("invalid email format")
 var ErrPhoneDigitsOnly = errors.New("phone must contain numbers only")
+var ErrInvalidCustomerSelection = errors.New("choose either an existing customer or create a new one")
+var ErrCustomerSelectionRequired = errors.New("customer is required")
+var ErrCustomerNameRequired = errors.New("customer name is required")
+var ErrCustomerPhoneRequired = errors.New("home phone or work phone is required")
+var ErrInvalidDeposit = errors.New("deposit must be zero or greater")
+var ErrDepositPaymentMethodRequired = errors.New("deposit payment method is required")
+var ErrCustomerNotFound = errors.New("customer not found")
+var ErrPaymentMethodNotFound = errors.New("payment method not found")
 var ErrInvalidRepairLogDetails = errors.New("repair log details are required")
 var ErrInvalidRepairLogHoursUsed = errors.New("repair log hours_used must be zero or greater")
 var ErrInvalidPartsSource = errors.New("parts source must be online or supplier")
@@ -25,6 +33,8 @@ var ErrInvalidPartsQuantity = errors.New("parts quantity must be at least 1")
 var ErrInvalidPartsTotalPrice = errors.New("parts total price must be zero or greater")
 var ErrRepairLogNotFound = errors.New("repair log not found")
 var ErrPartsPurchaseRequestNotFound = errors.New("parts purchase request not found")
+var ErrInvalidCreationMode = errors.New("creation mode must be new_job or stock")
+var ErrStockJobTypeNotFound = errors.New("stock job type not found")
 
 type Service struct {
 	repo Repository
@@ -130,11 +140,182 @@ type UpdatePartsPurchaseRequestInput struct {
 	Quantity   int32
 }
 
+type CustomerLookupOption struct {
+	ID           int64   `json:"id"`
+	Label        string  `json:"label"`
+	FirstName    *string `json:"first_name"`
+	LastName     *string `json:"last_name"`
+	Email        *string `json:"email"`
+	HomePhone    *string `json:"home_phone"`
+	WorkPhone    *string `json:"work_phone"`
+	Extension    *string `json:"extension_text"`
+	AddressLine1 *string `json:"address_line_1"`
+	AddressLine2 *string `json:"address_line_2"`
+	City         *string `json:"city"`
+	Province     *string `json:"province"`
+}
+
+type CreateWorkOrderCustomerInput struct {
+	Name         string
+	Email        *string
+	HomePhone    *string
+	WorkPhone    *string
+	Extension    *string
+	AddressLine1 *string
+	AddressLine2 *string
+	City         *string
+	Province     *string
+}
+
+type CreateWorkOrderInput struct {
+	CreationMode           string
+	CustomerID             *int64
+	NewCustomer            *CreateWorkOrderCustomerInput
+	CustomerUpdates        *CreateWorkOrderCustomerInput
+	ItemID                 *int64
+	BrandIDs               []int64
+	ModelNumber            *string
+	SerialNumber           *string
+	RemoteControlQty       int32
+	CableQty               int32
+	CordQty                int32
+	DVDVHSQty              int32
+	AlbumCDCassetteQty     int32
+	Deposit                float64
+	DepositPaymentMethodID *int64
+}
+
 func (s *Service) UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) (domain.WorkOrderDetail, error) {
 	if err := s.repo.UpdateEquipment(ctx, referenceID, input); err != nil {
 		return domain.WorkOrderDetail{}, err
 	}
 	return s.GetWorkOrderDetail(ctx, referenceID)
+}
+
+func (s *Service) ListCustomers(ctx context.Context, query string) ([]CustomerLookupOption, error) {
+	return s.repo.ListCustomers(ctx, query)
+}
+
+func (s *Service) CreateWorkOrder(ctx context.Context, input CreateWorkOrderInput) (domain.WorkOrderDetail, error) {
+	mode := strings.TrimSpace(strings.ToLower(input.CreationMode))
+	if mode == "" {
+		mode = "new_job"
+	}
+	if mode != "new_job" && mode != "stock" {
+		return domain.WorkOrderDetail{}, ErrInvalidCreationMode
+	}
+	input.CreationMode = mode
+
+	if input.Deposit < 0 {
+		return domain.WorkOrderDetail{}, ErrInvalidDeposit
+	}
+	if input.Deposit > 0 && (input.DepositPaymentMethodID == nil || *input.DepositPaymentMethodID <= 0) {
+		return domain.WorkOrderDetail{}, ErrDepositPaymentMethodRequired
+	}
+
+	if input.CreationMode == "stock" {
+		input.CustomerID = nil
+		input.NewCustomer = nil
+		input.CustomerUpdates = nil
+		return s.repo.CreateWorkOrder(ctx, input)
+	}
+
+	hasExisting := input.CustomerID != nil && *input.CustomerID > 0
+	hasNew := input.NewCustomer != nil
+	if hasExisting && hasNew {
+		return domain.WorkOrderDetail{}, ErrInvalidCustomerSelection
+	}
+	if !hasExisting && !hasNew {
+		return domain.WorkOrderDetail{}, ErrCustomerSelectionRequired
+	}
+	if hasExisting {
+		if input.CustomerUpdates != nil {
+			sanitizeCustomerInput(input.CustomerUpdates, false)
+			if input.CustomerUpdates.Email != nil {
+				if _, err := mail.ParseAddress(*input.CustomerUpdates.Email); err != nil {
+					return domain.WorkOrderDetail{}, ErrInvalidEmailFormat
+				}
+			}
+			onlyDigits := regexp.MustCompile(`^\d+$`)
+			for _, phone := range []*string{input.CustomerUpdates.HomePhone, input.CustomerUpdates.WorkPhone} {
+				if phone == nil || strings.TrimSpace(*phone) == "" {
+					continue
+				}
+				if !onlyDigits.MatchString(*phone) {
+					return domain.WorkOrderDetail{}, ErrPhoneDigitsOnly
+				}
+			}
+		}
+	}
+	if hasNew {
+		sanitizeCustomerInput(input.NewCustomer, true)
+		name := strings.TrimSpace(input.NewCustomer.Name)
+		homePhone := strings.TrimSpace(stringValue(input.NewCustomer.HomePhone))
+		workPhone := strings.TrimSpace(stringValue(input.NewCustomer.WorkPhone))
+		if name == "" {
+			return domain.WorkOrderDetail{}, ErrCustomerNameRequired
+		}
+		if homePhone == "" && workPhone == "" {
+			return domain.WorkOrderDetail{}, ErrCustomerPhoneRequired
+		}
+		onlyDigits := regexp.MustCompile(`^\d+$`)
+		if homePhone != "" && !onlyDigits.MatchString(homePhone) {
+			return domain.WorkOrderDetail{}, ErrPhoneDigitsOnly
+		}
+		if workPhone != "" && !onlyDigits.MatchString(workPhone) {
+			return domain.WorkOrderDetail{}, ErrPhoneDigitsOnly
+		}
+		input.NewCustomer.Name = name
+		if input.NewCustomer.Email != nil {
+			if _, err := mail.ParseAddress(*input.NewCustomer.Email); err != nil {
+				return domain.WorkOrderDetail{}, ErrInvalidEmailFormat
+			}
+		}
+	}
+	if hasExisting && input.CustomerID != nil && *input.CustomerID <= 0 {
+		return domain.WorkOrderDetail{}, ErrCustomerSelectionRequired
+	}
+
+	return s.repo.CreateWorkOrder(ctx, input)
+}
+
+func (s *Service) DeleteWorkOrder(ctx context.Context, referenceID int) error {
+	return s.repo.DeleteWorkOrder(ctx, referenceID)
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func trimStringPtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func sanitizeCustomerInput(input *CreateWorkOrderCustomerInput, trimName bool) {
+	if input == nil {
+		return
+	}
+	if trimName {
+		input.Name = strings.TrimSpace(input.Name)
+	}
+	input.Email = trimStringPtr(input.Email)
+	input.HomePhone = trimStringPtr(input.HomePhone)
+	input.WorkPhone = trimStringPtr(input.WorkPhone)
+	input.Extension = trimStringPtr(input.Extension)
+	input.AddressLine1 = trimStringPtr(input.AddressLine1)
+	input.AddressLine2 = trimStringPtr(input.AddressLine2)
+	input.City = trimStringPtr(input.City)
+	input.Province = trimStringPtr(input.Province)
 }
 
 func (s *Service) UpdateStatus(ctx context.Context, referenceID int, input StatusUpdateInput) (domain.WorkOrderDetail, error) {

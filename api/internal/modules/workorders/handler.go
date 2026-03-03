@@ -72,6 +72,48 @@ type updateCustomerRequest struct {
 	Extension    *string `json:"extension_text"`
 }
 
+type createWorkOrderCustomerRequest struct {
+	Name         string  `json:"name" binding:"required"`
+	Email        *string `json:"email"`
+	HomePhone    *string `json:"home_phone"`
+	WorkPhone    *string `json:"work_phone"`
+	Extension    *string `json:"extension_text"`
+	AddressLine1 *string `json:"address_line_1"`
+	AddressLine2 *string `json:"address_line_2"`
+	City         *string `json:"city"`
+	Province     *string `json:"province"`
+}
+
+type updateWorkOrderCustomerRequest struct {
+	Name         string  `json:"name"`
+	Email        *string `json:"email"`
+	HomePhone    *string `json:"home_phone"`
+	WorkPhone    *string `json:"work_phone"`
+	Extension    *string `json:"extension_text"`
+	AddressLine1 *string `json:"address_line_1"`
+	AddressLine2 *string `json:"address_line_2"`
+	City         *string `json:"city"`
+	Province     *string `json:"province"`
+}
+
+type createWorkOrderRequest struct {
+	CreationMode           string                          `json:"creation_mode"`
+	CustomerID             *int64                          `json:"customer_id"`
+	NewCustomer            *createWorkOrderCustomerRequest `json:"new_customer"`
+	CustomerUpdates        *updateWorkOrderCustomerRequest `json:"customer_updates"`
+	ItemID                 *int64                          `json:"item_id"`
+	BrandIDs               []int64                         `json:"brand_ids"`
+	ModelNumber            *string                         `json:"model_number"`
+	SerialNumber           *string                         `json:"serial_number"`
+	RemoteControlQty       int32                           `json:"remote_control_qty" binding:"gte=0"`
+	CableQty               int32                           `json:"cable_qty" binding:"gte=0"`
+	CordQty                int32                           `json:"cord_qty" binding:"gte=0"`
+	DVDVHSQty              int32                           `json:"dvd_vhs_qty" binding:"gte=0"`
+	AlbumCDCassetteQty     int32                           `json:"album_cd_cassette_qty" binding:"gte=0"`
+	Deposit                float64                         `json:"deposit" binding:"gte=0"`
+	DepositPaymentMethodID *int64                          `json:"deposit_payment_method_id"`
+}
+
 type createRepairLogRequest struct {
 	RepairDate *string `json:"repair_date"`
 	HoursUsed  *float64 `json:"hours_used"`
@@ -153,6 +195,108 @@ func (h *Handler) GetWorkOrder(c *gin.Context) {
 		item = sanitizeWorkOrderDetail(item)
 	}
 	c.JSON(http.StatusOK, item)
+}
+
+func (h *Handler) ListCustomers(c *gin.Context) {
+	items, err := h.service.ListCustomers(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list customers"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) CreateWorkOrder(c *gin.Context) {
+	var req createWorkOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	var newCustomer *CreateWorkOrderCustomerInput
+	var customerUpdates *CreateWorkOrderCustomerInput
+	if req.NewCustomer != nil {
+		newCustomer = &CreateWorkOrderCustomerInput{
+			Name:         req.NewCustomer.Name,
+			Email:        req.NewCustomer.Email,
+			HomePhone:    req.NewCustomer.HomePhone,
+			WorkPhone:    req.NewCustomer.WorkPhone,
+			Extension:    req.NewCustomer.Extension,
+			AddressLine1: req.NewCustomer.AddressLine1,
+			AddressLine2: req.NewCustomer.AddressLine2,
+			City:         req.NewCustomer.City,
+			Province:     req.NewCustomer.Province,
+		}
+	}
+	if req.CustomerUpdates != nil {
+		customerUpdates = &CreateWorkOrderCustomerInput{
+			Name:         req.CustomerUpdates.Name,
+			Email:        req.CustomerUpdates.Email,
+			HomePhone:    req.CustomerUpdates.HomePhone,
+			WorkPhone:    req.CustomerUpdates.WorkPhone,
+			Extension:    req.CustomerUpdates.Extension,
+			AddressLine1: req.CustomerUpdates.AddressLine1,
+			AddressLine2: req.CustomerUpdates.AddressLine2,
+			City:         req.CustomerUpdates.City,
+			Province:     req.CustomerUpdates.Province,
+		}
+	}
+
+	item, err := h.service.CreateWorkOrder(c.Request.Context(), CreateWorkOrderInput{
+		CreationMode:           req.CreationMode,
+		CustomerID:             req.CustomerID,
+		NewCustomer:            newCustomer,
+		CustomerUpdates:        customerUpdates,
+		ItemID:                 req.ItemID,
+		BrandIDs:               req.BrandIDs,
+		ModelNumber:            req.ModelNumber,
+		SerialNumber:           req.SerialNumber,
+		RemoteControlQty:       req.RemoteControlQty,
+		CableQty:               req.CableQty,
+		CordQty:                req.CordQty,
+		DVDVHSQty:              req.DVDVHSQty,
+		AlbumCDCassetteQty:     req.AlbumCDCassetteQty,
+		Deposit:                req.Deposit,
+		DepositPaymentMethodID: req.DepositPaymentMethodID,
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidCustomerSelection) ||
+			errors.Is(err, ErrCustomerSelectionRequired) ||
+			errors.Is(err, ErrCustomerNameRequired) ||
+			errors.Is(err, ErrCustomerPhoneRequired) ||
+			errors.Is(err, ErrInvalidEmailFormat) ||
+			errors.Is(err, ErrInvalidCreationMode) ||
+			errors.Is(err, ErrStockJobTypeNotFound) ||
+			errors.Is(err, ErrInvalidDeposit) ||
+			errors.Is(err, ErrDepositPaymentMethodRequired) ||
+			errors.Is(err, ErrPhoneDigitsOnly) ||
+			errors.Is(err, ErrCustomerNotFound) ||
+			errors.Is(err, ErrPaymentMethodNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create work order", "detail": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, item)
+}
+
+func (h *Handler) DeleteWorkOrder(c *gin.Context) {
+	referenceID, err := strconv.Atoi(c.Param("reference_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
+		return
+	}
+
+	if err := h.service.DeleteWorkOrder(c.Request.Context(), referenceID); err != nil {
+		if errors.Is(err, ErrWorkOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete work order"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) UpdateEquipment(c *gin.Context) {

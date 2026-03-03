@@ -2,6 +2,7 @@ package workorders
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,6 +16,9 @@ import (
 type Repository interface {
 	ListWorkOrders(ctx context.Context, query string, page, pageSize int) ([]domain.WorkOrderListItem, error)
 	GetWorkOrderDetail(ctx context.Context, referenceID int) (domain.WorkOrderDetail, error)
+	ListCustomers(ctx context.Context, query string) ([]CustomerLookupOption, error)
+	CreateWorkOrder(ctx context.Context, input CreateWorkOrderInput) (domain.WorkOrderDetail, error)
+	DeleteWorkOrder(ctx context.Context, referenceID int) error
 	UpdateStatus(ctx context.Context, referenceID int, statusID *int64) error
 	UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) error
 	UpdateWorkNotes(ctx context.Context, referenceID int, input WorkNotesUpdateInput) error
@@ -299,6 +303,368 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 	return detail, nil
 }
 
+func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]CustomerLookupOption, error) {
+	trimmedQuery := strings.TrimSpace(query)
+	if trimmedQuery == "" {
+		return []CustomerLookupOption{}, nil
+	}
+	normalizedQuery := strings.Join(strings.Fields(trimmedQuery), " ")
+	if normalizedQuery == "" {
+		return []CustomerLookupOption{}, nil
+	}
+	args := make([]any, 0, 2)
+	where := ""
+	if normalizedQuery != "" {
+		isEmailLike := strings.Contains(normalizedQuery, "@")
+		phoneDigits := strings.Map(func(r rune) rune {
+			if r >= '0' && r <= '9' {
+				return r
+			}
+			return -1
+		}, normalizedQuery)
+		hasLetters := false
+		for _, r := range normalizedQuery {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				hasLetters = true
+				break
+			}
+		}
+		useDigitPhoneSearch := phoneDigits != "" && !isEmailLike && !hasLetters
+
+		if isEmailLike {
+			where = `
+		WHERE COALESCE(c.email, '') ILIKE $1::text
+		`
+			args = append(args, "%"+normalizedQuery+"%")
+		} else {
+		where = `
+		WHERE (
+			COALESCE(c.first_name, '') ILIKE $1::text OR
+			COALESCE(c.last_name, '') ILIKE $1::text OR
+			(CONCAT_WS(' ', COALESCE(c.first_name, ''), COALESCE(c.last_name, ''))) ILIKE $1::text OR
+			(regexp_replace(CONCAT_WS(' ', COALESCE(c.first_name, ''), COALESCE(c.last_name, '')), '\s+', ' ', 'g')) ILIKE $1::text OR
+			COALESCE(c.email, '') ILIKE $1::text OR
+			COALESCE(c.home_phone, '') ILIKE $1::text OR
+			COALESCE(c.work_phone, '') ILIKE $1::text
+		)
+		`
+		args = append(args, "%"+normalizedQuery+"%")
+		if useDigitPhoneSearch {
+			where = `
+		WHERE (
+			COALESCE(c.first_name, '') ILIKE $1::text OR
+			COALESCE(c.last_name, '') ILIKE $1::text OR
+			(CONCAT_WS(' ', COALESCE(c.first_name, ''), COALESCE(c.last_name, ''))) ILIKE $1::text OR
+			(regexp_replace(CONCAT_WS(' ', COALESCE(c.first_name, ''), COALESCE(c.last_name, '')), '\s+', ' ', 'g')) ILIKE $1::text OR
+			COALESCE(c.email, '') ILIKE $1::text OR
+			COALESCE(c.home_phone, '') ILIKE $1::text OR
+			COALESCE(c.work_phone, '') ILIKE $1::text OR
+			regexp_replace(COALESCE(c.home_phone, ''), '[^0-9]', '', 'g') LIKE $2::text OR
+			regexp_replace(COALESCE(c.work_phone, ''), '[^0-9]', '', 'g') LIKE $2::text
+		)
+		`
+			args = append(args, "%"+phoneDigits+"%")
+		}
+		}
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			c.customer_id::bigint,
+			NULLIF(BTRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), '') AS full_name,
+			c.first_name,
+			c.last_name,
+			NULLIF(BTRIM(c.email), '') AS email,
+			NULLIF(BTRIM(c.home_phone), '') AS home_phone,
+			NULLIF(BTRIM(c.work_phone), '') AS work_phone,
+			NULLIF(BTRIM(c.extension_text), '') AS extension_text,
+			NULLIF(BTRIM(c.address_line_1), '') AS address_line_1,
+			NULLIF(BTRIM(c.address_line_2), '') AS address_line_2,
+			NULLIF(BTRIM(c.city), '') AS city,
+			NULLIF(BTRIM(c.province), '') AS province
+		FROM public.customers c
+	`+where+`
+		ORDER BY full_name NULLS LAST, c.customer_id DESC
+		LIMIT 20
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]CustomerLookupOption, 0)
+	for rows.Next() {
+		var id int64
+		var name *string
+		var firstName *string
+		var lastName *string
+		var email *string
+		var homePhone *string
+		var workPhone *string
+		var extension *string
+		var addressLine1 *string
+		var addressLine2 *string
+		var city *string
+		var province *string
+		if err := rows.Scan(
+			&id,
+			&name,
+			&firstName,
+			&lastName,
+			&email,
+			&homePhone,
+			&workPhone,
+			&extension,
+			&addressLine1,
+			&addressLine2,
+			&city,
+			&province,
+		); err != nil {
+			return nil, err
+		}
+		nameText := strings.TrimSpace(stringOrEmpty(name))
+		emailText := strings.TrimSpace(stringOrEmpty(email))
+		phone := strings.TrimSpace(stringOrEmpty(homePhone))
+		if phone == "" {
+			phone = strings.TrimSpace(stringOrEmpty(workPhone))
+		}
+		label := nameText
+		if label == "" {
+			label = fmt.Sprintf("Customer #%d", id)
+		}
+		if phone != "" {
+			label = fmt.Sprintf("%s (%s)", label, phone)
+		}
+		if emailText != "" {
+			label = fmt.Sprintf("%s - %s", label, emailText)
+		}
+		out = append(out, CustomerLookupOption{
+			ID:           id,
+			Label:        label,
+			FirstName:    firstName,
+			LastName:     lastName,
+			Email:        email,
+			HomePhone:    homePhone,
+			WorkPhone:    workPhone,
+			Extension:    extension,
+			AddressLine1: addressLine1,
+			AddressLine2: addressLine2,
+			City:         city,
+			Province:     province,
+		})
+	}
+	return out, rows.Err()
+}
+
+func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkOrderInput) (domain.WorkOrderDetail, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(895401)`); err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+
+	var customerID *int64
+	if input.CustomerID != nil {
+		customerID = input.CustomerID
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.customers WHERE customer_id = $1)`, *customerID).Scan(&exists); err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		if !exists {
+			return domain.WorkOrderDetail{}, ErrCustomerNotFound
+		}
+		if input.CustomerUpdates != nil {
+			firstName, lastName := splitCustomerName(input.CustomerUpdates.Name)
+			if _, err := tx.Exec(ctx, `
+				UPDATE public.customers
+				SET
+					first_name = COALESCE($1::text, first_name),
+					last_name = COALESCE($2::text, last_name),
+					email = COALESCE($3::text, email),
+					home_phone = COALESCE($4::text, home_phone),
+					work_phone = COALESCE($5::text, work_phone),
+					extension_text = COALESCE($6::text, extension_text),
+					address_line_1 = COALESCE($7::text, address_line_1),
+					address_line_2 = COALESCE($8::text, address_line_2),
+					city = COALESCE($9::text, city),
+					province = COALESCE($10::text, province)
+				WHERE customer_id = $11
+			`,
+				nullableString(&firstName),
+				nullableString(&lastName),
+				nullableString(input.CustomerUpdates.Email),
+				nullableString(input.CustomerUpdates.HomePhone),
+				nullableString(input.CustomerUpdates.WorkPhone),
+				nullableString(input.CustomerUpdates.Extension),
+				nullableString(input.CustomerUpdates.AddressLine1),
+				nullableString(input.CustomerUpdates.AddressLine2),
+				nullableString(input.CustomerUpdates.City),
+				nullableString(input.CustomerUpdates.Province),
+				*customerID,
+				); err != nil {
+					return domain.WorkOrderDetail{}, err
+				}
+			}
+	} else if input.NewCustomer != nil {
+		firstName, lastName := splitCustomerName(input.NewCustomer.Name)
+		var newCustomerID int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO public.customers(
+				first_name,
+				last_name,
+				email,
+				home_phone,
+				work_phone,
+				extension_text,
+				address_line_1,
+				address_line_2,
+				city,
+				province
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			RETURNING customer_id
+		`,
+			nullableString(&firstName),
+			nullableString(&lastName),
+			nullableString(input.NewCustomer.Email),
+			nullableString(input.NewCustomer.HomePhone),
+			nullableString(input.NewCustomer.WorkPhone),
+			nullableString(input.NewCustomer.Extension),
+			nullableString(input.NewCustomer.AddressLine1),
+			nullableString(input.NewCustomer.AddressLine2),
+			nullableString(input.NewCustomer.City),
+			nullableString(input.NewCustomer.Province),
+		).Scan(&newCustomerID); err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		customerID = &newCustomerID
+	}
+
+	var depositPaymentMethodIDs []int64
+	if input.DepositPaymentMethodID != nil && *input.DepositPaymentMethodID > 0 {
+		var paymentMethodExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.payment_methods WHERE payment_method_id = $1 AND is_active = true)`, *input.DepositPaymentMethodID).Scan(&paymentMethodExists); err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		if !paymentMethodExists {
+			return domain.WorkOrderDetail{}, ErrPaymentMethodNotFound
+		}
+		depositPaymentMethodIDs = append(depositPaymentMethodIDs, *input.DepositPaymentMethodID)
+	}
+
+	var statusID *int64
+	var preferredStatusID int64
+	statusErr := tx.QueryRow(ctx, `
+		SELECT status_id::bigint
+		FROM public.work_order_statuses
+		ORDER BY
+			CASE
+				WHEN LOWER(status_key) = 'received' OR LOWER(display_name) = 'received' THEN 0
+				ELSE 1
+			END,
+			status_id
+		LIMIT 1
+	`).Scan(&preferredStatusID)
+	if statusErr == nil {
+		statusID = &preferredStatusID
+	} else if !errors.Is(statusErr, pgx.ErrNoRows) {
+		return domain.WorkOrderDetail{}, statusErr
+	}
+
+	var jobTypeID *int64
+	if input.CreationMode == "stock" {
+		var stockJobTypeID int64
+		err := tx.QueryRow(ctx, `
+			SELECT job_type_id::bigint
+			FROM public.job_types
+			WHERE LOWER(job_type_key) = 'stock' OR LOWER(display_name) = 'stock'
+			ORDER BY job_type_id
+			LIMIT 1
+		`).Scan(&stockJobTypeID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.WorkOrderDetail{}, ErrStockJobTypeNotFound
+			}
+			return domain.WorkOrderDetail{}, err
+		}
+		jobTypeID = &stockJobTypeID
+	}
+
+	var referenceID int
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(reference_id), 0) + 1 FROM public.work_orders`).Scan(&referenceID); err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO public.work_orders(
+			reference_id,
+			customer_id,
+			status_id,
+			job_type_id,
+			item_id,
+			remote_control_qty,
+			cable_qty,
+			cord_qty,
+			dvd_vhs_qty,
+			album_cd_cassette_qty,
+			payment_method_ids,
+			deposit,
+			brand_ids,
+			worker_ids,
+			model_number,
+			serial_number,
+			source_hash,
+			source_loaded_at,
+			created_at,
+			updated_at,
+			status_updated_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+			COALESCE($11::bigint[], ARRAY[]::bigint[]),
+			$12,
+			COALESCE($13::bigint[], ARRAY[]::bigint[]),
+			COALESCE($14::integer[], ARRAY[]::integer[]),
+			$15,
+			$16,
+			md5(clock_timestamp()::text || random()::text),
+			now(),
+			now(), now(), now()
+		)
+	`,
+		referenceID,
+		customerID,
+		statusID,
+		jobTypeID,
+		input.ItemID,
+		input.RemoteControlQty,
+		input.CableQty,
+		input.CordQty,
+		input.DVDVHSQty,
+		input.AlbumCDCassetteQty,
+		depositPaymentMethodIDs,
+		input.Deposit,
+		input.BrandIDs,
+		[]int32{},
+		nullableString(input.ModelNumber),
+		nullableString(input.SerialNumber),
+	); err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+
+	return r.GetWorkOrderDetail(ctx, referenceID)
+}
+
 func (r *storeRepository) UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) error {
 	cmd, err := r.db.Exec(ctx, `
 		UPDATE public.work_orders
@@ -577,6 +943,27 @@ func nullableString(value *string) any {
 		return nil
 	}
 	return trimmed
+}
+
+func splitCustomerName(name string) (string, string) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", ""
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+	firstName := parts[0]
+	lastName := strings.Join(parts[1:], " ")
+	return firstName, lastName
+}
+
+func stringOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (r *storeRepository) recalculatePartsTotalTx(ctx context.Context, tx pgx.Tx, referenceID int) error {
@@ -990,6 +1377,37 @@ func (r *storeRepository) DeletePartsPurchaseRequest(ctx context.Context, refere
 		return ErrPartsPurchaseRequestNotFound
 	}
 	return nil
+}
+
+func (r *storeRepository) DeleteWorkOrder(ctx context.Context, referenceID int) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	// Clean up known dependent rows first in case FK cascades are not consistently configured.
+	if _, err := tx.Exec(ctx, `DELETE FROM public.work_order_line_items WHERE reference_id = $1`, referenceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM public.repair_logs WHERE reference_id = $1`, referenceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1`, referenceID); err != nil {
+		return err
+	}
+
+	cmd, err := tx.Exec(ctx, `DELETE FROM public.work_orders WHERE reference_id = $1`, referenceID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrWorkOrderNotFound
+	}
+
+	return tx.Commit(ctx)
 }
 
 func stringOrNil(value *string) any {

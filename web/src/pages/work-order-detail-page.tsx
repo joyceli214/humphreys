@@ -1,7 +1,7 @@
 "use client";
 
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -832,9 +832,11 @@ function SingleDropdown({
 }
 
 export default function WorkOrderDetailPage() {
+  const navigate = useNavigate();
   const { hasPermission } = useAuth();
   const alerts = useAlerts();
   const canEdit = hasPermission("work_orders:update");
+  const canAdminDeleteJob = hasPermission("work_orders:create");
   const canUpdateStatus = hasPermission("work_orders_status:update");
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canReadRepairLogs = hasPermission("repair_logs:read");
@@ -864,6 +866,8 @@ export default function WorkOrderDetailPage() {
   const [partsRequestDeleteTarget, setPartsRequestDeleteTarget] = useState<PartsPurchaseRequest | null>(null);
   const [deletingRepairLog, setDeletingRepairLog] = useState(false);
   const [deletingPartsRequest, setDeletingPartsRequest] = useState(false);
+  const [deleteWorkOrderOpen, setDeleteWorkOrderOpen] = useState(false);
+  const [deletingWorkOrder, setDeletingWorkOrder] = useState(false);
   const [editingRepairLogID, setEditingRepairLogID] = useState<number | null>(null);
   const [editingPartsRequestID, setEditingPartsRequestID] = useState<number | null>(null);
   const [editingPartsRequestStatus, setEditingPartsRequestStatus] = useState<"draft" | "waiting_approval" | "ordered" | "used" | null>(null);
@@ -1439,6 +1443,20 @@ export default function WorkOrderDetailPage() {
       alerts.error("Failed to delete parts request", err instanceof Error ? err.message : "Request failed");
     } finally {
       setDeletingPartsRequest(false);
+    }
+  };
+
+  const confirmDeleteWorkOrder = async () => {
+    setDeletingWorkOrder(true);
+    try {
+      await apiClient.deleteWorkOrder(parsedReferenceId);
+      setDeleteWorkOrderOpen(false);
+      alerts.success("Work order deleted");
+      navigate("/work-orders");
+    } catch (err) {
+      alerts.error("Failed to delete work order", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setDeletingWorkOrder(false);
     }
   };
 
@@ -2269,6 +2287,20 @@ export default function WorkOrderDetailPage() {
         </div>
       </div>
 
+      {canAdminDeleteJob && (
+        <article className="rounded-lg border border-destructive/30 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-destructive">Danger Zone</h2>
+              <p className="text-sm text-muted-foreground">Deleting this job is permanent and cannot be undone.</p>
+            </div>
+            <Button variant="destructive" onClick={() => setDeleteWorkOrderOpen(true)}>
+              Delete Job
+            </Button>
+          </div>
+        </article>
+      )}
+
       <AlertDialog
         open={repairLogDeleteTarget !== null}
         onOpenChange={(open) => {
@@ -2304,6 +2336,26 @@ export default function WorkOrderDetailPage() {
             <AlertDialogCancel disabled={deletingPartsRequest}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeletePartsRequest} disabled={deletingPartsRequest}>
               {deletingPartsRequest ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={deleteWorkOrderOpen}
+        onOpenChange={(open) => {
+          if (!open && !deletingWorkOrder) setDeleteWorkOrderOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this job?</AlertDialogTitle>
+            <AlertDialogDescription>Are you sure? If deleted, it cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingWorkOrder}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteWorkOrder} disabled={deletingWorkOrder}>
+              {deletingWorkOrder ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

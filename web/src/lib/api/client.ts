@@ -1,5 +1,6 @@
 import type {
   AuthResponse,
+  CustomerLookupOption,
   LookupOption,
   PartsPurchaseRequest,
   Permission,
@@ -156,8 +157,64 @@ export class APIClient {
     return this.request<{ items: WorkOrderListItem[] }>(`/work-orders?${params.toString()}`);
   }
 
+  listWorkOrderCustomers(q = "") {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    const target = params.size > 0 ? `/work-orders/customers?${params.toString()}` : "/work-orders/customers";
+    return this.request<{ items: CustomerLookupOption[] }>(target);
+  }
+
+  createWorkOrder(payload: {
+    creation_mode?: "new_job" | "stock";
+    customer_id?: number;
+    new_customer?: {
+      name: string;
+      email?: string;
+      home_phone?: string;
+      work_phone?: string;
+      extension_text?: string;
+      address_line_1?: string;
+      address_line_2?: string;
+      city?: string;
+      province?: string;
+    };
+    customer_updates?: {
+      name?: string;
+      email?: string;
+      home_phone?: string;
+      work_phone?: string;
+      extension_text?: string;
+      address_line_1?: string;
+      address_line_2?: string;
+      city?: string;
+      province?: string;
+    };
+    item_id?: number;
+    brand_ids?: number[];
+    model_number?: string;
+    serial_number?: string;
+    remote_control_qty: number;
+    cable_qty: number;
+    cord_qty: number;
+    dvd_vhs_qty: number;
+    album_cd_cassette_qty: number;
+    deposit: number;
+    deposit_payment_method_id?: number;
+  }) {
+    return this.request<WorkOrderDetail>("/work-orders", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   getWorkOrderDetail(referenceID: number) {
     return this.request<WorkOrderDetail>(`/work-orders/${referenceID}`);
+  }
+
+  deleteWorkOrder(referenceID: number) {
+    return this.request<void>(`/work-orders/${referenceID}`, {
+      method: "DELETE"
+    });
   }
 
   updateWorkOrderStatus(referenceID: number, payload: { status_id: number | null }) {

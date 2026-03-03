@@ -57,6 +57,38 @@ function money(value: number | null | undefined) {
   return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
 }
 
+function parseLooseNumber(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = value.replace(/[^0-9.-]/g, "");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseQuantity(value: string | null | undefined) {
+  if (!value) return null;
+  const match = value.match(/-?\d+(\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function calculatePartsTotal(item: WorkOrderDetail) {
+  return item.line_items.reduce((sum, line) => {
+    const lineTotal = parseLooseNumber(line.line_total_text);
+    if (lineTotal !== null) {
+      return sum + lineTotal;
+    }
+    const unitPrice = line.unit_price ?? 0;
+    const quantity = parseQuantity(line.quantity_text) ?? 0;
+    return sum + unitPrice * quantity;
+  }, 0);
+}
+
+function pageHeight(doc: jsPDF) {
+  return doc.internal.pageSize.getHeight();
+}
+
 function accessories(item: WorkOrderDetail) {
   return [
     `Remote Control: ${item.remote_control_qty}`,
@@ -80,11 +112,12 @@ function fitText(doc: jsPDF, value: string, maxWidth: number) {
 
 function lineField(doc: jsPDF, x: number, y: number, w: number, label: string, value: string) {
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
+  doc.setFontSize(10.5);
   // Access-style field: value above the line, label below the line.
-  doc.text(fitText(doc, value, w - 2), x + 1, y - 1.2);
+  doc.text(fitText(doc, value, w - 2), x + 1, y - 1.5);
   doc.line(x, y + 0.6, x + w, y + 0.6);
-  doc.text(label, x, y + 4.5);
+  doc.setFontSize(8.2);
+  doc.text(label, x, y + 4.3);
 }
 
 function drawHeader(doc: jsPDF, title: string) {
@@ -126,41 +159,41 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number) {
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  doc.rect(14, y + 40, 12, 5);
-  doc.text("Location", 29, y + 44);
-  doc.rect(58, y + 40, 12, 5);
-  doc.text("Cord", 73, y + 44);
-  doc.rect(102, y + 40, 12, 5);
-  doc.text("Remote Control", 117, y + 44);
+  doc.rect(14, y + 43, 12, 5);
+  doc.text("Location", 29, y + 47);
+  doc.rect(58, y + 43, 12, 5);
+  doc.text("Cord", 73, y + 47);
+  doc.rect(102, y + 43, 12, 5);
+  doc.text("Remote Control", 117, y + 47);
 
-  doc.rect(14, y + 49, 12, 5);
-  doc.text("Albums/CDs/Cassettes", 29, y + 53);
-  doc.rect(74, y + 49, 12, 5);
-  doc.text("DVDs/VHS", 91, y + 53);
-  doc.rect(112, y + 49, 12, 5);
-  doc.text("Cables", 127, y + 53);
+  doc.rect(14, y + 52, 12, 5);
+  doc.text("Albums/CDs/Cassettes", 29, y + 56);
+  doc.rect(74, y + 52, 12, 5);
+  doc.text("DVDs/VHS", 91, y + 56);
+  doc.rect(112, y + 52, 12, 5);
+  doc.text("Cables", 127, y + 56);
 
-  lineField(doc, 54, y + 58, 34, "Deposit", money(item.deposit));
-  lineField(doc, 100, y + 58, 50, "Payment Method", item.payment_method_names.length ? item.payment_method_names.join(", ") : "-");
+  lineField(doc, 54, y + 61, 34, "Deposit", money(item.deposit));
+  lineField(doc, 100, y + 61, 50, "Payment Method", item.payment_method_names.length ? item.payment_method_names.join(", ") : "-");
 
   doc.setLineWidth(0.8);
-  doc.line(14, y + 66, 196, y + 66);
+  doc.line(14, y + 70, 196, y + 70);
 
-  lineField(doc, 14, y + 79, 46, "Item", text(item.item_name));
-  lineField(doc, 64, y + 79, 40, "Brand", item.brand_names.length ? item.brand_names.join(", ") : "-");
+  lineField(doc, 14, y + 83, 46, "Item", text(item.item_name));
+  lineField(doc, 64, y + 83, 40, "Brand", item.brand_names.length ? item.brand_names.join(", ") : "-");
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text(`Customer ID`, 112, y + 79);
-  doc.text(String(item.reference_id), 150, y + 79);
+  doc.text(`Customer ID`, 112, y + 83);
+  doc.text(String(item.reference_id), 150, y + 83);
 
-  lineField(doc, 14, y + 91, 46, "Model Number", text(item.model_number));
-  lineField(doc, 64, y + 91, 40, "Serial Number", text(item.serial_number));
+  lineField(doc, 14, y + 95, 46, "Model Number", text(item.model_number));
+  lineField(doc, 64, y + 95, 40, "Serial Number", text(item.serial_number));
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text(fitText(doc, accessories(item), 180), 14, y + 100);
+  doc.text(fitText(doc, accessories(item), 180), 14, y + 104);
 
-  return y + 102;
+  return y + 106;
 }
 
 export function generateDropOffFormPdf(item: WorkOrderDetail) {
@@ -220,36 +253,49 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
     margin: { left: 14, right: 14 }
   });
 
-  const tableY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y + 40;
+  let tableY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y + 40;
+  const detailSectionHeight = 56;
+  const totalsSectionHeight = 45;
+  const sectionGap = 8;
+  const needsNewPage = tableY + sectionGap + detailSectionHeight + totalsSectionHeight > pageHeight(doc) - 10;
+  if (needsNewPage) {
+    doc.addPage();
+    drawHeader(doc, "Customer Pick Up Form");
+    tableY = 34;
+  }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text("Problem Description", 14, tableY + 8);
-  doc.text("Work Done", 108, tableY + 8);
+  doc.text("Problem Description", 14, tableY + 7);
+  doc.text("Work Done", 108, tableY + 7);
 
   doc.setFont("helvetica", "normal");
-  doc.rect(14, tableY + 10, 88, 44);
-  doc.rect(108, tableY + 10, 88, 44);
+  doc.rect(14, tableY + 9, 88, 44);
+  doc.rect(108, tableY + 9, 88, 44);
   doc.setFontSize(10);
-  doc.text(doc.splitTextToSize(text(item.problem_description), 84), 16, tableY + 16);
-  doc.text(doc.splitTextToSize(text(item.work_done), 84), 110, tableY + 16);
+  doc.text(doc.splitTextToSize(text(item.problem_description), 84), 16, tableY + 15);
+  doc.text(doc.splitTextToSize(text(item.work_done), 84), 110, tableY + 15);
 
-  const totalsY = tableY + 62;
+  const totalsY = tableY + 61;
+  const partsTotal = calculatePartsTotal(item);
+  const subtotal = partsTotal + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
+  const hst = subtotal * 0.13;
+  const total = subtotal + hst;
+  const payable = total - (item.deposit ?? 0);
   doc.setFont("helvetica", "normal");
-  doc.text(`Parts Total: ${money(item.parts_total)}`, 196, totalsY, { align: "right" });
+  doc.text(`Parts Total: ${money(partsTotal)}`, 196, totalsY, { align: "right" });
   doc.text(`Pick Up / Delivery: ${money(item.delivery_total)}`, 196, totalsY + 7, { align: "right" });
   doc.text(`Labour Total: ${money(item.labour_total)}`, 196, totalsY + 14, { align: "right" });
-  doc.text(`Deposit: ${money(item.deposit)}`, 196, totalsY + 21, { align: "right" });
+  doc.text(`HST (13%): ${money(hst)}`, 196, totalsY + 21, { align: "right" });
+  doc.text(`Deposit: ${money(item.deposit)}`, 196, totalsY + 28, { align: "right" });
 
-  const total = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
-  const payable = total - (item.deposit ?? 0);
   doc.setFont("helvetica", "bold");
-  doc.text(`Total: ${money(total)}`, 196, totalsY + 29, { align: "right" });
-  doc.text(`Total Payable: ${money(payable)}`, 196, totalsY + 37, { align: "right" });
+  doc.text(`Total: ${money(total)}`, 196, totalsY + 36, { align: "right" });
+  doc.text(`Total Payable: ${money(payable)}`, 196, totalsY + 43, { align: "right" });
 
   doc.setFontSize(10);
-  doc.text(`Technician(s): ${item.worker_names.length ? item.worker_names.join(", ") : "-"}`, 14, totalsY + 29);
-  doc.text(`Date Finished: ${dateOnly(item.updated_at)}`, 14, totalsY + 36);
+  doc.text(`Technician(s): ${item.worker_names.length ? item.worker_names.join(", ") : "-"}`, 14, totalsY + 36);
+  doc.text(`Date Finished: ${dateOnly(item.updated_at)}`, 14, totalsY + 43);
 
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
