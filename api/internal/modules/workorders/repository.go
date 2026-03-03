@@ -337,7 +337,7 @@ func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]Cu
 		`
 			args = append(args, "%"+normalizedQuery+"%")
 		} else {
-		where = `
+			where = `
 		WHERE (
 			COALESCE(c.first_name, '') ILIKE $1::text OR
 			COALESCE(c.last_name, '') ILIKE $1::text OR
@@ -348,9 +348,9 @@ func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]Cu
 			COALESCE(c.work_phone, '') ILIKE $1::text
 		)
 		`
-		args = append(args, "%"+normalizedQuery+"%")
-		if useDigitPhoneSearch {
-			where = `
+			args = append(args, "%"+normalizedQuery+"%")
+			if useDigitPhoneSearch {
+				where = `
 		WHERE (
 			COALESCE(c.first_name, '') ILIKE $1::text OR
 			COALESCE(c.last_name, '') ILIKE $1::text OR
@@ -363,8 +363,8 @@ func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]Cu
 			regexp_replace(COALESCE(c.work_phone, ''), '[^0-9]', '', 'g') LIKE $2::text
 		)
 		`
-			args = append(args, "%"+phoneDigits+"%")
-		}
+				args = append(args, "%"+phoneDigits+"%")
+			}
 		}
 	}
 
@@ -507,10 +507,10 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 				nullableString(input.CustomerUpdates.City),
 				nullableString(input.CustomerUpdates.Province),
 				*customerID,
-				); err != nil {
-					return domain.WorkOrderDetail{}, err
-				}
+			); err != nil {
+				return domain.WorkOrderDetail{}, err
 			}
+		}
 	} else if input.NewCustomer != nil {
 		firstName, lastName := splitCustomerName(input.NewCustomer.Name)
 		var newCustomerID int64
@@ -577,23 +577,9 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 		return domain.WorkOrderDetail{}, statusErr
 	}
 
-	var jobTypeID *int64
-	if input.CreationMode == "stock" {
-		var stockJobTypeID int64
-		err := tx.QueryRow(ctx, `
-			SELECT job_type_id::bigint
-			FROM public.job_types
-			WHERE LOWER(job_type_key) = 'stock' OR LOWER(display_name) = 'stock'
-			ORDER BY job_type_id
-			LIMIT 1
-		`).Scan(&stockJobTypeID)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return domain.WorkOrderDetail{}, ErrStockJobTypeNotFound
-			}
-			return domain.WorkOrderDetail{}, err
-		}
-		jobTypeID = &stockJobTypeID
+	jobTypeID, err := resolveJobTypeIDForCreationMode(ctx, tx, input.CreationMode)
+	if err != nil {
+		return domain.WorkOrderDetail{}, err
 	}
 
 	var referenceID int
@@ -619,8 +605,6 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 			worker_ids,
 			model_number,
 			serial_number,
-			source_hash,
-			source_loaded_at,
 			created_at,
 			updated_at,
 			status_updated_at
@@ -633,8 +617,6 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 			COALESCE($14::integer[], ARRAY[]::integer[]),
 			$15,
 			$16,
-			md5(clock_timestamp()::text || random()::text),
-			now(),
 			now(), now(), now()
 		)
 	`,
@@ -793,7 +775,7 @@ func (r *storeRepository) UpdateLineItems(ctx context.Context, referenceID int, 
 
 	keptIDs := make(map[int64]struct{})
 	for _, line := range lineItems {
-		if line.LineItemID != nil {
+		if line.LineItemID != nil && *line.LineItemID > 0 {
 			lineID := *line.LineItemID
 			if _, ok := existingIDs[lineID]; !ok {
 				return ErrLineItemNotFound
@@ -957,6 +939,71 @@ func splitCustomerName(name string) (string, string) {
 	firstName := parts[0]
 	lastName := strings.Join(parts[1:], " ")
 	return firstName, lastName
+}
+
+func resolveJobTypeIDForCreationMode(ctx context.Context, tx pgx.Tx, mode string) (*int64, error) {
+	normalizedMode := strings.TrimSpace(strings.ToLower(mode))
+	if normalizedMode == "" {
+		normalizedMode = "new_job"
+	}
+
+	if normalizedMode == "stock" {
+		var stockJobTypeID int64
+		err := tx.QueryRow(ctx, `
+			SELECT job_type_id::bigint
+			FROM public.job_types
+			WHERE
+				LOWER(job_type_key) = 'stock'
+				OR REPLACE(LOWER(display_name), ' ', '_') = 'stock'
+				OR LOWER(display_name) = 'stock'
+			ORDER BY job_type_id
+			LIMIT 1
+		`).Scan(&stockJobTypeID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrStockJobTypeNotFound
+			}
+			return nil, err
+		}
+		return &stockJobTypeID, nil
+	}
+
+	var newJobTypeID int64
+	err := tx.QueryRow(ctx, `
+		SELECT job_type_id::bigint
+		FROM public.job_types
+		WHERE
+			LOWER(job_type_key) IN ('new_job', 'newjob', 'new-job', 'new')
+			OR REPLACE(LOWER(display_name), ' ', '_') IN ('new_job', 'newjob', 'new-job', 'new')
+			OR LOWER(display_name) IN ('new job', 'new-job', 'new')
+		ORDER BY job_type_id
+		LIMIT 1
+	`).Scan(&newJobTypeID)
+	if err == nil {
+		return &newJobTypeID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	// Fallback: pick any non-stock job type so "new job" creation is never left undefined.
+	err = tx.QueryRow(ctx, `
+		SELECT job_type_id::bigint
+		FROM public.job_types
+		WHERE
+			LOWER(job_type_key) <> 'stock'
+			AND REPLACE(LOWER(display_name), ' ', '_') <> 'stock'
+			AND LOWER(display_name) <> 'stock'
+		ORDER BY job_type_id
+		LIMIT 1
+	`).Scan(&newJobTypeID)
+	if err == nil {
+		return &newJobTypeID, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return nil, err
 }
 
 func stringOrEmpty(value *string) string {

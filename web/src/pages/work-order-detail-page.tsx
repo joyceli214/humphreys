@@ -295,6 +295,8 @@ type LineItemForm = {
   line_total_text: string;
 };
 
+type LineItemModalMode = "create" | "edit";
+
 type CustomerForm = {
   first_name: string;
   last_name: string;
@@ -898,6 +900,16 @@ export default function WorkOrderDetailPage() {
     deposit: "0"
   });
   const [lineItemsForm, setLineItemsForm] = useState<LineItemForm[]>([]);
+  const [lineItemModalOpen, setLineItemModalOpen] = useState(false);
+  const [lineItemModalMode, setLineItemModalMode] = useState<LineItemModalMode>("create");
+  const [lineItemEditIndex, setLineItemEditIndex] = useState<number | null>(null);
+  const [lineItemDraft, setLineItemDraft] = useState<LineItemForm>({
+    line_item_id: null,
+    item_name: "",
+    unit_price: "",
+    quantity_text: "",
+    line_total_text: ""
+  });
   const [customerForm, setCustomerForm] = useState<CustomerForm>({
     first_name: "",
     last_name: "",
@@ -1046,6 +1058,32 @@ export default function WorkOrderDetailPage() {
     setFieldErrors({});
   };
 
+  const openCreateLineItemModal = () => {
+    setLineItemModalMode("create");
+    setLineItemEditIndex(null);
+    setLineItemDraft({
+      line_item_id: null,
+      item_name: "",
+      unit_price: "",
+      quantity_text: "",
+      line_total_text: ""
+    });
+    setLineItemModalOpen(true);
+  };
+
+  const openEditLineItemModal = (line: LineItemForm, index: number) => {
+    setLineItemModalMode("edit");
+    setLineItemEditIndex(index);
+    setLineItemDraft({
+      line_item_id: line.line_item_id,
+      item_name: line.item_name,
+      unit_price: line.unit_price,
+      quantity_text: line.quantity_text,
+      line_total_text: line.line_total_text
+    });
+    setLineItemModalOpen(true);
+  };
+
   const saveEquipment = async () => {
     setSavingSection("equipment");
     setSectionError("");
@@ -1150,11 +1188,11 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  const saveLineItems = async () => {
+  const saveLineItems = async (nextLineItems: LineItemForm[], successMessage = "Line items updated") => {
     setSavingSection("line_items");
     setSectionError("");
     try {
-      const payload = lineItemsForm.map((line, index) => {
+      const payload = nextLineItems.map((line, index) => {
         const unitPrice = parseOptionalNumber(line.unit_price);
         if (line.unit_price.trim() !== "" && unitPrice === null) {
           throw new Error(`Line ${index + 1}: Unit price must be a valid number`);
@@ -1175,14 +1213,38 @@ export default function WorkOrderDetailPage() {
         line_items: payload
       });
       setItem(updated);
-      setEditingSection(null);
-      alerts.success("Line items updated");
+      setLineItemsForm(
+        updated.line_items.map((line) => ({
+          line_item_id: line.line_item_id,
+          item_name: line.item_name ?? "",
+          unit_price: line.unit_price == null ? "" : String(line.unit_price),
+          quantity_text: line.quantity_text ?? "",
+          line_total_text: line.line_total_text ?? ""
+        }))
+      );
+      alerts.success(successMessage);
     } catch (err) {
       setSectionError(err instanceof Error ? err.message : "Failed to save line items");
       alerts.error("Failed to save line items", err instanceof Error ? err.message : "Request failed");
     } finally {
       setSavingSection(null);
     }
+  };
+
+  const saveLineItemFromModal = async () => {
+    const next =
+      lineItemModalMode === "edit" && lineItemEditIndex !== null
+        ? lineItemsForm.map((line, index) => (index === lineItemEditIndex ? lineItemDraft : line))
+        : [...lineItemsForm, { ...lineItemDraft, line_item_id: null }];
+
+    setLineItemModalOpen(false);
+    setLineItemEditIndex(null);
+    await saveLineItems(next, lineItemModalMode === "edit" ? "Line item updated" : "Line item added");
+  };
+
+  const deleteLineItem = async (index: number) => {
+    const next = lineItemsForm.filter((_, rowIndex) => rowIndex !== index);
+    await saveLineItems(next, "Line item deleted");
   };
 
   const saveTotals = async () => {
@@ -1583,15 +1645,15 @@ export default function WorkOrderDetailPage() {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Work Order #{item.reference_id}</h1>
           <p className="text-sm text-muted-foreground">Created {formatDateTime(item.created_at)}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge className={statusClass(item.status_name)}>{item.status_name ?? "Unknown"}</Badge>
-          {canViewSensitive && <Button variant="outline" onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</Button>}
-          {canViewSensitive && <Button variant="outline" onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</Button>}
+          {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</Button>}
+          {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</Button>}
           <Button variant="outline" asChild>
             <Link to="/work-orders">Back</Link>
           </Button>
@@ -1667,25 +1729,10 @@ export default function WorkOrderDetailPage() {
           <article className="rounded-lg border border-border bg-white p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Payment Breakdown</h2>
-              <div className="flex gap-2">
-                {canEdit && editingSection !== "line_items" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setLineItemsForm(
-                        item.line_items.map((line) => ({
-                          line_item_id: line.line_item_id,
-                          item_name: line.item_name ?? "",
-                          unit_price: line.unit_price == null ? "" : String(line.unit_price),
-                          quantity_text: line.quantity_text ?? "",
-                          line_total_text: line.line_total_text ?? ""
-                        }))
-                      );
-                      setEditingSection("line_items");
-                    }}
-                  >
-                    Edit Line Items
+              <div className="flex flex-wrap gap-2">
+                {canEdit && (
+                  <Button variant="outline" size="sm" onClick={openCreateLineItemModal}>
+                    New Line Item
                   </Button>
                 )}
                 {canEdit && editingSection !== "totals" && (
@@ -1696,125 +1743,83 @@ export default function WorkOrderDetailPage() {
 
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Line Items</p>
-              {editingSection === "line_items" ? (
-                <div className="space-y-3">
-                  <Table>
-                    <thead>
-                      <tr>
-                        <Th className="w-[100px]">ID</Th>
-                        <Th>Item</Th>
-                        <Th className="w-[140px]">Unit Price</Th>
-                        <Th className="w-[140px]">Qty</Th>
-                        <Th className="w-[180px]">Line Total</Th>
-                        <Th className="w-[100px]">Action</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lineItemsForm.length === 0 && (
-                        <tr>
-                          <Td colSpan={6}>No line items yet. Add one below.</Td>
-                        </tr>
-                      )}
-                      {lineItemsForm.map((line, index) => (
-                        <tr key={line.line_item_id ?? `new-${index}`}>
-                          <Td>{line.line_item_id ?? "new"}</Td>
-                          <Td>
-                            <Input
-                              value={line.item_name}
-                              onChange={(e) =>
-                                setLineItemsForm((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, item_name: e.target.value } : row)))
-                              }
-                            />
-                          </Td>
-                          <Td>
-                            <Input
-                              value={line.unit_price}
-                              onChange={(e) =>
-                                setLineItemsForm((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, unit_price: e.target.value } : row)))
-                              }
-                            />
-                          </Td>
-                          <Td>
-                            <Input
-                              value={line.quantity_text}
-                              onChange={(e) =>
-                                setLineItemsForm((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, quantity_text: e.target.value } : row)))
-                              }
-                            />
-                          </Td>
-                          <Td>
-                            <Input
-                              value={line.line_total_text}
-                              onChange={(e) =>
-                                setLineItemsForm((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, line_total_text: e.target.value } : row)))
-                              }
-                            />
-                          </Td>
-                          <Td>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setLineItemsForm((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}
-                            >
-                              Remove
-                            </Button>
-                          </Td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setLineItemsForm((prev) => [
-                          ...prev,
-                          { line_item_id: null, item_name: "", unit_price: "", quantity_text: "", line_total_text: "" }
-                        ])
-                      }
-                    >
-                      Add Line Item
-                    </Button>
-                    <Button size="sm" onClick={saveLineItems} disabled={savingSection === "line_items"}>
-                      {savingSection === "line_items" ? "Saving..." : "Save"}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={cancelEditing} disabled={savingSection === "line_items"}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Table>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[640px]">
                   <thead>
                     <tr>
-                      <Th className="w-[100px]">ID</Th>
                       <Th>Item</Th>
                       <Th className="w-[140px]">Unit Price</Th>
                       <Th className="w-[140px]">Qty</Th>
                       <Th className="w-[180px]">Line Total</Th>
+                      {canEdit && <Th className="w-[70px]" />}
                     </tr>
                   </thead>
                   <tbody>
-                    {item.line_items.length === 0 && (
+                    {lineItemsForm.length === 0 && (
                       <tr>
-                        <Td colSpan={5}>No line items.</Td>
+                        <Td colSpan={canEdit ? 5 : 4}>No line items.</Td>
                       </tr>
                     )}
-                    {item.line_items.map((line) => (
-                      <tr key={line.line_item_id}>
-                        <Td>{line.line_item_id}</Td>
-                        <Td>{line.item_name ?? "-"}</Td>
-                        <Td>{formatCurrency(line.unit_price)}</Td>
-                        <Td>{line.quantity_text ?? "-"}</Td>
-                        <Td>{line.line_total_text ?? "-"}</Td>
+                    {lineItemsForm.map((line, index) => (
+                      <tr key={line.line_item_id ?? `line-${index}`}>
+                        <Td>{line.item_name.trim() || "-"}</Td>
+                        <Td>{line.unit_price.trim() ? formatCurrency(parseOptionalNumber(line.unit_price)) : "-"}</Td>
+                        <Td>{line.quantity_text.trim() || "-"}</Td>
+                        <Td>{line.line_total_text.trim() || "-"}</Td>
+                        {canEdit && (
+                          <Td>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-lg font-bold text-slate-500 hover:bg-slate-100">⋮</Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => openEditLineItemModal(line, index)}>Edit</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => void deleteLineItem(index)}>Delete</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </Td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
                 </Table>
-              )}
+              </div>
             </div>
+
+            {canEdit && (
+              <Dialog open={lineItemModalOpen} onOpenChange={setLineItemModalOpen}>
+                <DialogContent className="max-w-lg">
+                  <DialogTitle className="text-lg font-semibold">{lineItemModalMode === "edit" ? "Edit Line Item" : "New Line Item"}</DialogTitle>
+                  <DialogDescription className="text-sm text-muted-foreground">
+                    Update fields below and save to apply changes to this work order.
+                  </DialogDescription>
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-sm text-muted-foreground">Item</label>
+                      <Input value={lineItemDraft.item_name} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, item_name: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-muted-foreground">Unit Price</label>
+                      <Input value={lineItemDraft.unit_price} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, unit_price: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-muted-foreground">Qty</label>
+                      <Input value={lineItemDraft.quantity_text} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, quantity_text: e.target.value }))} />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-sm text-muted-foreground">Line Total</label>
+                      <Input value={lineItemDraft.line_total_text} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, line_total_text: e.target.value }))} />
+                    </div>
+                    <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
+                      <Button variant="outline" onClick={() => setLineItemModalOpen(false)} disabled={savingSection === "line_items"}>Cancel</Button>
+                      <Button onClick={() => void saveLineItemFromModal()} disabled={savingSection === "line_items"}>
+                        {savingSection === "line_items" ? "Saving..." : lineItemModalMode === "edit" ? "Save Changes" : "Add Line Item"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
 
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Payment</p>
@@ -1886,9 +1891,9 @@ export default function WorkOrderDetailPage() {
 
           {(canReadRepairLogs || canCreateRepairLogs) && (
             <article className="rounded-lg border border-border bg-white p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Repair Logs</h2>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {loadingExtras && <span className="text-xs text-muted-foreground">Loading...</span>}
                   {canUpdateStatus &&
                     item.status_key !== "finished" &&
@@ -2002,12 +2007,12 @@ export default function WorkOrderDetailPage() {
 
           {(canReadPartsRequests || canCreatePartsRequests) && (
             <article className="rounded-lg border border-border bg-white p-4 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Parts Purchase Requests</h2>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {loadingExtras && <span className="text-xs text-muted-foreground">Loading...</span>}
                   {canCreatePartsRequests && (
-                    <Button size="sm" onClick={openCreatePartsRequestModal}>
+                    <Button size="sm" className="h-auto whitespace-normal py-2 text-center leading-tight" onClick={openCreatePartsRequestModal}>
                       Add Parts Request
                     </Button>
                   )}
@@ -2109,7 +2114,8 @@ export default function WorkOrderDetailPage() {
               )}
 
               {canReadPartsRequests && (
-                <Table>
+                <div className="overflow-x-auto">
+                <Table className="min-w-[900px]">
                   <thead>
                     <tr>
                       <Th>Item</Th>
@@ -2169,6 +2175,7 @@ export default function WorkOrderDetailPage() {
                     ))}
                   </tbody>
                 </Table>
+                </div>
               )}
             </article>
           )}
