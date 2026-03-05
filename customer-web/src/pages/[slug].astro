@@ -1,0 +1,59 @@
+---
+import { getCollection, getEntry, render } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { buttonVariants } from '@/components/ui/button';
+
+export const prerender = true;
+
+const heroImages: Record<string, string> = {
+  'audio-equipment-repair': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/TEAC+X-1000R+F+view+-1920w.jpg',
+  'desktop-and-laptop-repair-services': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/Screen+Shot+2020-11-18+at+11.22.16+AM-1920w.png',
+  'tv-repair': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/112553893-614x460-1920w.jpg',
+  'turn-table-servicing': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/112553895-596x349-1920w.jpeg',
+  'items-for-sale': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/Stereo+Stand+Units+for+Sale+-1920w.jpg',
+  'newpage': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20241104_151653-1920w.jpg',
+  'request-a-pickup': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20241105_113554-1920w.jpg',
+  'bose-wave-radio-repair': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20241105_113540-1920w.jpg',
+  'cd-player-repair': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/JVC-RX-9V-Computer-Controlled-Stereo-Receiver-2-x-1920w.jpg',
+  '1940-s-70-s-audio-services': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/West+Wall+items+for+Sale+-1920w.jpg',
+  contact: 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20230328_124107-1920w.jpg',
+  'about-us': 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20230328_124107-1920w.jpg',
+  testimonials1: 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20230328_124107-1920w.jpg'
+};
+
+export async function getStaticPaths() {
+  const pages = await getCollection('pages');
+  return pages
+    .filter((entry) => entry.id !== 'home')
+    .map((entry) => ({ params: { slug: entry.id } }));
+}
+
+const { slug } = Astro.params;
+if (!slug) throw new Error('Missing slug parameter');
+
+const page = await getEntry('pages', slug);
+if (!page) return Astro.redirect('/');
+
+const { Content } = await render(page);
+const image = heroImages[slug] ?? 'https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20230328_124107-1920w.jpg';
+---
+<BaseLayout title={page.data.title} description={page.data.description}>
+  <section class="grid gap-6 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+    <div class="space-y-4">
+      <p class="inline-flex rounded-full border border-border bg-white/80 px-4 py-1 text-sm font-bold text-primary">Humphrey's Services</p>
+      <h1 class="text-4xl leading-tight md:text-5xl">{page.data.heading ?? page.data.title}</h1>
+      <p class="max-w-2xl text-xl text-text/80">{page.data.description}</p>
+      <div class="flex flex-wrap gap-3">
+        <a href="/contact" class={buttonVariants({ variant: 'default', size: 'default' })}>Contact Us</a>
+        <a href="/request-a-pickup" class={buttonVariants({ variant: 'secondary', size: 'default' })}>Request Pickup</a>
+      </div>
+    </div>
+    <img class="h-72 w-full rounded-[1.75rem] border border-border object-cover shadow-soft md:h-[24rem]" src={image} alt={page.data.heading ?? page.data.title} loading="lazy" />
+  </section>
+
+  <section class="mt-7">
+    <div class="marketing-prose">
+      <Content />
+    </div>
+  </section>
+</BaseLayout>

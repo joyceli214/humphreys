@@ -1,0 +1,23 @@
+---
+const {
+  image,
+  imagePosition = 'left'
+} = Astro.props as {
+  image?: string;
+  imagePosition?: 'left' | 'right';
+};
+
+const reverse = imagePosition === 'right';
+---
+<section class={`my-6 grid items-start gap-5 lg:grid-cols-2 ${reverse ? 'lg:[&>*:first-child]:order-2' : ''}`}>
+  <div class="overflow-hidden rounded-2xl">
+    {image ? (
+      <img src={image} alt="Content image" class="h-full min-h-64 w-full object-cover" loading="lazy" />
+    ) : (
+      <div class="flex min-h-64 items-center justify-center text-sm text-muted-foreground">Add an image in Keystatic</div>
+    )}
+  </div>
+  <div class="marketing-prose">
+    <slot />
+  </div>
+</section>

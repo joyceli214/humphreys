@@ -1,0 +1,95 @@
+@import '@fontsource/prata';
+@import '@fontsource/geist-sans/400.css';
+@import '@fontsource/geist-sans/700.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 58 100% 98%;
+    --foreground: 249 66% 5%;
+    --card: 0 0% 100%;
+    --card-foreground: 249 66% 5%;
+    --border: 223 87% 88%;
+    --input: 223 87% 88%;
+    --ring: 240 65% 47%;
+    --radius: 1.1rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    @apply bg-background text-text antialiased;
+  }
+
+  body {
+    @apply font-body text-base leading-relaxed;
+    background-image:
+      radial-gradient(circle at 8% 8%, rgb(255 173 66 / 0.22), transparent 24%),
+      radial-gradient(circle at 88% 20%, rgb(162 189 251 / 0.35), transparent 28%),
+      linear-gradient(180deg, #fffef3 0%, #f7f8ff 65%, #fffef3 100%);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-heading tracking-tight text-text;
+  }
+
+  a {
+    @apply text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline;
+  }
+}
+
+@layer components {
+  .site-shell {
+    @apply relative min-h-screen overflow-x-hidden;
+  }
+
+  .site-shell::before,
+  .site-shell::after {
+    content: '';
+    @apply pointer-events-none absolute rounded-full blur-3xl;
+  }
+
+  .site-shell::before {
+    @apply -left-40 top-20 h-96 w-96 bg-secondary/40;
+  }
+
+  .site-shell::after {
+    @apply -right-28 top-[22rem] h-80 w-80 bg-accent/30;
+  }
+
+  .grain-overlay {
+    background-image: radial-gradient(rgb(5 3 22 / 0.05) 1px, transparent 0);
+    background-size: 20px 20px;
+  }
+
+  .marketing-prose {
+    @apply text-base leading-7 text-text/85;
+  }
+
+  .marketing-prose h1,
+  .marketing-prose h2,
+  .marketing-prose h3 {
+    @apply mt-5 font-heading text-2xl leading-tight text-text;
+  }
+
+  .marketing-prose p {
+    @apply my-2;
+  }
+
+  .marketing-prose ul {
+    @apply my-2 list-disc pl-5;
+  }
+
+  .marketing-prose li {
+    @apply my-1 pl-1;
+  }
+}

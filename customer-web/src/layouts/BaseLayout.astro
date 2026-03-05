@@ -1,0 +1,102 @@
+---
+import '../styles/global.css';
+import { buttonVariants } from '@/components/ui/button';
+
+const { title = "Humphrey's Audio & Vintage Audio Repair", description = '' } = Astro.props;
+const pathname = Astro.url.pathname;
+
+const navItems = [
+  ['/', 'Home'],
+  ['/audio-equipment-repair', 'Audio'],
+  ['/desktop-and-laptop-repair-services', 'Computer'],
+  ['/tv-repair', 'TV'],
+  ['/turn-table-servicing', 'Turntables'],
+  ['/items-for-sale', 'For Sale'],
+  ['/request-a-pickup', 'Free Pickup'],
+  ['/testimonials1', 'Testimonials'],
+  ['/contact', 'Contact']
+];
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+  </head>
+  <body>
+    <div class="site-shell">
+      <div class="grain-overlay absolute inset-0 -z-10 opacity-30"></div>
+
+      <header class="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl">
+        <div class="container py-3">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white/70 px-4 py-2 text-sm">
+            <p class="font-bold text-primary">FREE PICKUP & DELIVERY in Toronto & GTA</p>
+            <p class="font-bold text-text">Call/Text: (416) 923-3777 · (905) 235-2226</p>
+          </div>
+
+          <div class="flex items-center justify-between gap-4">
+            <a href="/" class="no-underline">
+              <p class="font-heading text-2xl leading-none text-text md:text-3xl">Humphrey's Audio Repair</p>
+              <p class="text-sm text-text/70">Customer service since 1955</p>
+            </a>
+
+            <div class="hidden items-center gap-3 md:flex">
+              <a class={buttonVariants({ variant: 'secondary', size: 'sm' })} href="/items-for-sale">View Inventory</a>
+              <a class={buttonVariants({ variant: 'default', size: 'sm' })} href="/contact">Get a Quote</a>
+            </div>
+          </div>
+
+          <nav class="mt-4 flex flex-wrap gap-2 pb-1">
+            {navItems.map(([href, label]) => {
+              const active = pathname === href;
+              return (
+                <a
+                  href={href}
+                  class:list={[
+                    'rounded-full border px-4 py-2 text-sm font-bold no-underline transition-colors',
+                    active
+                      ? 'border-primary bg-primary text-background'
+                      : 'border-border bg-white/85 text-text hover:border-primary/40 hover:bg-secondary/40'
+                  ]}
+                >
+                  {label}
+                </a>
+              );
+            })}
+          </nav>
+        </div>
+      </header>
+
+      <main class="container py-7 md:py-9">
+        <slot />
+      </main>
+
+      <footer class="border-t border-border/70 bg-white/75">
+        <div class="container py-10">
+          <div class="grid gap-8 md:grid-cols-3">
+            <div>
+              <h3 class="mb-2 text-2xl">Humphrey's Audio & Vintage Audio Repair</h3>
+              <p class="text-text/80">Trusted repair, restoration, and setup services for Toronto, GTA, and Newmarket customers.</p>
+            </div>
+            <div>
+              <h4 class="mb-2 font-heading text-xl">Contact</h4>
+              <p>16610 Bayview Ave, Unit #7</p>
+              <p>Newmarket, ON L3X 1X3</p>
+              <p>
+                <a href="mailto:humphreys.repair@rogers.com">humphreys.repair@rogers.com</a>
+              </p>
+              <p>(416) 923-3777 · (905) 235-2226</p>
+            </div>
+            <div class="md:text-right">
+              <h4 class="mb-2 font-heading text-xl">Need Help Fast?</h4>
+              <p class="mb-4 text-text/80">Send your make, model, and issue details. We will respond with the next step.</p>
+              <a class={buttonVariants({ variant: 'default', size: 'sm' })} href="/request-a-pickup">Request Pickup</a>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>

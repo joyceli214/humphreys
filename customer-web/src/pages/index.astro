@@ -1,0 +1,96 @@
+---
+import { getEntry, render } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { buttonVariants } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+const page = await getEntry('pages', 'home');
+if (!page) throw new Error('Missing home page content entry');
+const { Content } = await render(page);
+---
+<BaseLayout title={page.data.title} description={page.data.description}>
+  <section class="grid items-center gap-6 lg:grid-cols-2">
+    <div class="space-y-6">
+      <p class="inline-flex rounded-full border border-border bg-secondary/35 px-4 py-1 text-sm font-bold text-text">
+        Vintage Audio, TV, and Computer Repair
+      </p>
+      <h1 class="max-w-xl text-4xl leading-tight md:text-5xl">{page.data.heading ?? page.data.title}</h1>
+      <p class="max-w-xl text-xl text-text/80">{page.data.description}</p>
+      <div class="flex flex-wrap gap-3">
+        <a href="/request-a-pickup" class={buttonVariants({ variant: 'default', size: 'lg' })}>Request Free Pickup</a>
+        <a href="/items-for-sale" class={buttonVariants({ variant: 'secondary', size: 'lg' })}>Browse Items for Sale</a>
+      </div>
+      <div class="grid gap-3 sm:grid-cols-3">
+        <div class="rounded-2xl border border-border bg-white/80 p-4">
+          <p class="text-sm text-text/70">Toronto & GTA</p>
+          <p class="text-2xl font-bold">(416) 923-3777</p>
+        </div>
+        <div class="rounded-2xl border border-border bg-white/80 p-4">
+          <p class="text-sm text-text/70">Newmarket</p>
+          <p class="text-2xl font-bold">(905) 235-2226</p>
+        </div>
+        <div class="rounded-2xl border border-border bg-white/80 p-4">
+          <p class="text-sm text-text/70">Service Legacy</p>
+          <p class="text-2xl font-bold">Since 1955</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="relative">
+      <div class="absolute -inset-8 -z-10 rounded-[2.3rem] bg-primary/15 blur-2xl"></div>
+      <img
+        class="h-[470px] w-full rounded-[2rem] border border-border object-cover shadow-soft"
+        src="https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20230328_124107-1920w.jpg"
+        alt="Vintage audio equipment in repair shop"
+        loading="eager"
+      />
+    </div>
+  </section>
+
+  <section class="mt-8 grid gap-4 md:grid-cols-3">
+    <Card className="bg-white/90">
+      <CardHeader>
+        <CardTitle>Audio Specialists</CardTitle>
+        <CardDescription>Receivers, amplifiers, turntables, cassette decks, and reel-to-reel systems.</CardDescription>
+      </CardHeader>
+    </Card>
+    <Card className="bg-white/90">
+      <CardHeader>
+        <CardTitle>In-Home Convenience</CardTitle>
+        <CardDescription>Free pickup and delivery available in Toronto and the GTA for qualifying jobs.</CardDescription>
+      </CardHeader>
+    </Card>
+    <Card className="bg-white/90">
+      <CardHeader>
+        <CardTitle>Trusted Team</CardTitle>
+        <CardDescription>Family-owned operation with decades of practical troubleshooting and repair experience.</CardDescription>
+      </CardHeader>
+    </Card>
+  </section>
+
+  <section class="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+    <article>
+      <h2 class="text-3xl">Full-Service Repair and Restoration</h2>
+      <div class="marketing-prose mt-3">
+        <Content />
+      </div>
+    </article>
+
+    <Card className="h-fit bg-text text-background">
+      <CardHeader>
+        <CardTitle className="text-background">Need a Fast Repair Answer?</CardTitle>
+        <CardDescription className="text-background/80">
+          Send the make/model and issue details. We will guide you on repair vs replacement and next steps.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div class="space-y-3 text-sm">
+          <p>Email: humphreys.repair@rogers.com</p>
+          <p>Toronto & GTA: (416) 923-3777</p>
+          <p>Newmarket: (905) 235-2226</p>
+        </div>
+        <a href="/contact" class={`${buttonVariants({ variant: 'secondary', size: 'default' })} mt-6`}>Contact the Team</a>
+      </CardContent>
+    </Card>
+  </section>
+</BaseLayout>
