@@ -753,16 +753,20 @@ export default function WorkOrdersPage() {
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canCreateWorkOrders = hasPermission("work_orders:create");
   const initialQuery = searchParams.get("q")?.trim() ?? "";
-  const parsedInitialPage = Number(searchParams.get("page"));
-  const initialPage = Number.isInteger(parsedInitialPage) && parsedInitialPage > 0 ? parsedInitialPage : 1;
   const [items, setItems] = useState<WorkOrderListItem[]>([]);
   const [searchInput, setSearchInput] = useState(initialQuery);
   const [query, setQuery] = useState(initialQuery);
-  const [page, setPage] = useState(initialPage);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const loadingRef = useRef(loading);
+  const loadingMoreRef = useRef(loadingMore);
+  const hasMoreRef = useRef(hasMore);
+  const pageRef = useRef(page);
+  const queryRef = useRef(query);
+  const waitForSentinelExitRef = useRef(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [creationMode, setCreationMode] = useState<"new_job" | "stock">("new_job");
@@ -790,15 +794,12 @@ export default function WorkOrdersPage() {
   const [serialNumber, setSerialNumber] = useState("");
   const [paymentMethods, setPaymentMethods] = useState<LookupOption[]>([]);
   const [depositPaymentMethodId, setDepositPaymentMethodId] = useState("");
-  const pageSize = 20;
-  const toListSearch = (nextPage: number, nextQuery: string) => {
+  const pageSize = 100;
+  const toListSearch = (nextQuery: string) => {
     const params = new URLSearchParams();
     const trimmedQuery = nextQuery.trim();
     if (trimmedQuery) {
       params.set("q", trimmedQuery);
-    }
-    if (nextPage > 1) {
-      params.set("page", String(nextPage));
     }
     return params;
   };
@@ -813,23 +814,15 @@ export default function WorkOrdersPage() {
     return res.items;
   };
 
-  const loadInitial = async (nextQuery: string, untilPage = 1) => {
+  const loadInitial = async (nextQuery: string) => {
     setLoading(true);
     setLoadingMore(false);
+    waitForSentinelExitRef.current = false;
     try {
-      const allItems: WorkOrderListItem[] = [];
-      let loadedPage = 0;
-      let nextHasMore = true;
-      for (let p = 1; p <= untilPage; p += 1) {
-        const pageItems = await fetchPage(p, nextQuery);
-        allItems.push(...pageItems);
-        loadedPage = p;
-        nextHasMore = pageItems.length === pageSize;
-        if (!nextHasMore) break;
-      }
-      setItems(allItems);
-      setPage(Math.max(loadedPage, 1));
-      setHasMore(nextHasMore);
+      const pageItems = await fetchPage(1, nextQuery);
+      setItems(pageItems);
+      setPage(1);
+      setHasMore(pageItems.length === pageSize);
     } catch (err) {
       alerts.error("Failed to load work orders", err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -838,11 +831,12 @@ export default function WorkOrdersPage() {
   };
 
   const loadMore = async () => {
-    if (loading || loadingMore || !hasMore) return;
-    const nextPage = page + 1;
+    if (loadingRef.current || loadingMoreRef.current || !hasMoreRef.current) return;
+    const nextPage = pageRef.current + 1;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const pageItems = await fetchPage(nextPage, query);
+      const pageItems = await fetchPage(nextPage, queryRef.current);
       setItems((prev) => {
         const seen = new Set(prev.map((item) => item.reference_id));
         const uniqueAdds = pageItems.filter((item) => !seen.has(item.reference_id));
@@ -850,17 +844,19 @@ export default function WorkOrdersPage() {
       });
       setPage(nextPage);
       setHasMore(pageItems.length === pageSize);
-      setSearchParams(toListSearch(nextPage, query));
+      setSearchParams(toListSearch(queryRef.current));
+      waitForSentinelExitRef.current = true;
     } catch (err) {
       alerts.error("Failed to load more work orders", err instanceof Error ? err.message : "Request failed");
     } finally {
       setLoadingMore(false);
+      loadingMoreRef.current = false;
     }
   };
 
   useEffect(() => {
     if (!hasPermission("work_orders:read")) return;
-    loadInitial(initialQuery, initialPage);
+    loadInitial(initialQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPermission]);
 
@@ -871,15 +867,40 @@ export default function WorkOrdersPage() {
     const observer = new IntersectionObserver(
       (entries) => {
         const first = entries[0];
-        if (first?.isIntersecting) {
+        if (!first) return;
+        if (!first.isIntersecting) {
+          waitForSentinelExitRef.current = false;
+          return;
+        }
+        if (!waitForSentinelExitRef.current) {
           void loadMore();
         }
       },
-      { rootMargin: "300px 0px" }
+      { rootMargin: "0px", threshold: 1 }
     );
     observer.observe(target);
     return () => observer.disconnect();
   }, [hasMore, items.length, loading, loadingMore, page, query]);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  useEffect(() => {
+    pageRef.current = page;
+  }, [page]);
+
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
 
   useEffect(() => {
     if (!createOpen || !canCreateWorkOrders) return;
@@ -1280,9 +1301,9 @@ export default function WorkOrdersPage() {
                     alerts.success(`Work order #${created.reference_id} created`);
                     setCreateOpen(false);
                     resetCreateForm();
-                    await loadInitial(query, 1);
-                    const listSearch = toListSearch(1, query).toString();
-                    setSearchParams(toListSearch(1, query));
+                    await loadInitial(query);
+                    const listSearch = toListSearch(query).toString();
+                    setSearchParams(toListSearch(query));
                     navigate(`/work-orders/${created.reference_id}${listSearch ? `?${listSearch}` : ""}`);
                   } catch (err) {
                     alerts.error("Failed to create work order", err instanceof Error ? err.message : "Request failed");
@@ -1305,8 +1326,8 @@ export default function WorkOrdersPage() {
             e.preventDefault();
             const nextQuery = searchInput.trim();
             setQuery(nextQuery);
-            setSearchParams(toListSearch(1, nextQuery));
-            await loadInitial(nextQuery, 1);
+            setSearchParams(toListSearch(nextQuery));
+            await loadInitial(nextQuery);
           }}
         >
           <Input
@@ -1382,6 +1403,13 @@ export default function WorkOrdersPage() {
           {loadingMore && <p className="text-xs text-muted-foreground">Loading more work orders...</p>}
           {!loading && !loadingMore && !hasMore && items.length > 0 && <p className="text-xs text-muted-foreground">End of results.</p>}
         </div>
+        {!loading && !loadingMore && hasMore && (
+          <div className="flex justify-center">
+            <Button variant="outline" size="sm" onClick={() => void loadMore()}>
+              Load more
+            </Button>
+          </div>
+        )}
         <div ref={loadMoreRef} className="h-1 w-full" />
       </div>
     </section>
