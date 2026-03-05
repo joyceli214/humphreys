@@ -1,7 +1,7 @@
 "use client";
 
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -835,6 +835,7 @@ function SingleDropdown({
 
 export default function WorkOrderDetailPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { hasPermission } = useAuth();
   const alerts = useAlerts();
   const canEdit = hasPermission("work_orders:update");
@@ -936,6 +937,21 @@ export default function WorkOrderDetailPage() {
   });
 
   const parsedReferenceId = useMemo(() => Number(referenceId), [referenceId]);
+  const backToWorkOrders = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const q = params.get("q")?.trim() ?? "";
+    const parsedPage = Number(params.get("page"));
+    const page = Number.isInteger(parsedPage) && parsedPage > 1 ? String(parsedPage) : "";
+    const backParams = new URLSearchParams();
+    if (q) {
+      backParams.set("q", q);
+    }
+    if (page) {
+      backParams.set("page", page);
+    }
+    const queryString = backParams.toString();
+    return queryString ? `/work-orders?${queryString}` : "/work-orders";
+  }, [location.search]);
 
   const loadExtras = async (reference: number) => {
     setLoadingExtras(true);
@@ -1034,7 +1050,7 @@ export default function WorkOrderDetailPage() {
     return (
       <section className="space-y-4">
         <Button variant="outline" asChild>
-          <Link to="/work-orders">Back to Work Orders</Link>
+          <Link to={backToWorkOrders}>Back to Work Orders</Link>
         </Button>
         <p>Invalid work order reference.</p>
       </section>
@@ -1045,7 +1061,7 @@ export default function WorkOrderDetailPage() {
     return (
       <section className="space-y-4">
         <Button variant="outline" asChild>
-          <Link to="/work-orders">Back to Work Orders</Link>
+          <Link to={backToWorkOrders}>Back to Work Orders</Link>
         </Button>
         <p>Work order not found.</p>
       </section>
@@ -1135,7 +1151,7 @@ export default function WorkOrderDetailPage() {
     if (depositPaymentMethodID !== null) {
       next.push(depositPaymentMethodID);
     }
-    if (finalPaymentMethodID !== null && finalPaymentMethodID !== depositPaymentMethodID) {
+    if (finalPaymentMethodID !== null) {
       next.push(finalPaymentMethodID);
     }
     setWorkNotesForm((prev) => ({ ...prev, payment_method_ids: next }));
@@ -1514,7 +1530,7 @@ export default function WorkOrderDetailPage() {
       await apiClient.deleteWorkOrder(parsedReferenceId);
       setDeleteWorkOrderOpen(false);
       alerts.success("Work order deleted");
-      navigate("/work-orders");
+      navigate(backToWorkOrders);
     } catch (err) {
       alerts.error("Failed to delete work order", err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -1655,7 +1671,7 @@ export default function WorkOrderDetailPage() {
           {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</Button>}
           {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</Button>}
           <Button variant="outline" asChild>
-            <Link to="/work-orders">Back</Link>
+            <Link to={backToWorkOrders}>Back</Link>
           </Button>
         </div>
       </div>

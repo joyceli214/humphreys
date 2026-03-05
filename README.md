@@ -2,6 +2,7 @@
 
 Monorepo containing:
 - `web/`: React + Vite admin dashboard (shadcn-style components)
+- `customer-web/`: Astro + Keystatic customer-facing website
 - `api/`: Go REST API with JWT access + rotating refresh token auth
 - `infra/`: PostgreSQL migrations and local stack
 - `openapi.yaml`: API contract source for generated TypeScript types
@@ -22,6 +23,8 @@ Monorepo containing:
    - fallback without hot restart: `cd api && go run ./cmd/server`
 4. Run web:
    - `cd web && npm install && npm run dev`
+5. Run customer site:
+   - `cd customer-web && npm install && npm run dev`
 
 ## API hot restart
 - Install watcher once:

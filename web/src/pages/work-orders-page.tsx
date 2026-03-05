@@ -1,7 +1,7 @@
 "use client";
 
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { CustomerLookupOption, LookupOption, WorkOrderListItem } from "@/lib/api/generated/types";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -747,15 +747,22 @@ function MultiSearchableDropdown({
 
 export default function WorkOrdersPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = useAuth();
   const alerts = useAlerts();
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canCreateWorkOrders = hasPermission("work_orders:create");
+  const initialQuery = searchParams.get("q")?.trim() ?? "";
+  const parsedInitialPage = Number(searchParams.get("page"));
+  const initialPage = Number.isInteger(parsedInitialPage) && parsedInitialPage > 0 ? parsedInitialPage : 1;
   const [items, setItems] = useState<WorkOrderListItem[]>([]);
-  const [searchInput, setSearchInput] = useState("");
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState(initialQuery);
+  const [query, setQuery] = useState(initialQuery);
+  const [page, setPage] = useState(initialPage);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [creationMode, setCreationMode] = useState<"new_job" | "stock">("new_job");
@@ -784,17 +791,45 @@ export default function WorkOrdersPage() {
   const [paymentMethods, setPaymentMethods] = useState<LookupOption[]>([]);
   const [depositPaymentMethodId, setDepositPaymentMethodId] = useState("");
   const pageSize = 20;
+  const toListSearch = (nextPage: number, nextQuery: string) => {
+    const params = new URLSearchParams();
+    const trimmedQuery = nextQuery.trim();
+    if (trimmedQuery) {
+      params.set("q", trimmedQuery);
+    }
+    if (nextPage > 1) {
+      params.set("page", String(nextPage));
+    }
+    return params;
+  };
 
-  const load = async (nextPage = page, nextQuery = query) => {
+  const fetchPage = async (nextPage: number, nextQuery: string) => {
+    const params = new URLSearchParams({
+      q: nextQuery,
+      page: String(nextPage),
+      page_size: String(pageSize)
+    });
+    const res = await apiClient.listWorkOrders(params);
+    return res.items;
+  };
+
+  const loadInitial = async (nextQuery: string, untilPage = 1) => {
     setLoading(true);
+    setLoadingMore(false);
     try {
-      const params = new URLSearchParams({
-        q: nextQuery,
-        page: String(nextPage),
-        page_size: String(pageSize)
-      });
-      const res = await apiClient.listWorkOrders(params);
-      setItems(res.items);
+      const allItems: WorkOrderListItem[] = [];
+      let loadedPage = 0;
+      let nextHasMore = true;
+      for (let p = 1; p <= untilPage; p += 1) {
+        const pageItems = await fetchPage(p, nextQuery);
+        allItems.push(...pageItems);
+        loadedPage = p;
+        nextHasMore = pageItems.length === pageSize;
+        if (!nextHasMore) break;
+      }
+      setItems(allItems);
+      setPage(Math.max(loadedPage, 1));
+      setHasMore(nextHasMore);
     } catch (err) {
       alerts.error("Failed to load work orders", err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -802,11 +837,49 @@ export default function WorkOrdersPage() {
     }
   };
 
+  const loadMore = async () => {
+    if (loading || loadingMore || !hasMore) return;
+    const nextPage = page + 1;
+    setLoadingMore(true);
+    try {
+      const pageItems = await fetchPage(nextPage, query);
+      setItems((prev) => {
+        const seen = new Set(prev.map((item) => item.reference_id));
+        const uniqueAdds = pageItems.filter((item) => !seen.has(item.reference_id));
+        return [...prev, ...uniqueAdds];
+      });
+      setPage(nextPage);
+      setHasMore(pageItems.length === pageSize);
+      setSearchParams(toListSearch(nextPage, query));
+    } catch (err) {
+      alerts.error("Failed to load more work orders", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
     if (!hasPermission("work_orders:read")) return;
-    load(1, "");
+    loadInitial(initialQuery, initialPage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPermission]);
+
+  useEffect(() => {
+    if (loading || loadingMore || !hasMore || items.length === 0) return;
+    const target = loadMoreRef.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first?.isIntersecting) {
+          void loadMore();
+        }
+      },
+      { rootMargin: "300px 0px" }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, items.length, loading, loadingMore, page, query]);
 
   useEffect(() => {
     if (!createOpen || !canCreateWorkOrders) return;
@@ -1207,9 +1280,10 @@ export default function WorkOrdersPage() {
                     alerts.success(`Work order #${created.reference_id} created`);
                     setCreateOpen(false);
                     resetCreateForm();
-                    await load(1, query);
-                    setPage(1);
-                    navigate(`/work-orders/${created.reference_id}`);
+                    await loadInitial(query, 1);
+                    const listSearch = toListSearch(1, query).toString();
+                    setSearchParams(toListSearch(1, query));
+                    navigate(`/work-orders/${created.reference_id}${listSearch ? `?${listSearch}` : ""}`);
                   } catch (err) {
                     alerts.error("Failed to create work order", err instanceof Error ? err.message : "Request failed");
                   } finally {
@@ -1231,8 +1305,8 @@ export default function WorkOrdersPage() {
             e.preventDefault();
             const nextQuery = searchInput.trim();
             setQuery(nextQuery);
-            setPage(1);
-            await load(1, nextQuery);
+            setSearchParams(toListSearch(1, nextQuery));
+            await loadInitial(nextQuery, 1);
           }}
         >
           <Input
@@ -1262,7 +1336,7 @@ export default function WorkOrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (
+            {loading && items.length === 0 && (
               <tr>
                 <Td colSpan={canViewSensitive ? 7 : 6}>Loading work orders...</Td>
               </tr>
@@ -1272,68 +1346,43 @@ export default function WorkOrdersPage() {
                 <Td colSpan={canViewSensitive ? 7 : 6}>No work orders found.</Td>
               </tr>
             )}
-            {!loading &&
-              items.map((item) => (
-                <tr key={item.reference_id}>
-                  <Td>{item.reference_id}</Td>
-                  {canViewSensitive && (
-                    <Td>
-                      <div className="space-y-1">
-                        <p>{item.customer_name ?? "-"}</p>
-                        {item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
-                      </div>
-                    </Td>
-                  )}
-                  <Td>
-                    <Badge className={statusClass(item.status)}>{item.status}</Badge>
-                  </Td>
-                  <Td>{item.job_type}</Td>
+            {items.map((item) => (
+              <tr key={item.reference_id}>
+                <Td>{item.reference_id}</Td>
+                {canViewSensitive && (
                   <Td>
                     <div className="space-y-1">
-                      <p>{item.item_name ?? "-"}</p>
-                      {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
+                      <p>{item.customer_name ?? "-"}</p>
+                      {item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
                     </div>
                   </Td>
-                  <Td>{formatDateTime(item.created_at)}</Td>
-                  <Td>
-                    <Button variant="outline" size="sm" asChild>
-                      <Link to={`/work-orders/${item.reference_id}`}>View</Link>
-                    </Button>
-                  </Td>
-                </tr>
-              ))}
+                )}
+                <Td>
+                  <Badge className={statusClass(item.status)}>{item.status}</Badge>
+                </Td>
+                <Td>{item.job_type}</Td>
+                <Td>
+                  <div className="space-y-1">
+                    <p>{item.item_name ?? "-"}</p>
+                    {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
+                  </div>
+                </Td>
+                <Td>{formatDateTime(item.created_at)}</Td>
+                <Td>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/work-orders/${item.reference_id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}>View</Link>
+                  </Button>
+                </Td>
+              </tr>
+            ))}
           </tbody>
         </Table>
 
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">Page {page}</p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1 || loading}
-              onClick={async () => {
-                const next = page - 1;
-                setPage(next);
-                await load(next, query);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={loading || items.length < pageSize}
-              onClick={async () => {
-                const next = page + 1;
-                setPage(next);
-                await load(next, query);
-              }}
-            >
-              Next
-            </Button>
-          </div>
+        <div className="flex min-h-6 items-center justify-center">
+          {loadingMore && <p className="text-xs text-muted-foreground">Loading more work orders...</p>}
+          {!loading && !loadingMore && !hasMore && items.length > 0 && <p className="text-xs text-muted-foreground">End of results.</p>}
         </div>
+        <div ref={loadMoreRef} className="h-1 w-full" />
       </div>
     </section>
   );
