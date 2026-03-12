@@ -102,6 +102,71 @@ function labeledBoxHeight(doc: jsPDF, lines: string | string[], minHeight: numbe
   return Math.max(minHeight, titleToTextTop + textHeight + bottomPadding);
 }
 
+function lineHeightMm(doc: jsPDF) {
+  return (doc.getFontSize() * doc.getLineHeightFactor()) / doc.internal.scaleFactor;
+}
+
+type PaginatedBoxOptions = {
+  title: string;
+  lines: string[];
+  startY: number;
+  minHeight: number;
+  pageBottomY: number;
+  nextPageTopY: number;
+  onAddPage: () => void;
+};
+
+function drawPaginatedLabeledBox(doc: jsPDF, options: PaginatedBoxOptions) {
+  const titleToTextTop = 12;
+  const bottomPadding = 4;
+  const gapAfter = 7;
+  const lineHeight = lineHeightMm(doc);
+
+  let y = options.startY;
+  let remaining = options.lines.length ? options.lines : ["-"];
+  let firstChunk = true;
+
+  while (remaining.length > 0) {
+    const availableHeight = options.pageBottomY - y;
+    if (availableHeight < options.minHeight) {
+      options.onAddPage();
+      y = options.nextPageTopY;
+      firstChunk = false;
+      continue;
+    }
+
+    const allRemainingHeight = labeledBoxHeight(doc, remaining, options.minHeight);
+    let boxHeight = Math.min(allRemainingHeight, availableHeight);
+    if (allRemainingHeight <= availableHeight) {
+      boxHeight = Math.max(options.minHeight, allRemainingHeight);
+    }
+
+    const contentHeight = boxHeight - titleToTextTop - bottomPadding;
+    const linesToDraw = Math.max(1, Math.floor(contentHeight / lineHeight));
+    const chunk = remaining.slice(0, linesToDraw);
+    remaining = remaining.slice(linesToDraw);
+
+    doc.setLineWidth(0.3);
+    doc.rect(14, y, 182, boxHeight);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text(firstChunk ? options.title : `${options.title} (cont.)`, 16, y + 6);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(chunk, 16, y + 12);
+
+    if (remaining.length === 0) {
+      return y + boxHeight + gapAfter;
+    }
+
+    options.onAddPage();
+    y = options.nextPageTopY;
+    firstChunk = false;
+  }
+
+  return y + gapAfter;
+}
+
 function accessories(item: WorkOrderDetail) {
   return [
     `Remote Control: ${item.remote_control_qty}`,
@@ -213,36 +278,43 @@ export function generateDropOffFormPdf(item: WorkOrderDetail) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   drawHeader(doc, "Customer Drop Off Form");
 
-  const y = drawCommon(doc, item, 44);
+  const pageBottomY = pageHeight(doc) - 10;
+  const nextPageTopY = 44;
+  let y = drawCommon(doc, item, 44);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   const problemLines = linesForWidth(doc, item.problem_description, 176);
   const workDoneLines = linesForWidth(doc, item.work_done, 176);
-  const problemBoxHeight = labeledBoxHeight(doc, problemLines, 58);
-  const workDoneBoxHeight = labeledBoxHeight(doc, workDoneLines, 58);
+  const addDropoffPage = () => {
+    doc.addPage();
+    drawHeader(doc, "Customer Drop Off Form");
+  };
 
-  doc.setLineWidth(0.3);
-  doc.rect(14, y, 182, problemBoxHeight);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Problem Description", 16, y + 6);
+  y = drawPaginatedLabeledBox(doc, {
+    title: "Problem Description",
+    lines: problemLines,
+    startY: y,
+    minHeight: 58,
+    pageBottomY,
+    nextPageTopY,
+    onAddPage: addDropoffPage
+  });
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(problemLines, 16, y + 12);
-
-  const y2 = y + problemBoxHeight + 7;
-  doc.rect(14, y2, 182, workDoneBoxHeight);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Work Done / Notes", 16, y2 + 6);
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(workDoneLines, 16, y2 + 12);
+  y = drawPaginatedLabeledBox(doc, {
+    title: "Work Done / Notes",
+    lines: workDoneLines,
+    startY: y,
+    minHeight: 58,
+    pageBottomY,
+    nextPageTopY,
+    onAddPage: addDropoffPage
+  });
 
   doc.setFontSize(9);
+  if (y > pageBottomY) {
+    addDropoffPage();
+  }
   doc.text(`Generated: ${new Date().toLocaleString("en-CA")}`, 14, 290);
 
   doc.save(`drop-off-form-${item.reference_id}.pdf`);
