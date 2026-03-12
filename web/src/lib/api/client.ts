@@ -30,13 +30,36 @@ export class APIClient {
     this.csrfToken = token;
   }
 
+  private getCookieValue(name: string): string | null {
+    if (typeof document === "undefined") return null;
+    const prefix = `${name}=`;
+    for (const part of document.cookie.split(";")) {
+      const cookie = part.trim();
+      if (!cookie.startsWith(prefix)) continue;
+      const raw = cookie.slice(prefix.length);
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    }
+    return null;
+  }
+
+  private getCSRFToken(): string | null {
+    const cookieToken = this.getCookieValue("csrf_token");
+    if (cookieToken) {
+      this.csrfToken = cookieToken;
+      return cookieToken;
+    }
+    return this.csrfToken;
+  }
+
   private async request<T>(path: string, init?: RequestInit, allowRefreshRetry = true): Promise<T> {
     const headers = new Headers(init?.headers);
     headers.set("Content-Type", "application/json");
     if (this.accessToken) headers.set("Authorization", `Bearer ${this.accessToken}`);
-    const csrf =
-      this.csrfToken ??
-      (typeof document !== "undefined" ? document.cookie.split(";").find((c) => c.trim().startsWith("csrf_token="))?.split("=")[1] : "");
+    const csrf = this.getCSRFToken();
     if (csrf && init?.method && ["POST", "PATCH", "DELETE"].includes(init.method.toUpperCase())) {
       headers.set("X-CSRF-Token", csrf);
     }
@@ -51,6 +74,15 @@ export class APIClient {
       const body = await res.json().catch(() => ({}));
       const errMessage = typeof body.error === "string" ? body.error : "";
       const isInvalidToken = res.status === 401 && errMessage === "invalid token";
+      const isInvalidCSRF = res.status === 403 && errMessage === "invalid csrf token";
+
+      if (isInvalidCSRF) {
+        const latestCSRF = this.getCookieValue("csrf_token");
+        if (allowRefreshRetry && latestCSRF) {
+          this.csrfToken = latestCSRF;
+          return this.request<T>(path, init, false);
+        }
+      }
 
       if (allowRefreshRetry && isInvalidToken && path !== "/auth/refresh" && path !== "/auth/login") {
         const didRefresh = await this.refreshAccessToken();
