@@ -1,0 +1,33 @@
+{
+  "topBarItems": [
+    {
+      "text": "FREE PICKUP & DELIVERY in Toronto & GTA"
+    },
+    {
+      "text": "Call/Text: (416) 923-3777 · (905) 235-2226"
+    }
+  ],
+  "menuItems": [
+    { "label": "Home", "href": "/" },
+    { "label": "Audio", "href": "/audio-equipment-repair" },
+    { "label": "Computer", "href": "/desktop-and-laptop-repair-services" },
+    { "label": "TV", "href": "/tv-repair" },
+    { "label": "Turntables", "href": "/turn-table-servicing" },
+    { "label": "For Sale", "href": "/items-for-sale" },
+    { "label": "Free Pickup", "href": "/request-a-pickup" },
+    { "label": "Testimonials", "href": "/testimonials1" },
+    { "label": "Contact", "href": "/contact" }
+  ],
+  "headerActions": {
+    "primary": {
+      "enabled": true,
+      "label": "Get a Quote",
+      "href": "/contact"
+    },
+    "secondary": {
+      "enabled": true,
+      "label": "View Inventory",
+      "href": "/items-for-sale"
+    }
+  }
+}

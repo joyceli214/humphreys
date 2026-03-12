@@ -13,12 +13,12 @@ export default {
     },
     extend: {
       colors: {
-        text: '#050316',
-        background: '#fffef3',
-        primary: '#312ac6',
-        secondary: '#a2bdfb',
-        accent: '#ffad42',
-        'muted-foreground': '#4d4a70',
+        text: '#451A03',
+        background: '#FEF3C7',
+        primary: '#78350F',
+        secondary: '#D6B78A',
+        accent: '#FBBF24',
+        'muted-foreground': '#7C5A34',
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -29,8 +29,8 @@ export default {
         }
       },
       fontFamily: {
-        heading: ['Prata', 'serif'],
-        body: ['Geist Sans', 'system-ui', 'sans-serif']
+        heading: ['Abril Fatface', 'serif'],
+        body: ['Merriweather', 'Georgia', 'serif']
       },
       fontSize: {
         sm: '0.750rem',
@@ -51,7 +51,7 @@ export default {
         sm: 'calc(var(--radius) - 4px)'
       },
       boxShadow: {
-        soft: '0 18px 60px rgba(49, 42, 198, 0.15)'
+        soft: '0 20px 56px rgba(120, 53, 15, 0.22)'
       }
     }
   },

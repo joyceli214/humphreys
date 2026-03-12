@@ -1,11 +1,17 @@
 ---
 import '../styles/global.css';
 import { buttonVariants } from '@/components/ui/button';
+import { getEntry } from 'astro:content';
 
 const { title = "Humphrey's Audio & Vintage Audio Repair", description = '' } = Astro.props;
 const pathname = Astro.url.pathname;
-
-const navItems = [
+const siteSettings = await getEntry('settings', 'site');
+const topBarItems =
+  siteSettings?.data.topBarItems?.map((item) => item.text.trim()).filter(Boolean) ?? [];
+const tickerItems = topBarItems.length > 0
+  ? topBarItems
+  : ['FREE PICKUP & DELIVERY in Toronto & GTA', 'Call/Text: (416) 923-3777 · (905) 235-2226'];
+const defaultMenuItems = [
   ['/', 'Home'],
   ['/audio-equipment-repair', 'Audio'],
   ['/desktop-and-laptop-repair-services', 'Computer'],
@@ -16,6 +22,19 @@ const navItems = [
   ['/testimonials1', 'Testimonials'],
   ['/contact', 'Contact']
 ];
+const menuItems = siteSettings?.data.menuItems?.length
+  ? siteSettings.data.menuItems.map((item) => [item.href, item.label] as const)
+  : defaultMenuItems;
+const primaryAction = siteSettings?.data.headerActions?.primary ?? {
+  enabled: true,
+  label: 'Get a Quote',
+  href: '/contact'
+};
+const secondaryAction = siteSettings?.data.headerActions?.secondary ?? {
+  enabled: true,
+  label: 'View Inventory',
+  href: '/items-for-sale'
+};
 ---
 <!doctype html>
 <html lang="en">
@@ -27,58 +46,89 @@ const navItems = [
   </head>
   <body>
     <div class="site-shell">
-      <div class="grain-overlay absolute inset-0 -z-10 opacity-30"></div>
+      <div class="grain-overlay absolute inset-0 -z-10 opacity-15"></div>
 
-      <header class="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl">
-        <div class="container py-3">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-white/70 px-4 py-2 text-sm">
-            <p class="font-bold text-primary">FREE PICKUP & DELIVERY in Toronto & GTA</p>
-            <p class="font-bold text-text">Call/Text: (416) 923-3777 · (905) 235-2226</p>
-          </div>
-
-          <div class="flex items-center justify-between gap-4">
-            <a href="/" class="no-underline">
-              <p class="font-heading text-2xl leading-none text-text md:text-3xl">Humphrey's Audio Repair</p>
-              <p class="text-sm text-text/70">Customer service since 1955</p>
-            </a>
-
-            <div class="hidden items-center gap-3 md:flex">
-              <a class={buttonVariants({ variant: 'secondary', size: 'sm' })} href="/items-for-sale">View Inventory</a>
-              <a class={buttonVariants({ variant: 'default', size: 'sm' })} href="/contact">Get a Quote</a>
+      <header class="sticky top-4 z-50 px-4 md:px-6 lg:px-8">
+        <div class="glass-panel mx-auto max-w-[1320px] overflow-hidden rounded-3xl shadow-soft">
+          <div class="top-rotator-strip border-b border-amber-900/20 bg-amber-900 py-2 text-amber-50">
+            <div class="container">
+              <div class="flex items-center justify-between gap-3">
+                <button id="top-rotator-prev" class="top-rotator-arrow" type="button" aria-label="Previous top bar message">
+                  &#8592;
+                </button>
+                <p
+                  id="top-rotator-text"
+                  class="top-rotator-text flex-1 text-center text-xs font-bold uppercase tracking-[0.09em] text-amber-50 md:text-sm"
+                  data-items={JSON.stringify(tickerItems)}
+                >
+                  {tickerItems[0]}
+                </p>
+                <button id="top-rotator-next" class="top-rotator-arrow" type="button" aria-label="Next top bar message">
+                  &#8594;
+                </button>
+              </div>
             </div>
           </div>
 
-          <nav class="mt-4 flex flex-wrap gap-2 pb-1">
-            {navItems.map(([href, label]) => {
-              const active = pathname === href;
-              return (
-                <a
-                  href={href}
-                  class:list={[
-                    'rounded-full border px-4 py-2 text-sm font-bold no-underline transition-colors',
-                    active
-                      ? 'border-primary bg-primary text-background'
-                      : 'border-border bg-white/85 text-text hover:border-primary/40 hover:bg-secondary/40'
-                  ]}
-                >
-                  {label}
-                </a>
-              );
-            })}
-          </nav>
+          <div class="container py-4">
+            <div class="grid gap-4 lg:grid-cols-[auto_1fr_auto] lg:items-center">
+              <a href="/" class="shrink-0 no-underline">
+                <p class="font-heading text-[1.55rem] leading-none text-amber-950 md:text-[1.95rem]">Humphrey&apos;s</p>
+                <p class="font-body text-sm leading-tight text-amber-900 md:text-base">Audio & Vintage Audio Repair</p>
+                <p class="mt-1 font-heading text-xs italic text-amber-700">Since 1955</p>
+              </a>
+
+              <nav class="flex flex-wrap justify-start gap-1.5 lg:justify-center">
+                {menuItems.map(([href, label]) => {
+                  const active = pathname === href;
+                  return (
+                    <a
+                      href={href}
+                      class:list={[
+                        'rounded-full px-3 py-2 text-sm font-bold no-underline transition-colors md:px-4 md:text-base',
+                        active
+                          ? 'bg-accent text-amber-950'
+                          : 'text-amber-900 hover:bg-amber-200/70 hover:text-amber-950'
+                      ]}
+                    >
+                      {label}
+                    </a>
+                  );
+                })}
+              </nav>
+
+              <div class="flex items-center gap-2 lg:justify-end">
+                {secondaryAction.enabled && (
+                  <a class={buttonVariants({ variant: 'outline', size: 'sm' })} href={secondaryAction.href}>
+                    {secondaryAction.label}
+                  </a>
+                )}
+                {primaryAction.enabled && (
+                  <a class={buttonVariants({ variant: 'default', size: 'sm' })} href={primaryAction.href}>
+                    {primaryAction.label}
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
-      <main class="container py-7 md:py-9">
+      <main class="container pb-12 pt-8 md:pt-10">
         <slot />
       </main>
 
-      <footer class="border-t border-border/70 bg-white/75">
+      <footer class="mt-10 border-t border-amber-900/20 bg-amber-100/60">
         <div class="container py-10">
           <div class="grid gap-8 md:grid-cols-3">
             <div>
               <h3 class="mb-2 text-2xl">Humphrey's Audio & Vintage Audio Repair</h3>
-              <p class="text-text/80">Trusted repair, restoration, and setup services for Toronto, GTA, and Newmarket customers.</p>
+              <p class="text-amber-900/90">
+                Trusted repair, restoration, and setup services for Toronto, GTA, and Newmarket customers.
+              </p>
+              <div class="mt-4 inline-flex rounded-full border border-amber-900/30 bg-accent/30 px-4 py-1 text-xs font-bold uppercase tracking-[0.08em] text-amber-950">
+                Family-Owned Since 1955
+              </div>
             </div>
             <div>
               <h4 class="mb-2 font-heading text-xl">Contact</h4>
@@ -91,12 +141,77 @@ const navItems = [
             </div>
             <div class="md:text-right">
               <h4 class="mb-2 font-heading text-xl">Need Help Fast?</h4>
-              <p class="mb-4 text-text/80">Send your make, model, and issue details. We will respond with the next step.</p>
+              <p class="mb-4 text-amber-900/90">Share make, model, and issue details. We will respond with the next step.</p>
               <a class={buttonVariants({ variant: 'default', size: 'sm' })} href="/request-a-pickup">Request Pickup</a>
             </div>
           </div>
         </div>
       </footer>
     </div>
+    <script>
+      (() => {
+        const el = document.getElementById('top-rotator-text');
+        const prev = document.getElementById('top-rotator-prev');
+        const next = document.getElementById('top-rotator-next');
+        if (!el) return;
+
+        const raw = el.getAttribute('data-items');
+        if (!raw) return;
+
+        let items = [];
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            items = parsed.filter((value) => typeof value === 'string' && value.trim().length > 0);
+          }
+        } catch {
+          return;
+        }
+
+        if (items.length <= 1) {
+          if (prev) prev.style.visibility = 'hidden';
+          if (next) next.style.visibility = 'hidden';
+          return;
+        }
+
+        let index = 0;
+        const stepMs = 5000;
+        let timerId;
+
+        const render = (direction) => {
+          el.classList.remove('slide-left', 'slide-right');
+          void el.offsetWidth;
+          el.textContent = items[index];
+          el.classList.add(direction === 'left' ? 'slide-left' : 'slide-right');
+        };
+
+        const nextItem = () => {
+          index = (index + 1) % items.length;
+          render('right');
+        };
+
+        const prevItem = () => {
+          index = (index - 1 + items.length) % items.length;
+          render('left');
+        };
+
+        const restartAuto = () => {
+          if (timerId) window.clearInterval(timerId);
+          timerId = window.setInterval(nextItem, stepMs);
+        };
+
+        prev?.addEventListener('click', () => {
+          prevItem();
+          restartAuto();
+        });
+
+        next?.addEventListener('click', () => {
+          nextItem();
+          restartAuto();
+        });
+
+        restartAuto();
+      })();
+    </script>
   </body>
 </html>

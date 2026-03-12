@@ -9,87 +9,92 @@ if (!page) throw new Error('Missing home page content entry');
 const { Content } = await render(page);
 ---
 <BaseLayout title={page.data.title} description={page.data.description}>
-  <section class="grid items-center gap-6 lg:grid-cols-2">
+  <section class="grid items-center gap-7 lg:grid-cols-[1.05fr_0.95fr]">
     <div class="space-y-6">
-      <p class="inline-flex rounded-full border border-border bg-secondary/35 px-4 py-1 text-sm font-bold text-text">
+      <p class="inline-flex rounded-full border border-primary/30 bg-primary/10 px-4 py-1 text-xs font-bold uppercase tracking-[0.08em] text-amber-900 md:text-sm">
         Vintage Audio, TV, and Computer Repair
       </p>
       <h1 class="max-w-xl text-4xl leading-tight md:text-5xl">{page.data.heading ?? page.data.title}</h1>
-      <p class="max-w-xl text-xl text-text/80">{page.data.description}</p>
+      <p class="max-w-xl text-lg text-amber-900/90 md:text-xl">Professional diagnostics, honest repair guidance, and careful restoration for classic and modern equipment.</p>
       <div class="flex flex-wrap gap-3">
         <a href="/request-a-pickup" class={buttonVariants({ variant: 'default', size: 'lg' })}>Request Free Pickup</a>
-        <a href="/items-for-sale" class={buttonVariants({ variant: 'secondary', size: 'lg' })}>Browse Items for Sale</a>
+        <a href="/items-for-sale" class={buttonVariants({ variant: 'outline', size: 'lg' })}>Browse Restored Gear</a>
       </div>
       <div class="grid gap-3 sm:grid-cols-3">
-        <div class="rounded-2xl border border-border bg-white/80 p-4">
-          <p class="text-sm text-text/70">Toronto & GTA</p>
-          <p class="text-2xl font-bold">(416) 923-3777</p>
+        <div class="rounded-2xl border border-amber-900/20 bg-amber-50/85 p-4">
+          <p class="text-xs uppercase tracking-[0.08em] text-amber-700">Toronto & GTA</p>
+          <p class="text-2xl font-bold text-amber-950">(416) 923-3777</p>
         </div>
-        <div class="rounded-2xl border border-border bg-white/80 p-4">
-          <p class="text-sm text-text/70">Newmarket</p>
-          <p class="text-2xl font-bold">(905) 235-2226</p>
+        <div class="rounded-2xl border border-amber-900/20 bg-amber-50/85 p-4">
+          <p class="text-xs uppercase tracking-[0.08em] text-amber-700">Newmarket</p>
+          <p class="text-2xl font-bold text-amber-950">(905) 235-2226</p>
         </div>
-        <div class="rounded-2xl border border-border bg-white/80 p-4">
-          <p class="text-sm text-text/70">Service Legacy</p>
-          <p class="text-2xl font-bold">Since 1955</p>
+        <div class="rounded-2xl border border-amber-900/20 bg-amber-50/85 p-4">
+          <p class="text-xs uppercase tracking-[0.08em] text-amber-700">Service Legacy</p>
+          <p class="text-2xl font-bold text-amber-950">Since 1955</p>
         </div>
       </div>
     </div>
 
     <div class="relative">
-      <div class="absolute -inset-8 -z-10 rounded-[2.3rem] bg-primary/15 blur-2xl"></div>
+      <div class="absolute -inset-4 -z-10 rounded-[2.4rem] bg-primary/20 blur-3xl"></div>
       <img
-        class="h-[470px] w-full rounded-[2rem] border border-border object-cover shadow-soft"
+        class="h-[500px] w-full rounded-[2rem] border border-amber-900/20 object-cover shadow-soft"
         src="https://lirp.cdn-website.com/f68022c3/dms3rep/multi/opt/20230328_124107-1920w.jpg"
-        alt="Vintage audio equipment in repair shop"
+        alt="Humphrey's repair workbench with vintage audio equipment"
         loading="eager"
       />
+      <div class="absolute bottom-5 left-5 right-5 rounded-2xl border border-amber-100/40 bg-amber-950/70 p-4 backdrop-blur-sm">
+        <p class="text-xs uppercase tracking-[0.08em] text-amber-200">Trusted by local customers</p>
+        <p class="mt-1 text-lg font-bold text-amber-50">Fast diagnostics and clear repair options before any major work begins.</p>
+      </div>
     </div>
   </section>
 
   <section class="mt-8 grid gap-4 md:grid-cols-3">
-    <Card className="bg-white/90">
+    <Card className="border-amber-900/20 bg-amber-50/80 shadow-soft transition-shadow hover:shadow-2xl">
       <CardHeader>
         <CardTitle>Audio Specialists</CardTitle>
         <CardDescription>Receivers, amplifiers, turntables, cassette decks, and reel-to-reel systems.</CardDescription>
       </CardHeader>
     </Card>
-    <Card className="bg-white/90">
+    <Card className="border-amber-900/20 bg-amber-50/80 shadow-soft transition-shadow hover:shadow-2xl">
       <CardHeader>
-        <CardTitle>In-Home Convenience</CardTitle>
-        <CardDescription>Free pickup and delivery available in Toronto and the GTA for qualifying jobs.</CardDescription>
+        <CardTitle>Pickup Convenience</CardTitle>
+        <CardDescription>Free pickup and delivery in Toronto and the GTA for qualifying jobs.</CardDescription>
       </CardHeader>
     </Card>
-    <Card className="bg-white/90">
+    <Card className="border-amber-900/20 bg-amber-50/80 shadow-soft transition-shadow hover:shadow-2xl">
       <CardHeader>
-        <CardTitle>Trusted Team</CardTitle>
-        <CardDescription>Family-owned operation with decades of practical troubleshooting and repair experience.</CardDescription>
+        <CardTitle>Restoration Expertise</CardTitle>
+        <CardDescription>Practical troubleshooting and restoration experience across generations of equipment.</CardDescription>
       </CardHeader>
     </Card>
   </section>
 
   <section class="mt-8 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-    <article>
+    <article class="rounded-3xl border border-amber-900/20 bg-amber-50/80 p-6 md:p-8">
       <h2 class="text-3xl">Full-Service Repair and Restoration</h2>
       <div class="marketing-prose mt-3">
         <Content />
       </div>
     </article>
 
-    <Card className="h-fit bg-text text-background">
+    <Card className="h-fit border-amber-900/15 bg-gradient-to-br from-amber-900 via-amber-900 to-amber-800 text-amber-50">
       <CardHeader>
-        <CardTitle className="text-background">Need a Fast Repair Answer?</CardTitle>
-        <CardDescription className="text-background/80">
-          Send the make/model and issue details. We will guide you on repair vs replacement and next steps.
+        <CardTitle className="text-amber-50">Need a Fast Repair Answer?</CardTitle>
+        <CardDescription className="text-amber-100/85">
+          Share make, model, and issue details. We will help you plan the best next step.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div class="space-y-3 text-sm">
+        <div class="space-y-3 text-sm text-amber-100">
           <p>Email: humphreys.repair@rogers.com</p>
           <p>Toronto & GTA: (416) 923-3777</p>
           <p>Newmarket: (905) 235-2226</p>
+          <p>Address: 16610 Bayview Ave, Unit #7, Newmarket</p>
         </div>
-        <a href="/contact" class={`${buttonVariants({ variant: 'secondary', size: 'default' })} mt-6`}>Contact the Team</a>
+        <a href="/contact" class={`${buttonVariants({ variant: 'default', size: 'default' })} mt-6`}>Contact the Team</a>
       </CardContent>
     </Card>
   </section>

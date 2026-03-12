@@ -1,6 +1,7 @@
-@import '@fontsource/prata';
-@import '@fontsource/geist-sans/400.css';
-@import '@fontsource/geist-sans/700.css';
+@import '@fontsource/abril-fatface';
+@import '@fontsource/merriweather/300.css';
+@import '@fontsource/merriweather/400.css';
+@import '@fontsource/merriweather/700.css';
 
 @tailwind base;
 @tailwind components;
@@ -8,14 +9,14 @@
 
 @layer base {
   :root {
-    --background: 58 100% 98%;
-    --foreground: 249 66% 5%;
-    --card: 0 0% 100%;
-    --card-foreground: 249 66% 5%;
-    --border: 223 87% 88%;
-    --input: 223 87% 88%;
-    --ring: 240 65% 47%;
-    --radius: 1.1rem;
+    --background: 44 86% 90%;
+    --foreground: 24 57% 18%;
+    --card: 41 74% 94%;
+    --card-foreground: 24 57% 18%;
+    --border: 35 46% 70%;
+    --input: 35 46% 70%;
+    --ring: 31 75% 35%;
+    --radius: 1rem;
   }
 
   * {
@@ -30,20 +31,21 @@
   body {
     @apply font-body text-base leading-relaxed;
     background-image:
-      radial-gradient(circle at 8% 8%, rgb(255 173 66 / 0.22), transparent 24%),
-      radial-gradient(circle at 88% 20%, rgb(162 189 251 / 0.35), transparent 28%),
-      linear-gradient(180deg, #fffef3 0%, #f7f8ff 65%, #fffef3 100%);
+      radial-gradient(circle at 10% 8%, rgb(251 191 36 / 0.2), transparent 27%),
+      radial-gradient(circle at 88% 18%, rgb(120 53 15 / 0.12), transparent 24%),
+      linear-gradient(175deg, #fff8e6 0%, #f7e7c7 52%, #f4dfb7 100%);
+    min-height: 100vh;
   }
 
   h1,
   h2,
   h3,
   h4 {
-    @apply font-heading tracking-tight text-text;
+    @apply font-heading tracking-normal text-amber-950;
   }
 
   a {
-    @apply text-primary underline-offset-4 transition-colors hover:text-primary/80 hover:underline;
+    @apply text-amber-900 underline-offset-4 transition-colors hover:text-amber-700 hover:underline;
   }
 }
 
@@ -59,37 +61,95 @@
   }
 
   .site-shell::before {
-    @apply -left-40 top-20 h-96 w-96 bg-secondary/40;
+    @apply -left-20 top-16 h-72 w-72 bg-accent/25;
   }
 
   .site-shell::after {
-    @apply -right-28 top-[22rem] h-80 w-80 bg-accent/30;
+    @apply -right-24 top-[21rem] h-80 w-80 bg-primary/20;
   }
 
   .grain-overlay {
-    background-image: radial-gradient(rgb(5 3 22 / 0.05) 1px, transparent 0);
-    background-size: 20px 20px;
+    background-image: radial-gradient(rgb(120 53 15 / 0.14) 0.7px, transparent 0);
+    background-size: 14px 14px;
+  }
+
+  .glass-panel {
+    @apply border border-amber-900/15 bg-amber-50/90 backdrop-blur-sm;
   }
 
   .marketing-prose {
-    @apply text-base leading-7 text-text/85;
+    @apply text-base leading-7 text-amber-950/90;
   }
 
   .marketing-prose h1,
   .marketing-prose h2,
   .marketing-prose h3 {
-    @apply mt-5 font-heading text-2xl leading-tight text-text;
+    @apply mt-5 font-heading text-2xl leading-tight text-amber-950;
   }
 
   .marketing-prose p {
-    @apply my-2;
+    @apply my-3;
   }
 
   .marketing-prose ul {
-    @apply my-2 list-disc pl-5;
+    @apply my-3 list-disc space-y-1 pl-5;
   }
 
   .marketing-prose li {
-    @apply my-1 pl-1;
+    @apply pl-1;
+  }
+
+  .top-rotator-strip {
+    @apply overflow-hidden;
+  }
+
+  .top-rotator-text {
+    white-space: nowrap;
+  }
+
+  .top-rotator-arrow {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-100/20 text-base font-bold text-amber-50 transition-colors hover:bg-amber-100/30;
+    line-height: 1;
+  }
+
+  .slide-left {
+    animation: rotate-left 420ms ease;
+  }
+
+  .slide-right {
+    animation: rotate-right 420ms ease;
+  }
+}
+
+@keyframes rotate-left {
+  from {
+    opacity: 0.35;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes rotate-right {
+  from {
+    opacity: 0.35;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
   }
 }
