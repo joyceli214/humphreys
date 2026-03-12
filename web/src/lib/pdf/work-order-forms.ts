@@ -96,7 +96,9 @@ function linesForWidth(doc: jsPDF, value: string | null | undefined, width: numb
 function labeledBoxHeight(doc: jsPDF, lines: string | string[], minHeight: number) {
   const titleToTextTop = 12;
   const bottomPadding = 4;
-  const textHeight = doc.getTextDimensions(Array.isArray(lines) ? lines.join("\n") : lines).h;
+  const lineCount = Array.isArray(lines) ? Math.max(lines.length, 1) : Math.max(String(lines).split(/\r?\n/).length, 1);
+  const lineHeightMm = (doc.getFontSize() * doc.getLineHeightFactor()) / doc.internal.scaleFactor;
+  const textHeight = lineCount * lineHeightMm;
   return Math.max(minHeight, titleToTextTop + textHeight + bottomPadding);
 }
 
