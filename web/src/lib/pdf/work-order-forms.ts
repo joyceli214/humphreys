@@ -89,6 +89,17 @@ function pageHeight(doc: jsPDF) {
   return doc.internal.pageSize.getHeight();
 }
 
+function linesForWidth(doc: jsPDF, value: string | null | undefined, width: number) {
+  return doc.splitTextToSize(text(value), width);
+}
+
+function labeledBoxHeight(doc: jsPDF, lines: string | string[], minHeight: number) {
+  const titleToTextTop = 12;
+  const bottomPadding = 4;
+  const textHeight = doc.getTextDimensions(Array.isArray(lines) ? lines.join("\n") : lines).h;
+  return Math.max(minHeight, titleToTextTop + textHeight + bottomPadding);
+}
+
 function accessories(item: WorkOrderDetail) {
   return [
     `Remote Control: ${item.remote_control_qty}`,
@@ -202,27 +213,32 @@ export function generateDropOffFormPdf(item: WorkOrderDetail) {
 
   const y = drawCommon(doc, item, 44);
 
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  const problemLines = linesForWidth(doc, item.problem_description, 176);
+  const workDoneLines = linesForWidth(doc, item.work_done, 176);
+  const problemBoxHeight = labeledBoxHeight(doc, problemLines, 58);
+  const workDoneBoxHeight = labeledBoxHeight(doc, workDoneLines, 58);
+
   doc.setLineWidth(0.3);
-  doc.rect(14, y, 182, 58);
+  doc.rect(14, y, 182, problemBoxHeight);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.text("Problem Description", 16, y + 6);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  const problem = text(item.problem_description);
-  doc.text(doc.splitTextToSize(problem, 176), 16, y + 12);
+  doc.text(problemLines, 16, y + 12);
 
-  const y2 = y + 65;
-  doc.rect(14, y2, 182, 58);
+  const y2 = y + problemBoxHeight + 7;
+  doc.rect(14, y2, 182, workDoneBoxHeight);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.text("Work Done / Notes", 16, y2 + 6);
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  const workDone = text(item.work_done);
-  doc.text(doc.splitTextToSize(workDone, 176), 16, y2 + 12);
+  doc.text(workDoneLines, 16, y2 + 12);
 
   doc.setFontSize(9);
   doc.text(`Generated: ${new Date().toLocaleString("en-CA")}`, 14, 290);
@@ -254,7 +270,15 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
   });
 
   let tableY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y + 40;
-  const detailSectionHeight = 56;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  const problemLines = linesForWidth(doc, item.problem_description, 84);
+  const workDoneLines = linesForWidth(doc, item.work_done, 84);
+  const notesBoxHeight = Math.max(
+    labeledBoxHeight(doc, problemLines, 44),
+    labeledBoxHeight(doc, workDoneLines, 44)
+  );
+  const detailSectionHeight = 17 + notesBoxHeight;
   const totalsSectionHeight = 45;
   const sectionGap = 8;
   const needsNewPage = tableY + sectionGap + detailSectionHeight + totalsSectionHeight > pageHeight(doc) - 10;
@@ -270,13 +294,13 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
   doc.text("Work Done", 108, tableY + 7);
 
   doc.setFont("helvetica", "normal");
-  doc.rect(14, tableY + 9, 88, 44);
-  doc.rect(108, tableY + 9, 88, 44);
+  doc.rect(14, tableY + 9, 88, notesBoxHeight);
+  doc.rect(108, tableY + 9, 88, notesBoxHeight);
   doc.setFontSize(10);
-  doc.text(doc.splitTextToSize(text(item.problem_description), 84), 16, tableY + 15);
-  doc.text(doc.splitTextToSize(text(item.work_done), 84), 110, tableY + 15);
+  doc.text(problemLines, 16, tableY + 15);
+  doc.text(workDoneLines, 110, tableY + 15);
 
-  const totalsY = tableY + 61;
+  const totalsY = tableY + 17 + notesBoxHeight;
   const partsTotal = calculatePartsTotal(item);
   const subtotal = partsTotal + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
   const hst = subtotal * 0.13;
