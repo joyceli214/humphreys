@@ -3,7 +3,7 @@ builder = "RAILPACK"
 buildCommand = "npm install --include=dev && npm run build"
 
 [deploy]
-startCommand = "npx serve --single --listen $PORT dist"
+startCommand = "npm run start"
 healthcheckPath = "/"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"

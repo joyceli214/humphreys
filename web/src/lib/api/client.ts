@@ -11,7 +11,7 @@ import type {
   WorkOrderListItem
 } from "@/lib/api/generated/types";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export class APIClient {

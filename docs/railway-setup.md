@@ -33,7 +33,7 @@ Notes:
 - API listens on Railway `PORT` automatically if `SERVER_ADDR` is not set.
 
 ### Web service variables
-- `VITE_API_BASE_URL=<your api service domain>`
+- `API_UPSTREAM_URL=<your api service domain>`
 
 Use Railway's generated public domains, for example:
 - API: `https://api-production-xxxx.up.railway.app`
@@ -41,7 +41,7 @@ Use Railway's generated public domains, for example:
 
 Then set:
 - API `CORS_ORIGIN` to web domain
-- Web `VITE_API_BASE_URL` to API domain
+- Web `API_UPSTREAM_URL` to API domain
 
 ## 4) Deploy order
 
@@ -60,10 +60,11 @@ Configured in `railway.toml`:
 
 Web service is deployed with Railpack:
 - Build: `npm ci && npm run build`
-- Start: `npx serve --single --listen $PORT dist`
+- Start: `npm run start`
 
 Notes:
-- `--single` enables SPA fallback to `index.html`
+- Runtime serves SPA files and reverse-proxies `/api/*` to `API_UPSTREAM_URL`
+- Browser API calls stay same-origin (`/api`), improving iOS/Safari cookie behavior
 - No Dockerfile/Caddyfile is required for this setup
 
 ## 6) Notes on migrations
