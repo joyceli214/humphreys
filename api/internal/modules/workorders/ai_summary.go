@@ -102,10 +102,27 @@ func (h *Handler) GenerateAISummary(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch parts purchase requests"})
 		return
 	}
+	if shouldUseSparseSummary(item, repairLogs, partsRequests) {
+		summary := buildSparseSummary(item, partsRequests)
+		generatedAt := time.Now().UTC().Format(time.RFC3339)
+		if h.aiSummaryCache != nil {
+			h.aiSummaryCache.Set(cacheKey, aiSummaryCacheItem{
+				Summary:     summary,
+				Model:       "system",
+				GeneratedAt: generatedAt,
+			}, ttlcache.DefaultTTL)
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"summary":      summary,
+			"model":        "system",
+			"generated_at": generatedAt,
+		})
+		return
+	}
 
-	summary, err := h.generateOpenRouterSummary(c, buildWorkOrderAISummaryPrompt(item, repairLogs, partsRequests))
+	summary, err := h.generateOpenRouterSummaryOnce(c, buildWorkOrderAISummaryPrompt(item, repairLogs, partsRequests))
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to generate AI summary", "detail": err.Error()})
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
 		return
 	}
 
@@ -125,24 +142,13 @@ func (h *Handler) GenerateAISummary(c *gin.Context) {
 	})
 }
 
-func (h *Handler) generateOpenRouterSummary(c *gin.Context, prompt string) (string, error) {
-	summary, err := h.generateOpenRouterSummaryOnce(c, prompt)
-	if err == nil {
-		return summary, nil
-	}
-
-	// Some free models occasionally return an empty content payload. Retry once with stricter output guidance.
-	retryPrompt := prompt + "\n\nReturn one short natural-language paragraph and do not return an empty response."
-	return h.generateOpenRouterSummaryOnce(c, retryPrompt)
-}
-
 func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, prompt string) (string, error) {
 	payload := openRouterChatRequest{
 		Model: h.openRouterModel,
 		Messages: []openRouterMessage{
 			{
 				Role:    "system",
-				Content: "You summarize technician work orders. Write short, factual natural language. Do not use bullet points.",
+				Content: "You summarize technician work orders. Write short, factual natural language in paragraph form. Use 1-2 paragraphs only. Do not use bullet points, numbered lists, or headings.",
 			},
 			{
 				Role:    "user",
@@ -266,7 +272,8 @@ func buildWorkOrderAISummaryPrompt(item domain.WorkOrderDetail, repairLogs []dom
 	partsRequestSummary := summarizePartsRequests(partsRequests)
 
 	return fmt.Sprintf(`Write a single natural-language technician summary in 60 words max.
-Use markdown and bold important fields with **...** (customer name, phone, email, equipment brand/type/model, required actions).
+Output MUST be in paragraph form in natural language (1 short paragraph; maximum 2 paragraphs).
+Bold these information with **...**: customer name, phone, email, equipment brand/type/model, required actions.
 Do not use bullet points, numbered lists, markdown headings, or filler words.
 Must include: customer name, phone, email, equipment brand, equipment type, model (if present).
 Must include: repair logs summary with technician name(s) and key work done.
@@ -426,4 +433,32 @@ func formatMoney(value *float64) string {
 		return "Unknown"
 	}
 	return fmt.Sprintf("%.2f CAD", *value)
+}
+
+func shouldUseSparseSummary(item domain.WorkOrderDetail, repairLogs []domain.RepairLog, partsRequests []domain.PartsPurchaseRequest) bool {
+	customerMissing := item.Customer.CustomerID == nil &&
+		strings.TrimSpace(orEmpty(item.Customer.FirstName)) == "" &&
+		strings.TrimSpace(orEmpty(item.Customer.LastName)) == "" &&
+		strings.TrimSpace(orEmpty(item.Customer.Email)) == "" &&
+		strings.TrimSpace(orEmpty(item.Customer.HomePhone)) == "" &&
+		strings.TrimSpace(orEmpty(item.Customer.WorkPhone)) == ""
+	equipmentMissing := item.ItemID == nil &&
+		strings.TrimSpace(orEmpty(item.ItemName)) == "" &&
+		len(item.BrandNames) == 0 &&
+		strings.TrimSpace(orEmpty(item.ModelNumber)) == "" &&
+		strings.TrimSpace(orEmpty(item.SerialNumber)) == ""
+	return customerMissing && equipmentMissing && len(repairLogs) == 0 && len(partsRequests) > 0
+}
+
+func buildSparseSummary(item domain.WorkOrderDetail, partsRequests []domain.PartsPurchaseRequest) string {
+	status := strings.TrimSpace(orUnknown(item.StatusName))
+	parts := summarizePartsRequests(partsRequests)
+	actions := summarizeActionsRequired(item.StatusName, partsRequests)
+	return fmt.Sprintf(
+		"Work order **#%d** has limited customer and equipment data. **Status:** %s. **Parts Purchase Requests:** %s. **Actions Required:** %s.",
+		item.ReferenceID,
+		status,
+		parts,
+		actions,
+	)
 }

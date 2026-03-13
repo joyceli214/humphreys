@@ -2261,14 +2261,20 @@ export default function WorkOrderDetailPage() {
         <div className="space-y-4">
           {equipmentBlock}
 
-          {canViewSensitive && (
           <aside className="rounded-lg border border-border bg-white p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Customer</h2>
-              {canEdit && editingSection !== "customer" && <Button variant="outline" size="sm" onClick={() => setEditingSection("customer")}>Edit</Button>}
+              <div className="flex items-center gap-2">
+                {editingSection !== "customer" && item.customer.customer_id !== null && item.customer.customer_id > 0 && (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/work-orders?customer_id=${item.customer.customer_id}`}>View Jobs</Link>
+                  </Button>
+                )}
+                {canEdit && canViewSensitive && editingSection !== "customer" && <Button variant="outline" size="sm" onClick={() => setEditingSection("customer")}>Edit</Button>}
+              </div>
             </div>
 
-            {editingSection === "customer" ? (
+            {editingSection === "customer" && canViewSensitive ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -2349,18 +2355,21 @@ export default function WorkOrderDetailPage() {
             ) : (
               <>
                 {detailRow("Name", fullName(item.customer.first_name, item.customer.last_name))}
-                {detailRow("Email", item.customer.email ?? "-")}
-                {detailRow("Home Phone", item.customer.home_phone ?? "-")}
-                {detailRow("Work Phone", item.customer.work_phone ?? "-")}
-                {detailRow("Extension", item.customer.extension_text ?? "-")}
-                {detailRow("Address", item.customer.address_line_1 ?? "-")}
-                {detailRow("Address 2", item.customer.address_line_2 ?? "-")}
-                {detailRow("City", item.customer.city ?? "-")}
-                {detailRow("Province", item.customer.province ?? "-")}
+                {canViewSensitive && (
+                  <>
+                    {detailRow("Email", item.customer.email ?? "-")}
+                    {detailRow("Home Phone", item.customer.home_phone ?? "-")}
+                    {detailRow("Work Phone", item.customer.work_phone ?? "-")}
+                    {detailRow("Extension", item.customer.extension_text ?? "-")}
+                    {detailRow("Address", item.customer.address_line_1 ?? "-")}
+                    {detailRow("Address 2", item.customer.address_line_2 ?? "-")}
+                    {detailRow("City", item.customer.city ?? "-")}
+                    {detailRow("Province", item.customer.province ?? "-")}
+                  </>
+                )}
               </>
             )}
           </aside>
-          )}
 
           <aside className="rounded-lg border border-border bg-white p-4 space-y-2">
             <h2 className="font-semibold">Meta</h2>

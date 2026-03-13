@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"humphreys/api/internal/domain"
@@ -181,8 +182,47 @@ func (h *Handler) ListWorkOrders(c *gin.Context) {
 	query := c.Query("q")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	customerID, err := parsePositiveInt64Query(c.Query("customer_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer_id"})
+		return
+	}
+	statusID, err := parsePositiveInt64Query(c.Query("status_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid status_id"})
+		return
+	}
+	jobTypeID, err := parsePositiveInt64Query(c.Query("job_type_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid job_type_id"})
+		return
+	}
+	itemID, err := parsePositiveInt64Query(c.Query("item_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid item_id"})
+		return
+	}
+	createdFrom, err := parseDateQuery(c.Query("created_from"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid created_from (expected YYYY-MM-DD)"})
+		return
+	}
+	createdTo, err := parseDateQuery(c.Query("created_to"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid created_to (expected YYYY-MM-DD)"})
+		return
+	}
+	filters := WorkOrderListFilters{
+		CustomerID:  customerID,
+		StatusID:    statusID,
+		JobTypeID:   jobTypeID,
+		ItemID:      itemID,
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
+	}
+	includeSensitive := hasPermission(c, permSensitiveRead)
 
-	items, err := h.service.ListWorkOrders(c.Request.Context(), query, page, pageSize)
+	items, err := h.service.ListWorkOrders(c.Request.Context(), query, filters, includeSensitive, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":  "failed to list work orders",
@@ -190,14 +230,36 @@ func (h *Handler) ListWorkOrders(c *gin.Context) {
 		})
 		return
 	}
-	if !hasPermission(c, permSensitiveRead) {
+	if !includeSensitive {
 		for i := range items {
-			items[i].CustomerName = nil
 			items[i].CustomerEmail = nil
 			items[i].LabourTotal = nil
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func parsePositiveInt64Query(raw string) (*int64, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || parsed <= 0 {
+		return nil, errors.New("invalid positive integer")
+	}
+	return &parsed, nil
+}
+
+func parseDateQuery(raw string) (*string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	if _, err := time.Parse("2006-01-02", trimmed); err != nil {
+		return nil, err
+	}
+	return &trimmed, nil
 }
 
 func (h *Handler) GetWorkOrder(c *gin.Context) {
@@ -227,6 +289,25 @@ func (h *Handler) ListCustomers(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list customers"})
 		return
+	}
+	if !hasPermission(c, permSensitiveRead) {
+		for i := range items {
+			first := strings.TrimSpace(stringValue(items[i].FirstName))
+			last := strings.TrimSpace(stringValue(items[i].LastName))
+			name := strings.TrimSpace(strings.Join([]string{first, last}, " "))
+			if name == "" {
+				name = "Unknown"
+			}
+			items[i].Label = name
+			items[i].Email = nil
+			items[i].HomePhone = nil
+			items[i].WorkPhone = nil
+			items[i].Extension = nil
+			items[i].AddressLine1 = nil
+			items[i].AddressLine2 = nil
+			items[i].City = nil
+			items[i].Province = nil
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
@@ -789,7 +870,11 @@ func hasPermission(c *gin.Context, permission string) bool {
 }
 
 func sanitizeWorkOrderDetail(detail domain.WorkOrderDetail) domain.WorkOrderDetail {
-	detail.Customer = domain.WorkOrderCustomer{}
+	detail.Customer = domain.WorkOrderCustomer{
+		CustomerID: detail.Customer.CustomerID,
+		FirstName:  detail.Customer.FirstName,
+		LastName:   detail.Customer.LastName,
+	}
 	detail.PartsTotal = nil
 	detail.DeliveryTotal = nil
 	detail.LabourTotal = nil

@@ -90,20 +90,41 @@ function parseCustomerLabel(label: string): { name: string; email: string; phone
   return { name, email, phone };
 }
 
+type WorkOrderListFilters = {
+  customerId: number | null;
+  statusId: number | null;
+  jobTypeId: number | null;
+  itemId: number | null;
+  createdFrom: string;
+  createdTo: string;
+};
+
+function parsePositiveIntParam(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function CustomerSearchableDropdown({
+  label,
   value,
   valueLabel,
   onChange,
   loadOptions,
   onAddNew,
-  placeholder
+  placeholder,
+  allowAddNew = true,
+  allowClear = false
 }: {
+  label?: string;
   value: number | null;
   valueLabel?: string;
-  onChange: (option: CustomerLookupOption) => void;
+  onChange: (option: CustomerLookupOption | null) => void;
   loadOptions: (query: string) => Promise<CustomerLookupOption[]>;
-  onAddNew: (seed: string) => void;
+  onAddNew?: (seed: string) => void;
   placeholder: string;
+  allowAddNew?: boolean;
+  allowClear?: boolean;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -210,6 +231,7 @@ function CustomerSearchableDropdown({
 
   return (
     <div ref={rootRef} className="space-y-1">
+      {label && <label className="block text-sm text-muted-foreground">{label}</label>}
       <div className="relative">
         <button
           type="button"
@@ -236,6 +258,18 @@ function CustomerSearchableDropdown({
               )}
             </div>
             <div className="mt-2 max-h-52 overflow-auto space-y-1">
+              {allowClear && (
+                <button
+                  type="button"
+                  className="w-full rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
+                  onClick={() => {
+                    onChange(null);
+                    setOpen(false);
+                  }}
+                >
+                  Any
+                </button>
+              )}
               {options.length === 0 && <p className="rounded px-2 py-1 text-sm text-muted-foreground">No customers found.</p>}
               {options.map((option, index) => (
                 <button
@@ -251,16 +285,18 @@ function CustomerSearchableDropdown({
                   {option.label}
                 </button>
               ))}
-              <button
-                type="button"
-                className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-primary hover:bg-muted"
-                onClick={() => {
-                  onAddNew(query.trim());
-                  setOpen(false);
-                }}
-              >
-                + Add new customer
-              </button>
+              {allowAddNew && onAddNew && (
+                <button
+                  type="button"
+                  className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-primary hover:bg-muted"
+                  onClick={() => {
+                    onAddNew(query.trim());
+                    setOpen(false);
+                  }}
+                >
+                  + Add new customer
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -277,7 +313,8 @@ function SingleSearchableDropdown({
   loadOptions,
   placeholder,
   onAddNew,
-  searchable = true
+  searchable = true,
+  allowClear = false
 }: {
   label: string;
   value: number | null;
@@ -287,6 +324,7 @@ function SingleSearchableDropdown({
   placeholder: string;
   onAddNew?: (label: string) => Promise<LookupOption>;
   searchable?: boolean;
+  allowClear?: boolean;
 }) {
   const alerts = useAlerts();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -423,6 +461,18 @@ function SingleSearchableDropdown({
               </div>
             )}
             <div className="mt-2 max-h-52 overflow-auto space-y-1">
+              {allowClear && (
+                <button
+                  type="button"
+                  className="w-full rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
+                  onClick={() => {
+                    onChange(null);
+                    setOpen(false);
+                  }}
+                >
+                  Any
+                </button>
+              )}
               {options.map((option, index) => (
                 <button
                   key={option.id}
@@ -437,7 +487,7 @@ function SingleSearchableDropdown({
                   {option.label}
                 </button>
               ))}
-              {!adding && (
+              {!adding && onAddNew && (
                 <button
                   type="button"
                   className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
@@ -683,7 +733,7 @@ function MultiSearchableDropdown({
                   </label>
                 );
               })}
-              {!adding && (
+              {!adding && onAddNew && (
                 <button
                   type="button"
                   className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
@@ -753,9 +803,33 @@ export default function WorkOrdersPage() {
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canCreateWorkOrders = hasPermission("work_orders:create");
   const initialQuery = searchParams.get("q")?.trim() ?? "";
+  const initialFilters: WorkOrderListFilters = {
+    customerId: parsePositiveIntParam(searchParams.get("customer_id")),
+    statusId: parsePositiveIntParam(searchParams.get("status_id")),
+    jobTypeId: parsePositiveIntParam(searchParams.get("job_type_id")),
+    itemId: parsePositiveIntParam(searchParams.get("item_id")),
+    createdFrom: searchParams.get("created_from")?.trim() ?? "",
+    createdTo: searchParams.get("created_to")?.trim() ?? ""
+  };
+  const hasInitialAdvancedFilters =
+    initialFilters.statusId !== null ||
+    initialFilters.jobTypeId !== null ||
+    initialFilters.itemId !== null ||
+    initialFilters.createdFrom.length > 0 ||
+    initialFilters.createdTo.length > 0;
   const [items, setItems] = useState<WorkOrderListItem[]>([]);
   const [searchInput, setSearchInput] = useState(initialQuery);
   const [query, setQuery] = useState(initialQuery);
+  const [customerFilterInputId, setCustomerFilterInputId] = useState<number | null>(initialFilters.customerId);
+  const [customerFilterInputLabel, setCustomerFilterInputLabel] = useState("");
+  const [statusFilterInputId, setStatusFilterInputId] = useState<number | null>(initialFilters.statusId);
+  const [jobTypeFilterInputId, setJobTypeFilterInputId] = useState<number | null>(initialFilters.jobTypeId);
+  const [itemFilterInputId, setItemFilterInputId] = useState<number | null>(initialFilters.itemId);
+  const [createdFromInput, setCreatedFromInput] = useState(initialFilters.createdFrom);
+  const [createdToInput, setCreatedToInput] = useState(initialFilters.createdTo);
+  const [filters, setFilters] = useState<WorkOrderListFilters>(initialFilters);
+  const [customerFilterLabel, setCustomerFilterLabel] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(hasInitialAdvancedFilters);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -766,6 +840,7 @@ export default function WorkOrdersPage() {
   const hasMoreRef = useRef(hasMore);
   const pageRef = useRef(page);
   const queryRef = useRef(query);
+  const filtersRef = useRef(filters);
   const waitForSentinelExitRef = useRef(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -795,31 +870,35 @@ export default function WorkOrdersPage() {
   const [paymentMethods, setPaymentMethods] = useState<LookupOption[]>([]);
   const [depositPaymentMethodId, setDepositPaymentMethodId] = useState("");
   const pageSize = 100;
-  const toListSearch = (nextQuery: string) => {
+  const toListSearch = (nextQuery: string, nextFilters: WorkOrderListFilters) => {
     const params = new URLSearchParams();
     const trimmedQuery = nextQuery.trim();
     if (trimmedQuery) {
       params.set("q", trimmedQuery);
     }
+    if (nextFilters.customerId) params.set("customer_id", String(nextFilters.customerId));
+    if (nextFilters.statusId) params.set("status_id", String(nextFilters.statusId));
+    if (nextFilters.jobTypeId) params.set("job_type_id", String(nextFilters.jobTypeId));
+    if (nextFilters.itemId) params.set("item_id", String(nextFilters.itemId));
+    if (nextFilters.createdFrom.trim()) params.set("created_from", nextFilters.createdFrom.trim());
+    if (nextFilters.createdTo.trim()) params.set("created_to", nextFilters.createdTo.trim());
     return params;
   };
 
-  const fetchPage = async (nextPage: number, nextQuery: string) => {
-    const params = new URLSearchParams({
-      q: nextQuery,
-      page: String(nextPage),
-      page_size: String(pageSize)
-    });
+  const fetchPage = async (nextPage: number, nextQuery: string, nextFilters: WorkOrderListFilters) => {
+    const params = toListSearch(nextQuery, nextFilters);
+    params.set("page", String(nextPage));
+    params.set("page_size", String(pageSize));
     const res = await apiClient.listWorkOrders(params);
     return res.items;
   };
 
-  const loadInitial = async (nextQuery: string) => {
+  const loadInitial = async (nextQuery: string, nextFilters: WorkOrderListFilters) => {
     setLoading(true);
     setLoadingMore(false);
     waitForSentinelExitRef.current = false;
     try {
-      const pageItems = await fetchPage(1, nextQuery);
+      const pageItems = await fetchPage(1, nextQuery, nextFilters);
       setItems(pageItems);
       setPage(1);
       setHasMore(pageItems.length === pageSize);
@@ -836,7 +915,7 @@ export default function WorkOrdersPage() {
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      const pageItems = await fetchPage(nextPage, queryRef.current);
+      const pageItems = await fetchPage(nextPage, queryRef.current, filtersRef.current);
       setItems((prev) => {
         const seen = new Set(prev.map((item) => item.reference_id));
         const uniqueAdds = pageItems.filter((item) => !seen.has(item.reference_id));
@@ -844,7 +923,7 @@ export default function WorkOrdersPage() {
       });
       setPage(nextPage);
       setHasMore(pageItems.length === pageSize);
-      setSearchParams(toListSearch(queryRef.current));
+      setSearchParams(toListSearch(queryRef.current, filtersRef.current));
       waitForSentinelExitRef.current = true;
     } catch (err) {
       alerts.error("Failed to load more work orders", err instanceof Error ? err.message : "Request failed");
@@ -856,7 +935,7 @@ export default function WorkOrdersPage() {
 
   useEffect(() => {
     if (!hasPermission("work_orders:read")) return;
-    loadInitial(initialQuery);
+    loadInitial(initialQuery, initialFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPermission]);
 
@@ -901,6 +980,10 @@ export default function WorkOrdersPage() {
   useEffect(() => {
     queryRef.current = query;
   }, [query]);
+
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
 
   useEffect(() => {
     if (!createOpen || !canCreateWorkOrders) return;
@@ -1039,6 +1122,11 @@ export default function WorkOrdersPage() {
                     placeholder="Search by name, phone, or email"
                     loadOptions={async (search) => (await apiClient.listWorkOrderCustomers(search)).items}
                     onChange={(option) => {
+                      if (!option) {
+                        setSelectedCustomerId(null);
+                        setSelectedCustomerLabel("");
+                        return;
+                      }
                       setCustomerMode("existing");
                       setSelectedCustomerId(option.id);
                       setSelectedCustomerLabel(option.label);
@@ -1301,9 +1389,9 @@ export default function WorkOrdersPage() {
                     alerts.success(`Work order #${created.reference_id} created`);
                     setCreateOpen(false);
                     resetCreateForm();
-                    await loadInitial(query);
-                    const listSearch = toListSearch(query).toString();
-                    setSearchParams(toListSearch(query));
+                    await loadInitial(query, filters);
+                    const listSearch = toListSearch(query, filters).toString();
+                    setSearchParams(toListSearch(query, filters));
                     navigate(`/work-orders/${created.reference_id}${listSearch ? `?${listSearch}` : ""}`);
                   } catch (err) {
                     alerts.error("Failed to create work order", err instanceof Error ? err.message : "Request failed");
@@ -1321,34 +1409,148 @@ export default function WorkOrdersPage() {
 
       <div className="rounded-lg border border-border bg-white p-4 space-y-3">
         <form
-          className="flex gap-2"
+          className="space-y-3"
           onSubmit={async (e) => {
             e.preventDefault();
             const nextQuery = searchInput.trim();
+            const nextFilters: WorkOrderListFilters = {
+              customerId: customerFilterInputId,
+              statusId: statusFilterInputId,
+              jobTypeId: jobTypeFilterInputId,
+              itemId: itemFilterInputId,
+              createdFrom: createdFromInput.trim(),
+              createdTo: createdToInput.trim()
+            };
             setQuery(nextQuery);
-            setSearchParams(toListSearch(nextQuery));
-            await loadInitial(nextQuery);
+            setFilters(nextFilters);
+            setCustomerFilterLabel(customerFilterInputLabel);
+            setSearchParams(toListSearch(nextQuery, nextFilters));
+            await loadInitial(nextQuery, nextFilters);
           }}
         >
-          <Input
-            placeholder={
-              canViewSensitive
-                ? "Search reference, customer, email, item, model, serial"
-                : "Search reference, item, model, serial"
-            }
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-          <Button variant="outline" type="submit">
-            Search
-          </Button>
+          <div className="flex gap-2">
+            <Input
+              placeholder={
+                canViewSensitive
+                  ? "Search reference, customer name/phone/email, status, job type, item, brand, model, serial"
+                  : "Search reference, customer name, status, job type, item, brand, model, serial"
+              }
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+            <Button variant="outline" type="submit">
+              Search
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setSearchInput("");
+                setQuery("");
+                setCustomerFilterInputId(null);
+                setCustomerFilterInputLabel("");
+                setStatusFilterInputId(null);
+                setJobTypeFilterInputId(null);
+                setItemFilterInputId(null);
+                setCreatedFromInput("");
+                setCreatedToInput("");
+                setFilters({
+                  customerId: null,
+                  statusId: null,
+                  jobTypeId: null,
+                  itemId: null,
+                  createdFrom: "",
+                  createdTo: ""
+                });
+                setCustomerFilterLabel("");
+                setSearchParams(new URLSearchParams());
+                void loadInitial("", {
+                  customerId: null,
+                  statusId: null,
+                  jobTypeId: null,
+                  itemId: null,
+                  createdFrom: "",
+                  createdTo: ""
+                });
+              }}
+            >
+              Clear
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-8 px-2"
+              aria-expanded={advancedOpen}
+              onClick={() => setAdvancedOpen((prev) => !prev)}
+            >
+              {advancedOpen ? "Hide Advanced Search ▲" : "Show Advanced Search ▼"}
+            </Button>
+          </div>
+          {advancedOpen && (
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
+                <CustomerSearchableDropdown
+                  label="Customer"
+                  value={customerFilterInputId}
+                  valueLabel={customerFilterInputLabel || customerFilterLabel}
+                  placeholder="Filter by customer"
+                  loadOptions={async (search) => (await apiClient.listWorkOrderCustomers(search)).items}
+                  onChange={(option) => {
+                    if (!option) {
+                      setCustomerFilterInputId(null);
+                      setCustomerFilterInputLabel("");
+                      return;
+                    }
+                    setCustomerFilterInputId(option.id);
+                    setCustomerFilterInputLabel(option.label);
+                  }}
+                  allowAddNew={false}
+                  allowClear
+                />
+                <SingleSearchableDropdown
+                  label="Status"
+                  value={statusFilterInputId}
+                  onChange={setStatusFilterInputId}
+                  loadOptions={async (q) => (await apiClient.listWorkOrderStatuses(q)).items}
+                  placeholder="Any status"
+                  allowClear
+                />
+                <SingleSearchableDropdown
+                  label="Job Type"
+                  value={jobTypeFilterInputId}
+                  onChange={setJobTypeFilterInputId}
+                  loadOptions={async (q) => (await apiClient.listJobTypes(q)).items}
+                  placeholder="Any job type"
+                  allowClear
+                />
+                <SingleSearchableDropdown
+                  label="Item"
+                  value={itemFilterInputId}
+                  onChange={setItemFilterInputId}
+                  loadOptions={async (q) => (await apiClient.listItems(q)).items}
+                  placeholder="Any item"
+                  allowClear
+                />
+                <div className="space-y-1">
+                  <label className="block text-sm text-muted-foreground">Created From</label>
+                  <Input type="date" value={createdFromInput} onChange={(e) => setCreatedFromInput(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-sm text-muted-foreground">Created To</label>
+                  <Input type="date" value={createdToInput} onChange={(e) => setCreatedToInput(e.target.value)} />
+                </div>
+              </div>
+            </div>
+          )}
         </form>
 
         <Table>
           <thead>
             <tr>
               <Th className="w-[110px]">Ref #</Th>
-              {canViewSensitive && <Th>Customer</Th>}
+              <Th>Customer</Th>
               <Th>Status</Th>
               <Th>Job Type</Th>
               <Th>Item</Th>
@@ -1359,25 +1561,23 @@ export default function WorkOrdersPage() {
           <tbody>
             {loading && items.length === 0 && (
               <tr>
-                <Td colSpan={canViewSensitive ? 7 : 6}>Loading work orders...</Td>
+                <Td colSpan={7}>Loading work orders...</Td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <Td colSpan={canViewSensitive ? 7 : 6}>No work orders found.</Td>
+                <Td colSpan={7}>No work orders found.</Td>
               </tr>
             )}
             {items.map((item) => (
               <tr key={item.reference_id}>
                 <Td>{item.reference_id}</Td>
-                {canViewSensitive && (
-                  <Td>
-                    <div className="space-y-1">
-                      <p>{item.customer_name ?? "-"}</p>
-                      {item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
-                    </div>
-                  </Td>
-                )}
+                <Td>
+                  <div className="space-y-1">
+                    <p>{item.customer_name ?? "-"}</p>
+                    {canViewSensitive && item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
+                  </div>
+                </Td>
                 <Td>
                   <Badge className={statusClass(item.status)}>{item.status}</Badge>
                 </Td>

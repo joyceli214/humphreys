@@ -40,12 +40,21 @@ type Service struct {
 	repo Repository
 }
 
+type WorkOrderListFilters struct {
+	CustomerID  *int64
+	StatusID    *int64
+	JobTypeID   *int64
+	ItemID      *int64
+	CreatedFrom *string
+	CreatedTo   *string
+}
+
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) ListWorkOrders(ctx context.Context, query string, page, pageSize int) ([]domain.WorkOrderListItem, error) {
-	return s.repo.ListWorkOrders(ctx, query, page, pageSize)
+func (s *Service) ListWorkOrders(ctx context.Context, query string, filters WorkOrderListFilters, includeSensitive bool, page, pageSize int) ([]domain.WorkOrderListItem, error) {
+	return s.repo.ListWorkOrders(ctx, query, filters, includeSensitive, page, pageSize)
 }
 
 func (s *Service) GetWorkOrderDetail(ctx context.Context, referenceID int) (domain.WorkOrderDetail, error) {

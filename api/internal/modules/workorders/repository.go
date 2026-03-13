@@ -14,7 +14,7 @@ import (
 )
 
 type Repository interface {
-	ListWorkOrders(ctx context.Context, query string, page, pageSize int) ([]domain.WorkOrderListItem, error)
+	ListWorkOrders(ctx context.Context, query string, filters WorkOrderListFilters, includeSensitive bool, page, pageSize int) ([]domain.WorkOrderListItem, error)
 	GetWorkOrderDetail(ctx context.Context, referenceID int) (domain.WorkOrderDetail, error)
 	ListCustomers(ctx context.Context, query string) ([]CustomerLookupOption, error)
 	CreateWorkOrder(ctx context.Context, input CreateWorkOrderInput) (domain.WorkOrderDetail, error)
@@ -44,7 +44,7 @@ func NewRepository(db *pgxpool.Pool) Repository {
 	return &storeRepository{db: db}
 }
 
-func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, page, pageSize int) ([]domain.WorkOrderListItem, error) {
+func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, filters WorkOrderListFilters, includeSensitive bool, page, pageSize int) ([]domain.WorkOrderListItem, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -56,18 +56,101 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, page
 	clauses := make([]string, 0)
 	args := make([]any, 0)
 	argPos := 1
-	if query != "" {
-		pattern := "%" + query + "%"
-		clauses = append(clauses, fmt.Sprintf(`(
-			wo.reference_id::text ILIKE $%d OR
-			COALESCE(c.first_name, '') ILIKE $%d OR
-			COALESCE(c.last_name, '') ILIKE $%d OR
-			COALESCE(c.email, '') ILIKE $%d OR
-			COALESCE(i.item_name, '') ILIKE $%d OR
-			COALESCE(wo.model_number, '') ILIKE $%d OR
-			COALESCE(wo.serial_number, '') ILIKE $%d
-		)`, argPos, argPos, argPos, argPos, argPos, argPos, argPos))
+	normalizedQuery := strings.TrimSpace(strings.Join(strings.Fields(query), " "))
+	if normalizedQuery != "" {
+		pattern := "%" + normalizedQuery + "%"
+		brandIDs := make([]int64, 0)
+		if err := r.db.QueryRow(ctx, `SELECT COALESCE(array_agg(brand_id), ARRAY[]::bigint[]) FROM public.brands WHERE brand_name ILIKE $1`, pattern).Scan(&brandIDs); err != nil {
+			return nil, err
+		}
+		digits := strings.Map(func(r rune) rune {
+			if r >= '0' && r <= '9' {
+				return r
+			}
+			return -1
+		}, normalizedQuery)
+		phonePattern := "%" + digits + "%"
+		searchTerms := []string{
+			fmt.Sprintf("wo.reference_id::text ILIKE $%d", argPos),
+			fmt.Sprintf("COALESCE(wo.model_number, '') ILIKE $%d", argPos),
+			fmt.Sprintf("COALESCE(wo.serial_number, '') ILIKE $%d", argPos),
+		}
+		searchTerms = append(searchTerms, fmt.Sprintf(`EXISTS (
+			SELECT 1
+			FROM public.customers c
+			WHERE
+				c.customer_id = wo.customer_id AND (
+					COALESCE(c.first_name, '') ILIKE $%d OR
+					COALESCE(c.last_name, '') ILIKE $%d OR
+					COALESCE(c.full_name_search, '') ILIKE $%d
+				)
+		)`, argPos, argPos, argPos))
+		if includeSensitive {
+			searchTerms = append(searchTerms, fmt.Sprintf(`EXISTS (
+				SELECT 1
+				FROM public.customers c
+				WHERE
+					c.customer_id = wo.customer_id AND (
+						COALESCE(c.first_name, '') ILIKE $%d OR
+						COALESCE(c.last_name, '') ILIKE $%d OR
+						COALESCE(c.full_name_search, '') ILIKE $%d OR
+						COALESCE(c.email, '') ILIKE $%d OR
+						COALESCE(c.home_phone, '') ILIKE $%d OR
+						COALESCE(c.work_phone, '') ILIKE $%d
+					)
+			)`, argPos, argPos, argPos, argPos, argPos, argPos))
+		}
 		args = append(args, pattern)
+		argPos++
+		if len(brandIDs) > 0 {
+			searchTerms = append(searchTerms, fmt.Sprintf("COALESCE(wo.brand_ids, ARRAY[]::bigint[]) && $%d::bigint[]", argPos))
+			args = append(args, brandIDs)
+			argPos++
+		}
+		if includeSensitive && digits != "" {
+			searchTerms = append(searchTerms, fmt.Sprintf(`EXISTS (
+				SELECT 1
+				FROM public.customers c
+				WHERE
+					c.customer_id = wo.customer_id AND (
+						regexp_replace(COALESCE(c.home_phone, ''), '[^0-9]', '', 'g') ILIKE $%d OR
+						regexp_replace(COALESCE(c.work_phone, ''), '[^0-9]', '', 'g') ILIKE $%d
+					)
+			)`, argPos, argPos))
+			args = append(args, phonePattern)
+			argPos++
+		}
+		clauses = append(clauses, "("+strings.Join(searchTerms, " OR ")+")")
+	}
+
+	if filters.CustomerID != nil && *filters.CustomerID > 0 {
+		clauses = append(clauses, fmt.Sprintf("wo.customer_id = $%d", argPos))
+		args = append(args, *filters.CustomerID)
+		argPos++
+	}
+	if filters.StatusID != nil && *filters.StatusID > 0 {
+		clauses = append(clauses, fmt.Sprintf("wo.status_id = $%d", argPos))
+		args = append(args, *filters.StatusID)
+		argPos++
+	}
+	if filters.JobTypeID != nil && *filters.JobTypeID > 0 {
+		clauses = append(clauses, fmt.Sprintf("wo.job_type_id = $%d", argPos))
+		args = append(args, *filters.JobTypeID)
+		argPos++
+	}
+	if filters.ItemID != nil && *filters.ItemID > 0 {
+		clauses = append(clauses, fmt.Sprintf("wo.item_id = $%d", argPos))
+		args = append(args, *filters.ItemID)
+		argPos++
+	}
+	if filters.CreatedFrom != nil && strings.TrimSpace(*filters.CreatedFrom) != "" {
+		clauses = append(clauses, fmt.Sprintf("wo.created_at::date >= $%d::date", argPos))
+		args = append(args, strings.TrimSpace(*filters.CreatedFrom))
+		argPos++
+	}
+	if filters.CreatedTo != nil && strings.TrimSpace(*filters.CreatedTo) != "" {
+		clauses = append(clauses, fmt.Sprintf("wo.created_at::date <= $%d::date", argPos))
+		args = append(args, strings.TrimSpace(*filters.CreatedTo))
 		argPos++
 	}
 
@@ -77,15 +160,30 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, page
 	}
 
 	args = append(args, pageSize, offset)
+	customerNameSelect := "c.full_name_search AS customer_name"
+	customerEmailSelect := "c.email"
+	customerJoin := "LEFT JOIN public.customers c ON c.customer_id = wo.customer_id"
+	if !includeSensitive {
+		customerEmailSelect = "NULL::text AS email"
+	}
 	querySQL := fmt.Sprintf(`
+		WITH paged_work_orders AS (
+			SELECT
+				wo.reference_id,
+				wo.created_at
+			FROM public.work_orders wo
+			%s
+			ORDER BY wo.created_at DESC NULLS LAST, wo.reference_id DESC
+			LIMIT $%d OFFSET $%d
+		)
 		SELECT
 			wo.reference_id,
 			wo.created_at,
 			wo.updated_at,
 			COALESCE(st.display_name, 'Unknown') AS status_name,
 			COALESCE(jt.display_name, 'Unknown') AS job_type_name,
-			NULLIF(BTRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), '') AS customer_name,
-			c.email,
+			%s,
+			%s,
 			i.item_name,
 			COALESCE(
 				(
@@ -98,15 +196,14 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, page
 			wo.model_number,
 			wo.serial_number,
 			wo.labour_total::double precision
-		FROM public.work_orders wo
-		LEFT JOIN public.customers c ON c.customer_id = wo.customer_id
+		FROM paged_work_orders p
+		JOIN public.work_orders wo ON wo.reference_id = p.reference_id
+		%s
 		LEFT JOIN public.items i ON i.item_id = wo.item_id
 		LEFT JOIN public.work_order_statuses st ON st.status_id = wo.status_id
 		LEFT JOIN public.job_types jt ON jt.job_type_id = wo.job_type_id
-		%s
-		ORDER BY wo.created_at DESC NULLS LAST, wo.reference_id DESC
-		LIMIT $%d OFFSET $%d
-	`, where, argPos, argPos+1)
+		ORDER BY p.created_at DESC NULLS LAST, p.reference_id DESC
+	`, where, argPos, argPos+1, customerNameSelect, customerEmailSelect, customerJoin)
 	rows, err := r.db.Query(ctx, querySQL, args...)
 	if err != nil {
 		return nil, err
