@@ -3,17 +3,24 @@ package workorders
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"humphreys/api/internal/domain"
 	"humphreys/api/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jellydator/ttlcache/v3"
 )
 
 type Handler struct {
-	service *Service
+	service          *Service
+	openRouterAPIKey string
+	openRouterModel  string
+	httpClient       *http.Client
+	aiSummaryCache   *ttlcache.Cache[string, aiSummaryCacheItem]
 }
 
 type updateEquipmentRequest struct {
@@ -115,9 +122,9 @@ type createWorkOrderRequest struct {
 }
 
 type createRepairLogRequest struct {
-	RepairDate *string `json:"repair_date"`
+	RepairDate *string  `json:"repair_date"`
 	HoursUsed  *float64 `json:"hours_used"`
-	Details    string  `json:"details" binding:"required"`
+	Details    string   `json:"details" binding:"required"`
 }
 
 type createPartsPurchaseRequest struct {
@@ -145,11 +152,29 @@ type updatePartsPurchaseRequest struct {
 }
 
 func New(db *pgxpool.Pool) *Handler {
-	return &Handler{service: NewService(NewRepository(db))}
+	aiCache := ttlcache.New[string, aiSummaryCacheItem](ttlcache.WithTTL[string, aiSummaryCacheItem](30 * time.Second))
+	go aiCache.Start()
+
+	return &Handler{
+		service:          NewService(NewRepository(db)),
+		openRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
+		openRouterModel:  getOpenRouterModel(),
+		httpClient:       &http.Client{Timeout: 25 * time.Second},
+		aiSummaryCache:   aiCache,
+	}
 }
 
 func NewWithService(service *Service) *Handler {
-	return &Handler{service: service}
+	aiCache := ttlcache.New[string, aiSummaryCacheItem](ttlcache.WithTTL[string, aiSummaryCacheItem](30 * time.Second))
+	go aiCache.Start()
+
+	return &Handler{
+		service:          service,
+		openRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
+		openRouterModel:  getOpenRouterModel(),
+		httpClient:       &http.Client{Timeout: 25 * time.Second},
+		aiSummaryCache:   aiCache,
+	}
 }
 
 func (h *Handler) ListWorkOrders(c *gin.Context) {

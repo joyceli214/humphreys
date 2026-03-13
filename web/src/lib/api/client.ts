@@ -241,6 +241,12 @@ export class APIClient {
     return this.request<WorkOrderDetail>(`/work-orders/${referenceID}`);
   }
 
+  generateWorkOrderAISummary(referenceID: number) {
+    return this.request<{ summary: string; model: string; generated_at: string }>(`/work-orders/${referenceID}/ai-summary`, {
+      method: "POST"
+    });
+  }
+
   deleteWorkOrder(referenceID: number) {
     return this.request<void>(`/work-orders/${referenceID}`, {
       method: "DELETE"

@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
@@ -874,6 +874,12 @@ export default function WorkOrderDetailPage() {
   const [editingRepairLogID, setEditingRepairLogID] = useState<number | null>(null);
   const [editingPartsRequestID, setEditingPartsRequestID] = useState<number | null>(null);
   const [editingPartsRequestStatus, setEditingPartsRequestStatus] = useState<"draft" | "waiting_approval" | "ordered" | "used" | null>(null);
+  const [aiSummary, setAISummary] = useState("");
+  const [aiSummaryModel, setAISummaryModel] = useState<string | null>(null);
+  const [aiSummaryGeneratedAt, setAISummaryGeneratedAt] = useState<string | null>(null);
+  const [aiSummaryLoading, setAISummaryLoading] = useState(false);
+  const [aiSummaryError, setAISummaryError] = useState("");
+  const [aiSummaryLoadedReference, setAISummaryLoadedReference] = useState<number | null>(null);
 
   const [equipmentForm, setEquipmentForm] = useState<EquipmentForm>({
     status_id: null,
@@ -953,6 +959,27 @@ export default function WorkOrderDetailPage() {
     return queryString ? `/work-orders?${queryString}` : "/work-orders";
   }, [location.search]);
 
+  const generateAISummary = useCallback(async () => {
+    if (!canViewSensitive || !Number.isInteger(parsedReferenceId) || parsedReferenceId <= 0) return;
+    setAISummaryLoading(true);
+    setAISummaryError("");
+    try {
+      const res = await apiClient.generateWorkOrderAISummary(parsedReferenceId);
+      setAISummary(res.summary);
+      setAISummaryModel(res.model);
+      setAISummaryGeneratedAt(res.generated_at);
+      setAISummaryLoadedReference(parsedReferenceId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Request failed";
+      setAISummaryError(message);
+      setAISummary("");
+      setAISummaryModel(null);
+      setAISummaryGeneratedAt(null);
+    } finally {
+      setAISummaryLoading(false);
+    }
+  }, [canViewSensitive, parsedReferenceId]);
+
   const loadExtras = async (reference: number) => {
     setLoadingExtras(true);
     try {
@@ -975,6 +1002,12 @@ export default function WorkOrderDetailPage() {
       setLoading(false);
       return;
     }
+
+    setAISummary("");
+    setAISummaryModel(null);
+    setAISummaryGeneratedAt(null);
+    setAISummaryError("");
+    setAISummaryLoadedReference(null);
 
     (async () => {
       setLoading(true);
@@ -1037,6 +1070,12 @@ export default function WorkOrderDetailPage() {
       province: item.customer.province ?? ""
     });
   }, [item]);
+
+  useEffect(() => {
+    if (!item || !canViewSensitive) return;
+    if (aiSummaryLoadedReference === item.reference_id) return;
+    void generateAISummary();
+  }, [item, canViewSensitive, aiSummaryLoadedReference, generateAISummary]);
 
   if (!hasPermission("work_orders:read")) {
     return null;
@@ -1680,6 +1719,28 @@ export default function WorkOrderDetailPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[7fr_3fr] gap-4 items-start">
         <div className="space-y-4">
+          {canViewSensitive && (
+            <article className="rounded-lg border border-border bg-white p-4 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h2 className="font-semibold">AI Summary</h2>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => void generateAISummary()} disabled={aiSummaryLoading}>
+                  {aiSummaryLoading ? "Generating..." : aiSummary ? "Refresh" : "Generate"}
+                </Button>
+              </div>
+              {aiSummaryError && <p className="text-sm text-destructive">{aiSummaryError}</p>}
+              {!aiSummaryError && aiSummaryLoading && !aiSummary && (
+                <p className="text-sm text-muted-foreground">Generating summary...</p>
+              )}
+              {aiSummary ? (
+                <div className="space-y-2">
+                  {markdownBlock(aiSummary)}
+                </div>
+              ) : null}
+            </article>
+          )}
+
           <article className="rounded-lg border border-border bg-white p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Work Notes</h2>

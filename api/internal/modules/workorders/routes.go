@@ -36,6 +36,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	group.DELETE("/:reference_id", middleware.RequirePermission(permCreate), h.DeleteWorkOrder)
 	group.GET("", middleware.RequirePermission(permRead), h.ListWorkOrders)
 	group.GET("/:reference_id", middleware.RequirePermission(permRead), h.GetWorkOrder)
+	group.POST(
+		"/:reference_id/ai-summary",
+		middleware.RequirePermission(permRead),
+		middleware.RequirePermission(permSensitiveRead),
+		h.GenerateAISummary,
+	)
 	group.PATCH("/:reference_id/status", middleware.RequirePermission(permStatusUpdate), h.UpdateStatus)
 	group.PATCH("/:reference_id/equipment", middleware.RequirePermission(permUpdate), h.UpdateEquipment)
 	group.PATCH("/:reference_id/work-notes", middleware.RequirePermission(permUpdate), h.UpdateWorkNotes)
