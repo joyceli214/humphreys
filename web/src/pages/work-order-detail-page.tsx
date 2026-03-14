@@ -93,8 +93,8 @@ function formatCurrency(value: number | null) {
 function formatLocationValue(locationID: number | null, locationShelf: string | null, locationFloor: number | null) {
   if (locationID == null && !locationShelf && locationFloor == null) return "-";
   const shelf = locationShelf?.trim() ? locationShelf : "-";
-  const floor = locationFloor == null ? "-" : String(locationFloor);
-  return `Shelf: ${shelf}, Floor: ${floor}`;
+  const floor = locationFloor == null ? "-" : locationFloor === 0 ? "FLOOR" : String(locationFloor);
+  return `${shelf}-${floor}`;
 }
 
 function statusClass(status: string | null) {
@@ -535,6 +535,7 @@ function SingleSearchableDropdown({
                     <Input placeholder="Shelf" value={newShelf} onChange={(e) => setNewShelf(e.target.value)} />
                     <Input placeholder="Floor" type="number" min={0} value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
                   </div>
+                  <p className="text-xs text-muted-foreground">Input 0 for floor</p>
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"

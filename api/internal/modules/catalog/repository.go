@@ -145,7 +145,7 @@ func (r *storeRepository) ListLocations(ctx context.Context, query string) ([]Lo
 		}
 		out = append(out, LookupOption{
 			ID:    id,
-			Label: fmt.Sprintf("Shelf: %s, Floor: %d", shelf, floor),
+			Label: fmt.Sprintf("%s-%s", shelf, formatFloorLabel(floor)),
 		})
 	}
 	return out, rows.Err()
@@ -253,8 +253,15 @@ func (r *storeRepository) CreateLocation(ctx context.Context, shelf string, floo
 	if err != nil {
 		return option, err
 	}
-	option.Label = fmt.Sprintf("Shelf: %s, Floor: %d", createdShelf, createdFloor)
+	option.Label = fmt.Sprintf("%s-%s", createdShelf, formatFloorLabel(createdFloor))
 	return option, err
+}
+
+func formatFloorLabel(floor int32) string {
+	if floor == 0 {
+		return "FLOOR"
+	}
+	return fmt.Sprintf("%d", floor)
 }
 
 func (r *storeRepository) listLookup(ctx context.Context, baseSQL, labelCol, query string) ([]LookupOption, error) {
