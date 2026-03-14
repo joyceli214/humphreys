@@ -111,21 +111,34 @@ func (r *storeRepository) ListPaymentMethods(ctx context.Context, query string) 
 
 func (r *storeRepository) ListLocations(ctx context.Context, query string) ([]LookupOption, error) {
 	trimmed := strings.TrimSpace(query)
-	args := make([]any, 0, 1)
+	args := make([]any, 0, 3)
 	sql := `
 		SELECT location_id::bigint, shelf, floor
 		FROM public.locations
 		WHERE is_active = true
 	`
 	if trimmed != "" {
+		argPos := 1
+		args = append(args, "%"+trimmed+"%")
 		sql += `
 			AND (
 				shelf ILIKE $1 OR
 				floor::text ILIKE $1 OR
 				location_id::text ILIKE $1
+		`
+		argPos++
+		if shelf, floor, ok := parseLocationSearch(trimmed); ok {
+			sql += fmt.Sprintf(`
+				OR (
+					LOWER(BTRIM(shelf)) = $%d
+					AND floor = $%d
+				)
+			`, argPos, argPos+1)
+			args = append(args, strings.ToLower(strings.TrimSpace(shelf)), floor)
+		}
+		sql += `
 			)
 		`
-		args = append(args, "%"+trimmed+"%")
 	}
 	sql += ` ORDER BY floor ASC, shelf ASC, location_id ASC`
 
@@ -262,6 +275,56 @@ func formatFloorLabel(floor int32) string {
 		return "FLOOR"
 	}
 	return fmt.Sprintf("%d", floor)
+}
+
+func parseLocationSearch(raw string) (string, int32, bool) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return "", 0, false
+	}
+	if strings.HasSuffix(value, "floor") {
+		shelf := strings.TrimSpace(strings.TrimSuffix(value, "floor"))
+		shelf = strings.Trim(shelf, "-_ ")
+		if shelf == "" {
+			return "", 0, false
+		}
+		return shelf, 0, true
+	}
+
+	lastDigit := -1
+	for i := len(value) - 1; i >= 0; i-- {
+		ch := value[i]
+		if ch >= '0' && ch <= '9' {
+			lastDigit = i
+			continue
+		}
+		if lastDigit != -1 {
+			break
+		}
+	}
+	if lastDigit == -1 {
+		return "", 0, false
+	}
+	firstDigit := lastDigit
+	for i := lastDigit; i >= 0; i-- {
+		ch := value[i]
+		if ch >= '0' && ch <= '9' {
+			firstDigit = i
+			continue
+		}
+		break
+	}
+	suffix := value[firstDigit : lastDigit+1]
+	shelf := strings.TrimSpace(value[:firstDigit])
+	shelf = strings.Trim(shelf, "-_ ")
+	if shelf == "" {
+		return "", 0, false
+	}
+	var floor int32
+	if _, err := fmt.Sscanf(suffix, "%d", &floor); err != nil {
+		return "", 0, false
+	}
+	return shelf, floor, true
 }
 
 func (r *storeRepository) listLookup(ctx context.Context, baseSQL, labelCol, query string) ([]LookupOption, error) {

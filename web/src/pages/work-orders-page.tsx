@@ -515,7 +515,7 @@ function SingleSearchableDropdown({
                     <Input placeholder="Shelf" value={newShelf} onChange={(e) => setNewShelf(e.target.value)} />
                     <Input placeholder="Floor" type="number" min={0} value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
                   </div>
-                  <p className="text-xs text-muted-foreground">Input 0 for floor</p>
+                  <p className="text-right text-xs text-muted-foreground">Input 0 for floor</p>
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"

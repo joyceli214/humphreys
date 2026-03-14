@@ -535,7 +535,7 @@ function SingleSearchableDropdown({
                     <Input placeholder="Shelf" value={newShelf} onChange={(e) => setNewShelf(e.target.value)} />
                     <Input placeholder="Floor" type="number" min={0} value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
                   </div>
-                  <p className="text-xs text-muted-foreground">Input 0 for floor</p>
+                  <p className="text-right text-xs text-muted-foreground">Input 0 for floor</p>
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
@@ -1248,19 +1248,30 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  const saveStatusOnly = async () => {
+  const saveStatusAndLocationOnly = async () => {
     setSavingSection("equipment");
     setSectionError("");
     try {
-      const updated = await apiClient.updateWorkOrderStatus(parsedReferenceId, {
-        status_id: equipmentForm.status_id
+      const updated = await apiClient.updateWorkOrderEquipment(parsedReferenceId, {
+        status_id: equipmentForm.status_id,
+        job_type_id: equipmentForm.job_type_id,
+        location_id: equipmentForm.location_id,
+        item_id: equipmentForm.item_id,
+        brand_ids: equipmentForm.brand_ids,
+        model_number: blankToNull(equipmentForm.model_number),
+        serial_number: blankToNull(equipmentForm.serial_number),
+        remote_control_qty: Math.max(0, equipmentForm.remote_control_qty),
+        cable_qty: Math.max(0, equipmentForm.cable_qty),
+        cord_qty: Math.max(0, equipmentForm.cord_qty),
+        dvd_vhs_qty: Math.max(0, equipmentForm.dvd_vhs_qty),
+        album_cd_cassette_qty: Math.max(0, equipmentForm.album_cd_cassette_qty)
       });
       setItem(updated);
       setEditingSection(null);
-      alerts.success("Status updated");
+      alerts.success("Status/location updated");
     } catch (err) {
-      setSectionError(err instanceof Error ? err.message : "Failed to save status");
-      alerts.error("Failed to save status", err instanceof Error ? err.message : "Request failed");
+      setSectionError(err instanceof Error ? err.message : "Failed to save status/location");
+      alerts.error("Failed to save status/location", err instanceof Error ? err.message : "Request failed");
     } finally {
       setSavingSection(null);
     }
@@ -1693,6 +1704,16 @@ export default function WorkOrderDetailPage() {
             placeholder="Select status"
             onAddNew={canEdit ? (label) => apiClient.createWorkOrderStatus(label) : undefined}
           />
+          <SingleSearchableDropdown
+            label="Location"
+            value={equipmentForm.location_id}
+            valueLabel={formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}
+            onChange={(value) => setEquipmentForm((prev) => ({ ...prev, location_id: value }))}
+            loadOptions={async (q) => (await apiClient.listLocations(q)).items}
+            placeholder="Select location"
+            onAddLocation={canEdit ? (payload) => apiClient.createLocation(payload) : undefined}
+            allowClear
+          />
           {canEdit ? (
             <>
           <SingleDropdown
@@ -1703,16 +1724,6 @@ export default function WorkOrderDetailPage() {
             loadOptions={async () => (await apiClient.listJobTypes("")).items}
             placeholder="Select job type"
             onAddNew={(label) => apiClient.createJobType(label)}
-          />
-          <SingleSearchableDropdown
-            label="Location"
-            value={equipmentForm.location_id}
-            valueLabel={formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}
-            onChange={(value) => setEquipmentForm((prev) => ({ ...prev, location_id: value }))}
-            loadOptions={async (q) => (await apiClient.listLocations(q)).items}
-            placeholder="Select location"
-            onAddLocation={(payload) => apiClient.createLocation(payload)}
-            allowClear
           />
           <SingleSearchableDropdown
             label="Item"
@@ -1765,7 +1776,7 @@ export default function WorkOrderDetailPage() {
             </>
           ) : null}
           <div className="flex gap-2">
-            <Button size="sm" onClick={canEdit ? saveEquipment : saveStatusOnly} disabled={savingSection === "equipment"}>{savingSection === "equipment" ? "Saving..." : "Save"}</Button>
+            <Button size="sm" onClick={canEdit ? saveEquipment : saveStatusAndLocationOnly} disabled={savingSection === "equipment"}>{savingSection === "equipment" ? "Saving..." : "Save"}</Button>
             <Button size="sm" variant="outline" onClick={cancelEditing} disabled={savingSection === "equipment"}>Cancel</Button>
           </div>
         </div>

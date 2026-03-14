@@ -422,7 +422,8 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.UpdateEquipment(c.Request.Context(), referenceID, EquipmentUpdateInput{
+	canFullEdit := hasPermission(c, permUpdate)
+	input := EquipmentUpdateInput{
 		StatusID:           req.StatusID,
 		JobTypeID:          req.JobTypeID,
 		LocationID:         req.LocationID,
@@ -435,7 +436,31 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 		CordQty:            req.CordQty,
 		DVDVHSQty:          req.DVDVHSQty,
 		AlbumCDCassetteQty: req.AlbumCDCassetteQty,
-	})
+	}
+	if !canFullEdit {
+		current, currentErr := h.service.GetWorkOrderDetail(c.Request.Context(), referenceID)
+		if errors.Is(currentErr, ErrWorkOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+			return
+		}
+		if currentErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch work order"})
+			return
+		}
+		// Status/location-only editors (e.g. staff) cannot modify other equipment fields.
+		input.JobTypeID = current.JobTypeID
+		input.ItemID = current.ItemID
+		input.BrandIDs = current.BrandIDs
+		input.ModelNumber = current.ModelNumber
+		input.SerialNumber = current.SerialNumber
+		input.RemoteControlQty = current.RemoteControlQty
+		input.CableQty = current.CableQty
+		input.CordQty = current.CordQty
+		input.DVDVHSQty = current.DVDVHSQty
+		input.AlbumCDCassetteQty = current.AlbumCDCassetteQty
+	}
+
+	item, err := h.service.UpdateEquipment(c.Request.Context(), referenceID, input)
 	if errors.Is(err, ErrWorkOrderNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
 		return

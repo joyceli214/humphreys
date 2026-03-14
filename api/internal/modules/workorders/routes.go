@@ -2,6 +2,7 @@ package workorders
 
 import (
 	"humphreys/api/internal/middleware"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -43,7 +44,7 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		h.GenerateAISummary,
 	)
 	group.PATCH("/:reference_id/status", middleware.RequirePermission(permStatusUpdate), h.UpdateStatus)
-	group.PATCH("/:reference_id/equipment", middleware.RequirePermission(permUpdate), h.UpdateEquipment)
+	group.PATCH("/:reference_id/equipment", requireEquipmentUpdatePermission(), h.UpdateEquipment)
 	group.PATCH("/:reference_id/work-notes", middleware.RequirePermission(permUpdate), h.UpdateWorkNotes)
 	group.PATCH("/:reference_id/line-items", middleware.RequirePermission(permUpdate), h.UpdateLineItems)
 	group.PATCH("/:reference_id/totals", middleware.RequirePermission(permUpdate), h.UpdateTotals)
@@ -56,4 +57,21 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	group.POST("/:reference_id/parts-purchase-requests", middleware.RequirePermission(permPartsCreate), h.CreatePartsPurchaseRequest)
 	group.PATCH("/:reference_id/parts-purchase-requests/:parts_purchase_request_id", middleware.RequirePermission(permPartsUpdate), h.UpdatePartsPurchaseRequest)
 	group.DELETE("/:reference_id/parts-purchase-requests/:parts_purchase_request_id", middleware.RequirePermission(permPartsDelete), h.DeletePartsPurchaseRequest)
+}
+
+func requireEquipmentUpdatePermission() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims, ok := middleware.Claims(c)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+			return
+		}
+		for _, code := range claims.Scope {
+			if code == permUpdate || code == permStatusUpdate {
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	}
 }
