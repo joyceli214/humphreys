@@ -10,10 +10,10 @@ export function AppSidebar({ className, onNavigate }: { className?: string; onNa
   const { scope } = useAuth();
   const visibleLinks = visibleNavEntries(scope);
   return (
-    <aside className={cn("w-64 border-r border-border bg-white", className)}>
+    <aside className={cn("w-64 shrink-0 border-r border-border bg-white", className)}>
       <div className="px-5 py-6 border-b border-border">
         <p className="text-xs uppercase tracking-wider text-muted-foreground">Admin Panel</p>
-        <h1 className="text-lg font-semibold">Control Center</h1>
+        <h1 className="text-lg font-semibold whitespace-nowrap">Control Center</h1>
       </div>
       <nav className="p-3 space-y-1">
         {visibleLinks.map((link) => (
@@ -22,7 +22,7 @@ export function AppSidebar({ className, onNavigate }: { className?: string; onNa
             to={link.href}
             onClick={onNavigate}
             className={cn(
-              "block rounded-md px-3 py-2 text-sm font-medium",
+              "block rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap",
               pathname === link.href ? "bg-accent text-accent-foreground" : "hover:bg-muted"
             )}
           >

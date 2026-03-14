@@ -112,9 +112,9 @@ function fullName(firstName: string | null, lastName: string | null) {
 
 function detailRow(label: string, value: string) {
   return (
-    <div className="grid grid-cols-[170px_1fr] gap-2 text-sm">
+    <div className="grid grid-cols-[130px_minmax(0,1fr)] gap-2 text-sm sm:grid-cols-[170px_minmax(0,1fr)]">
       <p className="text-muted-foreground">{label}</p>
-      <p>{value || "-"}</p>
+      <p className="min-w-0 break-words [overflow-wrap:anywhere]">{value || "-"}</p>
     </div>
   );
 }
@@ -122,14 +122,14 @@ function detailRow(label: string, value: string) {
 function markdownBlock(value: string | null) {
   const content = value?.trim() ? value : "-";
   return (
-    <div className="rounded-md border border-border p-3 text-sm">
+    <div className="rounded-md border border-border p-3 text-sm break-words">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw]}
         components={{
           p: ({ children }) => <p className="mb-2 leading-6 last:mb-0">{children}</p>,
           a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+            <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 break-all">
               {children}
             </a>
           ),
@@ -162,7 +162,7 @@ function markdownPlain(value: string | null) {
       components={{
         p: ({ children }) => <p className="mb-2 leading-6 last:mb-0">{children}</p>,
         a: ({ children, href }) => (
-          <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">
+          <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 break-all">
             {children}
           </a>
         ),
@@ -1847,7 +1847,7 @@ export default function WorkOrderDetailPage() {
   );
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Work Order #{item.reference_id}</h1>
@@ -1865,8 +1865,8 @@ export default function WorkOrderDetailPage() {
 
       {sectionError && <p className="text-sm text-destructive">{sectionError}</p>}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[7fr_3fr] gap-4 items-start">
-        <div className="space-y-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[7fr_3fr] gap-4 items-start min-w-0">
+        <div className="min-w-0 space-y-4">
           {canViewSensitive && (
             <article className="rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
@@ -2406,7 +2406,7 @@ export default function WorkOrderDetailPage() {
           )}
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           {equipmentBlock}
 
           <aside className="rounded-lg border border-border bg-white p-4 space-y-3">

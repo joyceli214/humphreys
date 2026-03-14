@@ -110,3 +110,44 @@ type PartsPurchaseRequest struct {
 	CreatedAt              *time.Time `json:"created_at"`
 	UpdatedAt              *time.Time `json:"updated_at"`
 }
+
+type DashboardWorkOrderItem struct {
+	ReferenceID     int32      `json:"reference_id"`
+	CustomerName    *string    `json:"customer_name"`
+	ItemName        *string    `json:"item_name"`
+	Status          string     `json:"status"`
+	StatusUpdatedAt *time.Time `json:"status_updated_at"`
+}
+
+type DashboardOverdueItem struct {
+	ReferenceID     int32      `json:"reference_id"`
+	CustomerName    *string    `json:"customer_name"`
+	ItemName        *string    `json:"item_name"`
+	LateDays        int32      `json:"late_days"`
+	StatusUpdatedAt *time.Time `json:"status_updated_at"`
+}
+
+type DashboardPartsReviewItem struct {
+	PartsPurchaseRequestID int64      `json:"parts_purchase_request_id"`
+	ReferenceID            int32      `json:"reference_id"`
+	ItemName               string     `json:"item_name"`
+	TotalPrice             float64    `json:"total_price"`
+	CreatedAt              *time.Time `json:"created_at"`
+}
+
+type DashboardActivityItem struct {
+	PersonID    string     `json:"person_id"`
+	PersonName  string     `json:"person_name"`
+	ReferenceID int32      `json:"reference_id"`
+	Details     string     `json:"details"`
+	LoggedAt    *time.Time `json:"logged_at"`
+}
+
+type DashboardData struct {
+	ReadyTotal       int64                      `json:"ready_total"`
+	OverdueTotal     int64                      `json:"overdue_total"`
+	ReadyItems       []DashboardWorkOrderItem   `json:"ready_items"`
+	OverdueItems     []DashboardOverdueItem     `json:"overdue_items"`
+	PartsReviewItems []DashboardPartsReviewItem `json:"parts_review_items"`
+	ActivityItems    []DashboardActivityItem    `json:"activity_items"`
+}

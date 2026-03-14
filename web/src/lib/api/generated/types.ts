@@ -161,3 +161,44 @@ export interface CustomerLookupOption {
   city?: string | null;
   province?: string | null;
 }
+
+export interface DashboardWorkOrderItem {
+  reference_id: number;
+  customer_name: string | null;
+  item_name: string | null;
+  status: string;
+  status_updated_at: string | null;
+}
+
+export interface DashboardOverdueItem {
+  reference_id: number;
+  customer_name: string | null;
+  item_name: string | null;
+  late_days: number;
+  status_updated_at: string | null;
+}
+
+export interface DashboardPartsReviewItem {
+  parts_purchase_request_id: number;
+  reference_id: number;
+  item_name: string;
+  total_price: number;
+  created_at: string | null;
+}
+
+export interface DashboardActivityItem {
+  person_id: string;
+  person_name: string;
+  reference_id: number;
+  details: string;
+  logged_at: string | null;
+}
+
+export interface DashboardData {
+  ready_total: number;
+  overdue_total: number;
+  ready_items: DashboardWorkOrderItem[];
+  overdue_items: DashboardOverdueItem[];
+  parts_review_items: DashboardPartsReviewItem[];
+  activity_items: DashboardActivityItem[];
+}

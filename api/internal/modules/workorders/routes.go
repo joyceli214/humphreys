@@ -33,6 +33,7 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 
 	group := authed.Group("/work-orders")
 	group.GET("/customers", middleware.RequirePermission(permRead), h.ListCustomers)
+	group.GET("/dashboard", middleware.RequirePermission(permRead), h.Dashboard)
 	group.POST("", middleware.RequirePermission(permCreate), h.CreateWorkOrder)
 	group.DELETE("/:reference_id", middleware.RequirePermission(permCreate), h.DeleteWorkOrder)
 	group.GET("", middleware.RequirePermission(permRead), h.ListWorkOrders)

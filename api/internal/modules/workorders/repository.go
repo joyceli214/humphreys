@@ -34,6 +34,7 @@ type Repository interface {
 	CreatePartsPurchaseRequest(ctx context.Context, referenceID int, input CreatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error)
 	UpdatePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, input UpdatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error)
 	DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64) error
+	GetDashboardData(ctx context.Context, input DashboardQueryInput) (domain.DashboardData, error)
 }
 
 type storeRepository struct {
@@ -1289,6 +1290,187 @@ func (r *storeRepository) ListAllPartsPurchaseRequests(ctx context.Context) ([]d
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQueryInput) (domain.DashboardData, error) {
+	readyPage := input.ReadyPage
+	if readyPage < 1 {
+		readyPage = 1
+	}
+	readyPageSize := input.ReadyPageSize
+	if readyPageSize < 1 || readyPageSize > 100 {
+		readyPageSize = 10
+	}
+	overduePage := input.OverduePage
+	if overduePage < 1 {
+		overduePage = 1
+	}
+	overduePageSize := input.OverduePageSize
+	if overduePageSize < 1 || overduePageSize > 100 {
+		overduePageSize = 10
+	}
+
+	readyOffset := (readyPage - 1) * readyPageSize
+	overdueOffset := (overduePage - 1) * overduePageSize
+
+	out := domain.DashboardData{
+		ReadyItems:       make([]domain.DashboardWorkOrderItem, 0),
+		OverdueItems:     make([]domain.DashboardOverdueItem, 0),
+		PartsReviewItems: make([]domain.DashboardPartsReviewItem, 0),
+		ActivityItems:    make([]domain.DashboardActivityItem, 0),
+	}
+
+	baseFilter := `
+		FROM public.work_orders wo
+		LEFT JOIN public.work_order_statuses st ON st.status_id = wo.status_id
+		LEFT JOIN public.job_types jt ON jt.job_type_id = wo.job_type_id
+		LEFT JOIN public.customers c ON c.customer_id = wo.customer_id
+		LEFT JOIN public.items i ON i.item_id = wo.item_id
+		WHERE COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) >= $1::date
+		  AND COALESCE(jt.display_name, '') NOT ILIKE '%stock%'
+	`
+
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.display_name, '') ILIKE '%finished%'`, input.RangeStart).Scan(&out.ReadyTotal); err != nil {
+		return domain.DashboardData{}, err
+	}
+
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.display_name, '') NOT ILIKE '%picked up%' AND (now() - COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at)) > interval '14 days'`, input.RangeStart).Scan(&out.OverdueTotal); err != nil {
+		return domain.DashboardData{}, err
+	}
+
+	readyRows, err := r.db.Query(ctx, `
+		SELECT
+			wo.reference_id,
+			c.full_name_search AS customer_name,
+			i.item_name,
+			COALESCE(st.display_name, 'Unknown') AS status_name,
+			COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) AS status_updated_at
+		`+baseFilter+`
+		  AND COALESCE(st.display_name, '') ILIKE '%finished%'
+		ORDER BY COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) DESC, wo.reference_id DESC
+		LIMIT $2 OFFSET $3
+	`, input.RangeStart, readyPageSize, readyOffset)
+	if err != nil {
+		return domain.DashboardData{}, err
+	}
+	defer readyRows.Close()
+	for readyRows.Next() {
+		var item domain.DashboardWorkOrderItem
+		if err := readyRows.Scan(&item.ReferenceID, &item.CustomerName, &item.ItemName, &item.Status, &item.StatusUpdatedAt); err != nil {
+			return domain.DashboardData{}, err
+		}
+		out.ReadyItems = append(out.ReadyItems, item)
+	}
+	if err := readyRows.Err(); err != nil {
+		return domain.DashboardData{}, err
+	}
+
+	overdueRows, err := r.db.Query(ctx, `
+		SELECT
+			wo.reference_id,
+			c.full_name_search AS customer_name,
+			i.item_name,
+			FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at))) / 86400)::int AS late_days,
+			COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) AS status_updated_at
+		`+baseFilter+`
+		  AND COALESCE(st.display_name, '') NOT ILIKE '%picked up%'
+		  AND (now() - COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at)) > interval '14 days'
+		ORDER BY COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) DESC, wo.reference_id DESC
+		LIMIT $2 OFFSET $3
+	`, input.RangeStart, overduePageSize, overdueOffset)
+	if err != nil {
+		return domain.DashboardData{}, err
+	}
+	defer overdueRows.Close()
+	for overdueRows.Next() {
+		var item domain.DashboardOverdueItem
+		if err := overdueRows.Scan(&item.ReferenceID, &item.CustomerName, &item.ItemName, &item.LateDays, &item.StatusUpdatedAt); err != nil {
+			return domain.DashboardData{}, err
+		}
+		out.OverdueItems = append(out.OverdueItems, item)
+	}
+	if err := overdueRows.Err(); err != nil {
+		return domain.DashboardData{}, err
+	}
+
+	if input.IncludeParts {
+		rows, err := r.db.Query(ctx, `
+			SELECT
+				ppr.parts_purchase_request_id,
+				ppr.reference_id,
+				ppr.item_name,
+				ppr.total_price::double precision,
+				ppr.created_at
+			FROM public.parts_purchase_requests ppr
+			WHERE ppr.status = 'waiting_approval'
+			  AND ppr.created_at >= $1::date
+			ORDER BY ppr.created_at DESC, ppr.parts_purchase_request_id DESC
+			LIMIT 5
+		`, input.RangeStart)
+		if err != nil {
+			return domain.DashboardData{}, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item domain.DashboardPartsReviewItem
+			if err := rows.Scan(&item.PartsPurchaseRequestID, &item.ReferenceID, &item.ItemName, &item.TotalPrice, &item.CreatedAt); err != nil {
+				return domain.DashboardData{}, err
+			}
+			out.PartsReviewItems = append(out.PartsReviewItems, item)
+		}
+		if err := rows.Err(); err != nil {
+			return domain.DashboardData{}, err
+		}
+	}
+
+	if input.IncludeActivity {
+		rows, err := r.db.Query(ctx, `
+			WITH candidate_logs AS (
+				SELECT
+					rl.created_by_user_id::text AS person_id,
+					COALESCE(u.full_name, 'Unknown') AS person_name,
+					rl.reference_id,
+					rl.details,
+					COALESCE(rl.updated_at, rl.created_at, rl.repair_date::timestamp) AS logged_at
+				FROM public.repair_logs rl
+				JOIN public.work_orders wo ON wo.reference_id = rl.reference_id
+				LEFT JOIN public.users u ON u.id = rl.created_by_user_id
+				LEFT JOIN public.job_types jt ON jt.job_type_id = wo.job_type_id
+				WHERE COALESCE(jt.display_name, '') NOT ILIKE '%stock%'
+				  AND COALESCE(rl.updated_at, rl.created_at, rl.repair_date::timestamp) >= $1::date
+			),
+			latest_per_person AS (
+				SELECT DISTINCT ON (person_id)
+					person_id,
+					person_name,
+					reference_id,
+					details,
+					logged_at
+				FROM candidate_logs
+				ORDER BY person_id, logged_at DESC
+			)
+			SELECT person_id, person_name, reference_id, details, logged_at
+			FROM latest_per_person
+			ORDER BY logged_at DESC
+			LIMIT 6
+		`, input.RangeStart)
+		if err != nil {
+			return domain.DashboardData{}, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item domain.DashboardActivityItem
+			if err := rows.Scan(&item.PersonID, &item.PersonName, &item.ReferenceID, &item.Details, &item.LoggedAt); err != nil {
+				return domain.DashboardData{}, err
+			}
+			out.ActivityItems = append(out.ActivityItems, item)
+		}
+		if err := rows.Err(); err != nil {
+			return domain.DashboardData{}, err
+		}
+	}
+
+	return out, nil
 }
 
 func (r *storeRepository) CreateRepairLog(ctx context.Context, referenceID int, repairDate *string, hoursUsed *float64, details, createdByUserID string) (domain.RepairLog, error) {

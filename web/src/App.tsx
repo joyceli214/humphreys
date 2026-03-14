@@ -8,6 +8,7 @@ import WorkOrderDetailPage from "@/pages/work-order-detail-page";
 import PartsPurchaseRequestsPage from "@/pages/parts-purchase-requests-page";
 import UsersPage from "@/pages/users-page";
 import RolesPage from "@/pages/roles-page";
+import AdminDashboardPage from "@/pages/admin-dashboard-page";
 
 function HomeRedirect() {
   const { loading, scope } = useAuth();
@@ -20,6 +21,14 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedShell>
+            <AdminDashboardPage />
+          </ProtectedShell>
+        }
+      />
       <Route
         path="/work-orders"
         element={

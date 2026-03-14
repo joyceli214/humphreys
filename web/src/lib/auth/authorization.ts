@@ -5,6 +5,7 @@ export type NavEntry = {
 };
 
 export const NAV_ENTRIES: NavEntry[] = [
+  { href: "/dashboard", label: "Dashboard", readPermission: "work_orders:read" },
   { href: "/work-orders", label: "Work Orders", readPermission: "work_orders:read" },
   { href: "/parts-purchase-requests", label: "Parts Requests", readPermission: "work_orders_sensitive:read" },
   { href: "/users", label: "User Management", readPermission: "users:read" },

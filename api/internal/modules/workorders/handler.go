@@ -154,6 +154,15 @@ type updatePartsPurchaseRequest struct {
 	Quantity   int32   `json:"quantity" binding:"required,gte=1"`
 }
 
+type dashboardResponse struct {
+	ReadyTotal       int64                             `json:"ready_total"`
+	OverdueTotal     int64                             `json:"overdue_total"`
+	ReadyItems       []domain.DashboardWorkOrderItem   `json:"ready_items"`
+	OverdueItems     []domain.DashboardOverdueItem     `json:"overdue_items"`
+	PartsReviewItems []domain.DashboardPartsReviewItem `json:"parts_review_items"`
+	ActivityItems    []domain.DashboardActivityItem    `json:"activity_items"`
+}
+
 func New(db *pgxpool.Pool) *Handler {
 	aiCache := ttlcache.New[string, aiSummaryCacheItem](ttlcache.WithTTL[string, aiSummaryCacheItem](30 * time.Second))
 	go aiCache.Start()
@@ -241,6 +250,46 @@ func (h *Handler) ListWorkOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (h *Handler) Dashboard(c *gin.Context) {
+	rangeKey := strings.TrimSpace(c.DefaultQuery("range", "90d"))
+	rangeStart, err := dashboardRangeStart(rangeKey)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid range"})
+		return
+	}
+
+	readyPage := parsePositiveIntOrDefault(c.Query("ready_page"), 1)
+	readyPageSize := parsePositiveIntOrDefault(c.Query("ready_page_size"), 10)
+	overduePage := parsePositiveIntOrDefault(c.Query("overdue_page"), 1)
+	overduePageSize := parsePositiveIntOrDefault(c.Query("overdue_page_size"), 10)
+
+	includeParts := hasPermission(c, permPartsRead) && hasPermission(c, permSensitiveRead)
+	includeActivity := hasPermission(c, permRepairLogsRead)
+
+	data, err := h.service.GetDashboardData(c.Request.Context(), DashboardQueryInput{
+		RangeStart:      rangeStart,
+		ReadyPage:       readyPage,
+		ReadyPageSize:   readyPageSize,
+		OverduePage:     overduePage,
+		OverduePageSize: overduePageSize,
+		IncludeParts:    includeParts,
+		IncludeActivity: includeActivity,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load dashboard"})
+		return
+	}
+
+	c.JSON(http.StatusOK, dashboardResponse{
+		ReadyTotal:       data.ReadyTotal,
+		OverdueTotal:     data.OverdueTotal,
+		ReadyItems:       data.ReadyItems,
+		OverdueItems:     data.OverdueItems,
+		PartsReviewItems: data.PartsReviewItems,
+		ActivityItems:    data.ActivityItems,
+	})
+}
+
 func parsePositiveInt64Query(raw string) (*int64, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -262,6 +311,37 @@ func parseDateQuery(raw string) (*string, error) {
 		return nil, err
 	}
 	return &trimmed, nil
+}
+
+func parsePositiveIntOrDefault(raw string, fallback int) int {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func dashboardRangeStart(rangeKey string) (string, error) {
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	switch rangeKey {
+	case "90d":
+		start = start.AddDate(0, 0, -89)
+	case "2w":
+		start = start.AddDate(0, 0, -13)
+	case "1m":
+		start = start.AddDate(0, -1, 0)
+	case "1y":
+		start = start.AddDate(-1, 0, 0)
+	default:
+		return "", errors.New("invalid range")
+	}
+	return start.Format("2006-01-02"), nil
 }
 
 func (h *Handler) GetWorkOrder(c *gin.Context) {

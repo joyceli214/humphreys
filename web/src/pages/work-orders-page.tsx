@@ -1114,6 +1114,19 @@ export default function WorkOrdersPage() {
     setCreateOpen(true);
   };
 
+  useEffect(() => {
+    if (!canCreateWorkOrders) return;
+    const createParam = searchParams.get("create");
+    if (createParam !== "new_job" && createParam !== "stock") return;
+
+    openCreateModal(createParam);
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("create");
+    setSearchParams(nextParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canCreateWorkOrders, searchParams, setSearchParams]);
+
   if (!hasPermission("work_orders:read")) {
     return null;
   }

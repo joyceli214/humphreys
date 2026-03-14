@@ -50,12 +50,26 @@ type WorkOrderListFilters struct {
 	CreatedTo   *string
 }
 
+type DashboardQueryInput struct {
+	RangeStart      string
+	ReadyPage       int
+	ReadyPageSize   int
+	OverduePage     int
+	OverduePageSize int
+	IncludeParts    bool
+	IncludeActivity bool
+}
+
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
 func (s *Service) ListWorkOrders(ctx context.Context, query string, filters WorkOrderListFilters, includeSensitive bool, page, pageSize int) ([]domain.WorkOrderListItem, error) {
 	return s.repo.ListWorkOrders(ctx, query, filters, includeSensitive, page, pageSize)
+}
+
+func (s *Service) GetDashboardData(ctx context.Context, input DashboardQueryInput) (domain.DashboardData, error) {
+	return s.repo.GetDashboardData(ctx, input)
 }
 
 func (s *Service) GetWorkOrderDetail(ctx context.Context, referenceID int) (domain.WorkOrderDetail, error) {

@@ -33,7 +33,7 @@ export function ProtectedShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-[100dvh] flex bg-background">
+    <div className="min-h-[100dvh] flex overflow-x-hidden bg-background">
       <AppSidebar className="hidden md:block" />
 
       {mobileMenuOpen && (
@@ -48,9 +48,9 @@ export function ProtectedShell({ children }: { children: ReactNode }) {
         </>
       )}
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenuToggle={() => setMobileMenuOpen(true)} />
-        <main className="p-6">{children}</main>
+        <main className="min-w-0 overflow-x-hidden p-6">{children}</main>
       </div>
     </div>
   );

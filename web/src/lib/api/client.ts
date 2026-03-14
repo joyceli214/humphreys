@@ -1,6 +1,7 @@
 import type {
   AuthResponse,
   CustomerLookupOption,
+  DashboardData,
   LookupOption,
   PartsPurchaseRequest,
   Permission,
@@ -185,6 +186,10 @@ export class APIClient {
 
   listWorkOrders(params: URLSearchParams) {
     return this.request<{ items: WorkOrderListItem[] }>(`/work-orders?${params.toString()}`);
+  }
+
+  getDashboard(params: URLSearchParams) {
+    return this.request<DashboardData>(`/work-orders/dashboard?${params.toString()}`);
   }
 
   listWorkOrderCustomers(q = "") {
