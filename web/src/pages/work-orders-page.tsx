@@ -58,6 +58,13 @@ function statusClass(status: string) {
   return "bg-muted text-muted-foreground";
 }
 
+function formatLocationValue(locationID: number | null, locationShelf: string | null, locationFloor: number | null) {
+  if (locationID == null && !locationShelf && locationFloor == null) return "-";
+  const shelf = locationShelf?.trim() ? locationShelf : "-";
+  const floor = locationFloor == null ? "-" : String(locationFloor);
+  return `Shelf: ${shelf}, Floor: ${floor}`;
+}
+
 function parseNonNegativeInt(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return 0;
@@ -313,8 +320,10 @@ function SingleSearchableDropdown({
   loadOptions,
   placeholder,
   onAddNew,
+  onAddLocation,
   searchable = true,
-  allowClear = false
+  allowClear = false,
+  clearLabel = "Any"
 }: {
   label: string;
   value: number | null;
@@ -323,8 +332,10 @@ function SingleSearchableDropdown({
   loadOptions: (query: string) => Promise<LookupOption[]>;
   placeholder: string;
   onAddNew?: (label: string) => Promise<LookupOption>;
+  onAddLocation?: (payload: { shelf: string; floor: number }) => Promise<LookupOption>;
   searchable?: boolean;
   allowClear?: boolean;
+  clearLabel?: string;
 }) {
   const alerts = useAlerts();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -335,6 +346,8 @@ function SingleSearchableDropdown({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [adding, setAdding] = useState(false);
   const [newValue, setNewValue] = useState("");
+  const [newShelf, setNewShelf] = useState("");
+  const [newFloor, setNewFloor] = useState("0");
 
   useEffect(() => {
     if (!open) return;
@@ -470,7 +483,7 @@ function SingleSearchableDropdown({
                     setOpen(false);
                   }}
                 >
-                  Any
+                  {clearLabel}
                 </button>
               )}
               {options.map((option, index) => (
@@ -487,7 +500,7 @@ function SingleSearchableDropdown({
                   {option.label}
                 </button>
               ))}
-              {!adding && onAddNew && (
+              {!adding && (onAddNew || onAddLocation) && (
                 <button
                   type="button"
                   className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
@@ -496,7 +509,58 @@ function SingleSearchableDropdown({
                   + Add new...
                 </button>
               )}
-              {adding && onAddNew && (
+              {adding && onAddLocation && (
+                <div className="p-0 space-y-2">
+                  <div className="grid grid-cols-[1fr_120px] gap-2">
+                    <Input placeholder="Shelf" value={newShelf} onChange={(e) => setNewShelf(e.target.value)} />
+                    <Input placeholder="Floor" type="number" min={0} value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAdding(false);
+                        setNewShelf("");
+                        setNewFloor("0");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={async () => {
+                        const shelf = newShelf.trim();
+                        const floor = Number(newFloor.trim());
+                        if (!shelf) {
+                          alerts.error("Shelf required", "Enter a shelf value.");
+                          return;
+                        }
+                        if (!Number.isInteger(floor) || floor < 0) {
+                          alerts.error("Invalid floor", "Floor must be a whole number zero or greater.");
+                          return;
+                        }
+                        try {
+                          const created = await onAddLocation({ shelf, floor });
+                          onChange(created.id);
+                          setAdding(false);
+                          setNewShelf("");
+                          setNewFloor("0");
+                          setOpen(false);
+                          alerts.success(`${label} added`);
+                        } catch (err) {
+                          alerts.error(`Failed to add ${label.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
+                        }
+                      }}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {adding && onAddNew && !onAddLocation && (
                 <div className="p-0">
                   <div className="flex items-center gap-2">
                     <Input
@@ -864,6 +928,7 @@ export default function WorkOrdersPage() {
   const [albumCdCassetteQty, setAlbumCdCassetteQty] = useState("0");
   const [deposit, setDeposit] = useState("0");
   const [itemId, setItemId] = useState<number | null>(null);
+  const [locationId, setLocationId] = useState<number | null>(null);
   const [brandIds, setBrandIds] = useState<number[]>([]);
   const [modelNumber, setModelNumber] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
@@ -1018,6 +1083,7 @@ export default function WorkOrdersPage() {
     setAlbumCdCassetteQty("0");
     setDeposit("0");
     setItemId(null);
+    setLocationId(null);
     setBrandIds([]);
     setModelNumber("");
     setSerialNumber("");
@@ -1202,6 +1268,16 @@ export default function WorkOrdersPage() {
               <p className="text-sm font-medium">Equipment</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 <SingleSearchableDropdown
+                  label="Location"
+                  value={locationId}
+                  onChange={setLocationId}
+                  loadOptions={async (q) => (await apiClient.listLocations(q)).items}
+                  placeholder="Select location"
+                  onAddLocation={(payload) => apiClient.createLocation(payload)}
+                  allowClear
+                  clearLabel="None"
+                />
+                <SingleSearchableDropdown
                   label="Item"
                   value={itemId}
                   onChange={setItemId}
@@ -1371,6 +1447,7 @@ export default function WorkOrdersPage() {
                               province: newCustomerProvince.trim() || undefined
                             }
                           : undefined,
+                      location_id: locationId ?? undefined,
                       item_id: itemId ?? undefined,
                       brand_ids: brandIds,
                       model_number: modelNumber.trim() || undefined,
@@ -1432,8 +1509,8 @@ export default function WorkOrdersPage() {
             <Input
               placeholder={
                 canViewSensitive
-                  ? "Search reference, customer name/phone/email, status, job type, item, brand, model, serial"
-                  : "Search reference, customer name, status, job type, item, brand, model, serial"
+                  ? "Search reference, customer name/phone/email, status, job type, location, item, brand, model, serial"
+                  : "Search reference, customer name, status, job type, location, item, brand, model, serial"
               }
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -1554,6 +1631,7 @@ export default function WorkOrdersPage() {
               <Th>Status</Th>
               <Th>Job Type</Th>
               <Th>Item</Th>
+              <Th>Location</Th>
               <Th>Created</Th>
               <Th className="w-[120px]">Action</Th>
             </tr>
@@ -1561,12 +1639,12 @@ export default function WorkOrdersPage() {
           <tbody>
             {loading && items.length === 0 && (
               <tr>
-                <Td colSpan={7}>Loading work orders...</Td>
+                <Td colSpan={8}>Loading work orders...</Td>
               </tr>
             )}
             {!loading && items.length === 0 && (
               <tr>
-                <Td colSpan={7}>No work orders found.</Td>
+                <Td colSpan={8}>No work orders found.</Td>
               </tr>
             )}
             {items.map((item) => (
@@ -1588,6 +1666,7 @@ export default function WorkOrdersPage() {
                     {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
                   </div>
                 </Td>
+                <Td>{formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}</Td>
                 <Td>{formatDateTime(item.created_at)}</Td>
                 <Td>
                   <Button variant="outline" size="sm" asChild>

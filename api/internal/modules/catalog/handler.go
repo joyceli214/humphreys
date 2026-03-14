@@ -16,6 +16,12 @@ type createLookupRequest struct {
 	Label string `json:"label" binding:"required"`
 }
 
+type createLocationRequest struct {
+	Label *string `json:"label"`
+	Shelf *string `json:"shelf"`
+	Floor *int32  `json:"floor"`
+}
+
 func New(db *pgxpool.Pool) *Handler {
 	return &Handler{
 		service: NewService(NewRepository(db)),
@@ -93,6 +99,15 @@ func (h *Handler) ListPaymentMethods(c *gin.Context) {
 	items, err := h.service.ListPaymentMethods(c.Request.Context(), c.Query("q"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list payment methods"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) ListLocations(c *gin.Context) {
+	items, err := h.service.ListLocations(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list locations"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
@@ -196,6 +211,37 @@ func (h *Handler) CreatePaymentMethod(c *gin.Context) {
 	}
 	item, err := h.service.CreatePaymentMethod(c.Request.Context(), req.Label)
 	if errors.Is(err, ErrInvalidLookupLabel) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, item)
+}
+
+func (h *Handler) CreateLocation(c *gin.Context) {
+	var req createLocationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	shelf := ""
+	if req.Shelf != nil {
+		shelf = *req.Shelf
+	} else if req.Label != nil {
+		// Backward-compatible payload for older UI add-new flow.
+		shelf = *req.Label
+	}
+	floor := int32(0)
+	if req.Floor != nil {
+		floor = *req.Floor
+	}
+
+	item, err := h.service.CreateLocation(c.Request.Context(), shelf, floor)
+	if errors.Is(err, ErrInvalidLocationShelf) || errors.Is(err, ErrInvalidLocationFloor) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

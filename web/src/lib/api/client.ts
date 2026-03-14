@@ -219,6 +219,7 @@ export class APIClient {
       city?: string;
       province?: string;
     };
+    location_id?: number;
     item_id?: number;
     brand_ids?: number[];
     model_number?: string;
@@ -267,6 +268,7 @@ export class APIClient {
       serial_number: string | null;
       status_id: number | null;
       job_type_id: number | null;
+      location_id: number | null;
       item_id: number | null;
       brand_ids: number[];
       remote_control_qty: number;
@@ -447,6 +449,10 @@ export class APIClient {
     return this.cachedLookup("/catalog/payment-methods", q);
   }
 
+  listLocations(q = "") {
+    return this.cachedLookup("/catalog/locations", q);
+  }
+
   createWorkOrderStatus(label: string) {
     return this.createLookup("/catalog/work-order-statuses", label);
   }
@@ -469,6 +475,17 @@ export class APIClient {
 
   createPaymentMethod(label: string) {
     return this.createLookup("/catalog/payment-methods", label);
+  }
+
+  createLocation(payload: { shelf: string; floor: number }) {
+    const shelf = payload.shelf.trim();
+    return this.request<LookupOption>("/catalog/locations", {
+      method: "POST",
+      body: JSON.stringify({ shelf, floor: payload.floor })
+    }).then((created) => {
+      this.invalidateLookupCache("/catalog/locations");
+      return created;
+    });
   }
 
   private async refreshAccessToken(): Promise<boolean> {

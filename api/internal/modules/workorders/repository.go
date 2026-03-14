@@ -72,6 +72,16 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, filt
 		phonePattern := "%" + digits + "%"
 		searchTerms := []string{
 			fmt.Sprintf("wo.reference_id::text ILIKE $%d", argPos),
+			fmt.Sprintf(`EXISTS (
+				SELECT 1
+				FROM public.locations loc
+				WHERE loc.location_id = wo.location_id
+				  AND (
+						loc.location_id::text ILIKE $%d OR
+						COALESCE(loc.shelf, '') ILIKE $%d OR
+						loc.floor::text ILIKE $%d
+				  )
+				)`, argPos, argPos, argPos),
 			fmt.Sprintf("COALESCE(wo.model_number, '') ILIKE $%d", argPos),
 			fmt.Sprintf("COALESCE(wo.serial_number, '') ILIKE $%d", argPos),
 		}
@@ -182,6 +192,10 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, filt
 			wo.updated_at,
 			COALESCE(st.display_name, 'Unknown') AS status_name,
 			COALESCE(jt.display_name, 'Unknown') AS job_type_name,
+			wo.location_id,
+			loc.location_code,
+			loc.shelf,
+			loc.floor,
 			%s,
 			%s,
 			i.item_name,
@@ -199,6 +213,7 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, filt
 		FROM paged_work_orders p
 		JOIN public.work_orders wo ON wo.reference_id = p.reference_id
 		%s
+		LEFT JOIN public.locations loc ON loc.location_id = wo.location_id
 		LEFT JOIN public.items i ON i.item_id = wo.item_id
 		LEFT JOIN public.work_order_statuses st ON st.status_id = wo.status_id
 		LEFT JOIN public.job_types jt ON jt.job_type_id = wo.job_type_id
@@ -220,6 +235,10 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, filt
 			&item.UpdatedAt,
 			&item.Status,
 			&item.JobType,
+			&item.LocationID,
+			&item.LocationCode,
+			&item.LocationShelf,
+			&item.LocationFloor,
 			&item.CustomerName,
 			&item.CustomerEmail,
 			&item.ItemName,
@@ -259,6 +278,10 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 			wo.job_type_id,
 			jt.job_type_key,
 			jt.display_name,
+			wo.location_id,
+			loc.location_code,
+			loc.shelf,
+			loc.floor,
 			c.customer_id,
 			c.first_name,
 			c.last_name,
@@ -314,6 +337,7 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 			wo.deposit::double precision
 		FROM public.work_orders wo
 		LEFT JOIN public.customers c ON c.customer_id = wo.customer_id
+		LEFT JOIN public.locations loc ON loc.location_id = wo.location_id
 		LEFT JOIN public.items i ON i.item_id = wo.item_id
 		LEFT JOIN public.work_order_statuses st ON st.status_id = wo.status_id
 		LEFT JOIN public.job_types jt ON jt.job_type_id = wo.job_type_id
@@ -332,6 +356,10 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 		&detail.JobTypeID,
 		&detail.JobTypeKey,
 		&detail.JobTypeName,
+		&detail.LocationID,
+		&detail.LocationCode,
+		&detail.LocationShelf,
+		&detail.LocationFloor,
 		&detail.Customer.CustomerID,
 		&detail.Customer.FirstName,
 		&detail.Customer.LastName,
@@ -655,6 +683,19 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 		depositPaymentMethodIDs = append(depositPaymentMethodIDs, *input.DepositPaymentMethodID)
 	}
 
+	if input.LocationID != nil {
+		if *input.LocationID <= 0 {
+			return domain.WorkOrderDetail{}, ErrLocationNotFound
+		}
+		var locationExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.locations WHERE location_id = $1 AND is_active = true)`, *input.LocationID).Scan(&locationExists); err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		if !locationExists {
+			return domain.WorkOrderDetail{}, ErrLocationNotFound
+		}
+	}
+
 	var statusID *int64
 	var preferredStatusID int64
 	statusErr := tx.QueryRow(ctx, `
@@ -690,6 +731,7 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 			customer_id,
 			status_id,
 			job_type_id,
+			location_id,
 			item_id,
 			remote_control_qty,
 			cable_qty,
@@ -707,13 +749,13 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 			status_updated_at
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-			COALESCE($11::bigint[], ARRAY[]::bigint[]),
-			$12,
-			COALESCE($13::bigint[], ARRAY[]::bigint[]),
-			COALESCE($14::integer[], ARRAY[]::integer[]),
-			$15,
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+			COALESCE($12::bigint[], ARRAY[]::bigint[]),
+			$13,
+			COALESCE($14::bigint[], ARRAY[]::bigint[]),
+			COALESCE($15::integer[], ARRAY[]::integer[]),
 			$16,
+			$17,
 			now(), now(), now()
 		)
 	`,
@@ -721,6 +763,7 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 		customerID,
 		statusID,
 		jobTypeID,
+		input.LocationID,
 		input.ItemID,
 		input.RemoteControlQty,
 		input.CableQty,
@@ -745,25 +788,40 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 }
 
 func (r *storeRepository) UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) error {
+	if input.LocationID != nil {
+		if *input.LocationID <= 0 {
+			return ErrLocationNotFound
+		}
+		var locationExists bool
+		if err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.locations WHERE location_id = $1 AND is_active = true)`, *input.LocationID).Scan(&locationExists); err != nil {
+			return err
+		}
+		if !locationExists {
+			return ErrLocationNotFound
+		}
+	}
+
 	cmd, err := r.db.Exec(ctx, `
 		UPDATE public.work_orders
 		SET
 			status_id = $1,
 			job_type_id = $2,
-			item_id = $3,
-			brand_ids = $4,
-			model_number = $5,
-			serial_number = $6,
-			remote_control_qty = $7,
-			cable_qty = $8,
-			cord_qty = $9,
-			dvd_vhs_qty = $10,
-			album_cd_cassette_qty = $11,
+			location_id = $3,
+			item_id = $4,
+			brand_ids = $5,
+			model_number = $6,
+			serial_number = $7,
+			remote_control_qty = $8,
+			cable_qty = $9,
+			cord_qty = $10,
+			dvd_vhs_qty = $11,
+			album_cd_cassette_qty = $12,
 			updated_at = now()
-		WHERE reference_id = $12
+		WHERE reference_id = $13
 	`,
 		input.StatusID,
 		input.JobTypeID,
+		input.LocationID,
 		input.ItemID,
 		input.BrandIDs,
 		nullableString(input.ModelNumber),

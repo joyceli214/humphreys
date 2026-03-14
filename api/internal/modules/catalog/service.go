@@ -13,6 +13,8 @@ type Service struct {
 }
 
 var ErrInvalidLookupLabel = errors.New("label is required")
+var ErrInvalidLocationShelf = errors.New("shelf is required")
+var ErrInvalidLocationFloor = errors.New("floor must be zero or greater")
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
@@ -48,6 +50,10 @@ func (s *Service) ListWorkers(ctx context.Context, query string) ([]LookupOption
 
 func (s *Service) ListPaymentMethods(ctx context.Context, query string) ([]LookupOption, error) {
 	return s.repo.ListPaymentMethods(ctx, query)
+}
+
+func (s *Service) ListLocations(ctx context.Context, query string) ([]LookupOption, error) {
+	return s.repo.ListLocations(ctx, query)
 }
 
 func (s *Service) CreateWorkOrderStatus(ctx context.Context, label string) (LookupOption, error) {
@@ -96,4 +102,15 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, label string) (Lookup
 		return LookupOption{}, ErrInvalidLookupLabel
 	}
 	return s.repo.CreatePaymentMethod(ctx, value)
+}
+
+func (s *Service) CreateLocation(ctx context.Context, shelf string, floor int32) (LookupOption, error) {
+	value := strings.TrimSpace(shelf)
+	if value == "" {
+		return LookupOption{}, ErrInvalidLocationShelf
+	}
+	if floor < 0 {
+		return LookupOption{}, ErrInvalidLocationFloor
+	}
+	return s.repo.CreateLocation(ctx, value, floor)
 }

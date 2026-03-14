@@ -24,6 +24,7 @@ var ErrInvalidDeposit = errors.New("deposit must be zero or greater")
 var ErrDepositPaymentMethodRequired = errors.New("deposit payment method is required")
 var ErrCustomerNotFound = errors.New("customer not found")
 var ErrPaymentMethodNotFound = errors.New("payment method not found")
+var ErrLocationNotFound = errors.New("location not found")
 var ErrInvalidRepairLogDetails = errors.New("repair log details are required")
 var ErrInvalidRepairLogHoursUsed = errors.New("repair log hours_used must be zero or greater")
 var ErrInvalidPartsSource = errors.New("parts source must be online or supplier")
@@ -68,6 +69,7 @@ func (s *Service) GetWorkOrderDetail(ctx context.Context, referenceID int) (doma
 type EquipmentUpdateInput struct {
 	StatusID           *int64
 	JobTypeID          *int64
+	LocationID         *int64
 	ItemID             *int64
 	BrandIDs           []int64
 	ModelNumber        *string
@@ -181,6 +183,7 @@ type CreateWorkOrderInput struct {
 	CustomerID             *int64
 	NewCustomer            *CreateWorkOrderCustomerInput
 	CustomerUpdates        *CreateWorkOrderCustomerInput
+	LocationID             *int64
 	ItemID                 *int64
 	BrandIDs               []int64
 	ModelNumber            *string

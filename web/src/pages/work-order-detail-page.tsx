@@ -90,6 +90,13 @@ function formatCurrency(value: number | null) {
   }).format(value);
 }
 
+function formatLocationValue(locationID: number | null, locationShelf: string | null, locationFloor: number | null) {
+  if (locationID == null && !locationShelf && locationFloor == null) return "-";
+  const shelf = locationShelf?.trim() ? locationShelf : "-";
+  const floor = locationFloor == null ? "-" : String(locationFloor);
+  return `Shelf: ${shelf}, Floor: ${floor}`;
+}
+
 function statusClass(status: string | null) {
   const normalized = (status ?? "").toLowerCase();
   if (normalized === "finished") return "bg-emerald-100 text-emerald-700";
@@ -262,6 +269,7 @@ type SectionKey = "equipment" | "work_notes" | "line_items" | "totals" | "custom
 type EquipmentForm = {
   status_id: number | null;
   job_type_id: number | null;
+  location_id: number | null;
   item_id: number | null;
   brand_ids: number[];
   model_number: string;
@@ -334,7 +342,9 @@ function SingleSearchableDropdown({
   loadOptions,
   placeholder,
   onAddNew,
-  searchable = true
+  onAddLocation,
+  searchable = true,
+  allowClear = false
 }: {
   label: string;
   value: number | null;
@@ -343,7 +353,9 @@ function SingleSearchableDropdown({
   loadOptions: (query: string) => Promise<LookupOption[]>;
   placeholder: string;
   onAddNew?: (label: string) => Promise<LookupOption>;
+  onAddLocation?: (payload: { shelf: string; floor: number }) => Promise<LookupOption>;
   searchable?: boolean;
+  allowClear?: boolean;
 }) {
   const alerts = useAlerts();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -354,6 +366,8 @@ function SingleSearchableDropdown({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [adding, setAdding] = useState(false);
   const [newValue, setNewValue] = useState("");
+  const [newShelf, setNewShelf] = useState("");
+  const [newFloor, setNewFloor] = useState("0");
 
   useEffect(() => {
     if (!open) return;
@@ -480,6 +494,18 @@ function SingleSearchableDropdown({
               </div>
             )}
             <div className="mt-2 max-h-52 overflow-auto space-y-1">
+              {allowClear && (
+                <button
+                  type="button"
+                  className="w-full rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
+                  onClick={() => {
+                    onChange(null);
+                    setOpen(false);
+                  }}
+                >
+                  None
+                </button>
+              )}
               {options.map((option, index) => (
                 <button
                   key={option.id}
@@ -494,7 +520,7 @@ function SingleSearchableDropdown({
                   {option.label}
                 </button>
               ))}
-              {!adding && (
+              {!adding && (onAddNew || onAddLocation) && (
                 <button
                   type="button"
                   className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
@@ -503,7 +529,58 @@ function SingleSearchableDropdown({
                   + Add new...
                 </button>
               )}
-              {adding && onAddNew && (
+              {adding && onAddLocation && (
+                <div className="p-0 space-y-2">
+                  <div className="grid grid-cols-[1fr_120px] gap-2">
+                    <Input placeholder="Shelf" value={newShelf} onChange={(e) => setNewShelf(e.target.value)} />
+                    <Input placeholder="Floor" type="number" min={0} value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAdding(false);
+                        setNewShelf("");
+                        setNewFloor("0");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={async () => {
+                        const shelf = newShelf.trim();
+                        const floor = Number(newFloor.trim());
+                        if (!shelf) {
+                          alerts.error("Shelf required", "Enter a shelf value.");
+                          return;
+                        }
+                        if (!Number.isInteger(floor) || floor < 0) {
+                          alerts.error("Invalid floor", "Floor must be a whole number zero or greater.");
+                          return;
+                        }
+                        try {
+                          const created = await onAddLocation({ shelf, floor });
+                          onChange(created.id);
+                          setAdding(false);
+                          setNewShelf("");
+                          setNewFloor("0");
+                          setOpen(false);
+                          alerts.success(`${label} added`);
+                        } catch (err) {
+                          alerts.error(`Failed to add ${label.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
+                        }
+                      }}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {adding && onAddNew && !onAddLocation && (
                 <div className="p-0">
                   <div className="flex items-center gap-2">
                     <Input
@@ -884,6 +961,7 @@ export default function WorkOrderDetailPage() {
   const [equipmentForm, setEquipmentForm] = useState<EquipmentForm>({
     status_id: null,
     job_type_id: null,
+    location_id: null,
     item_id: null,
     brand_ids: [],
     model_number: "",
@@ -1026,6 +1104,7 @@ export default function WorkOrderDetailPage() {
     setEquipmentForm({
       status_id: item.status_id,
       job_type_id: item.job_type_id,
+      location_id: item.location_id,
       item_id: item.item_id,
       brand_ids: item.brand_ids ?? [],
       model_number: item.model_number ?? "",
@@ -1146,6 +1225,7 @@ export default function WorkOrderDetailPage() {
       const updated = await apiClient.updateWorkOrderEquipment(parsedReferenceId, {
         status_id: equipmentForm.status_id,
         job_type_id: equipmentForm.job_type_id,
+        location_id: equipmentForm.location_id,
         item_id: equipmentForm.item_id,
         brand_ids: equipmentForm.brand_ids,
         model_number: blankToNull(equipmentForm.model_number),
@@ -1624,6 +1704,16 @@ export default function WorkOrderDetailPage() {
             onAddNew={(label) => apiClient.createJobType(label)}
           />
           <SingleSearchableDropdown
+            label="Location"
+            value={equipmentForm.location_id}
+            valueLabel={formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}
+            onChange={(value) => setEquipmentForm((prev) => ({ ...prev, location_id: value }))}
+            loadOptions={async (q) => (await apiClient.listLocations(q)).items}
+            placeholder="Select location"
+            onAddLocation={(payload) => apiClient.createLocation(payload)}
+            allowClear
+          />
+          <SingleSearchableDropdown
             label="Item"
             value={equipmentForm.item_id}
             valueLabel={item.item_name ?? undefined}
@@ -1683,6 +1773,7 @@ export default function WorkOrderDetailPage() {
           {detailRow("Status", item.status_name ?? "-")}
           {detailRow("Status Updated At", formatDateTime(item.status_updated_at))}
           {detailRow("Job Type", item.job_type_name ?? "-")}
+          {detailRow("Location", formatLocationValue(item.location_id, item.location_shelf, item.location_floor))}
           {detailRow("Original Job", item.original_job_id ? String(item.original_job_id) : "-")}
           {detailRow("Item", item.item_name ?? "-")}
           {detailRow("Brands", item.brand_names.join(", ") || "-")}

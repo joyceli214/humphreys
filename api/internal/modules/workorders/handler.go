@@ -27,6 +27,7 @@ type Handler struct {
 type updateEquipmentRequest struct {
 	StatusID           *int64  `json:"status_id"`
 	JobTypeID          *int64  `json:"job_type_id"`
+	LocationID         *int64  `json:"location_id"`
 	ItemID             *int64  `json:"item_id"`
 	BrandIDs           []int64 `json:"brand_ids"`
 	ModelNumber        *string `json:"model_number"`
@@ -109,6 +110,7 @@ type createWorkOrderRequest struct {
 	CustomerID             *int64                          `json:"customer_id"`
 	NewCustomer            *createWorkOrderCustomerRequest `json:"new_customer"`
 	CustomerUpdates        *updateWorkOrderCustomerRequest `json:"customer_updates"`
+	LocationID             *int64                          `json:"location_id"`
 	ItemID                 *int64                          `json:"item_id"`
 	BrandIDs               []int64                         `json:"brand_ids"`
 	ModelNumber            *string                         `json:"model_number"`
@@ -353,6 +355,7 @@ func (h *Handler) CreateWorkOrder(c *gin.Context) {
 		CustomerID:             req.CustomerID,
 		NewCustomer:            newCustomer,
 		CustomerUpdates:        customerUpdates,
+		LocationID:             req.LocationID,
 		ItemID:                 req.ItemID,
 		BrandIDs:               req.BrandIDs,
 		ModelNumber:            req.ModelNumber,
@@ -377,7 +380,8 @@ func (h *Handler) CreateWorkOrder(c *gin.Context) {
 			errors.Is(err, ErrDepositPaymentMethodRequired) ||
 			errors.Is(err, ErrPhoneDigitsOnly) ||
 			errors.Is(err, ErrCustomerNotFound) ||
-			errors.Is(err, ErrPaymentMethodNotFound) {
+			errors.Is(err, ErrPaymentMethodNotFound) ||
+			errors.Is(err, ErrLocationNotFound) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -421,6 +425,7 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 	item, err := h.service.UpdateEquipment(c.Request.Context(), referenceID, EquipmentUpdateInput{
 		StatusID:           req.StatusID,
 		JobTypeID:          req.JobTypeID,
+		LocationID:         req.LocationID,
 		ItemID:             req.ItemID,
 		BrandIDs:           req.BrandIDs,
 		ModelNumber:        req.ModelNumber,
@@ -433,6 +438,10 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 	})
 	if errors.Is(err, ErrWorkOrderNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+		return
+	}
+	if errors.Is(err, ErrLocationNotFound) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {

@@ -39,6 +39,10 @@ export interface WorkOrderListItem {
   updated_at: string | null;
   status: string;
   job_type: string;
+  location_id: number | null;
+  location_code: string | null;
+  location_shelf: string | null;
+  location_floor: number | null;
   customer_name: string | null;
   customer_email: string | null;
   item_name: string | null;
@@ -82,6 +86,10 @@ export interface WorkOrderDetail {
   job_type_id: number | null;
   job_type_key: string | null;
   job_type_name: string | null;
+  location_id: number | null;
+  location_code: string | null;
+  location_shelf: string | null;
+  location_floor: number | null;
   customer: WorkOrderCustomer;
   item_id: number | null;
   item_name: string | null;

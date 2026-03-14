@@ -22,10 +22,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	authed.GET("/catalog/brands", middleware.RequirePermission(permWorkOrdersRead), h.ListBrands)
 	authed.GET("/catalog/workers", middleware.RequirePermission(permWorkOrdersRead), h.ListWorkers)
 	authed.GET("/catalog/payment-methods", middleware.RequirePermission(permWorkOrdersRead), h.ListPaymentMethods)
+	authed.GET("/catalog/locations", middleware.RequirePermission(permWorkOrdersRead), h.ListLocations)
 	authed.POST("/catalog/work-order-statuses", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateWorkOrderStatus)
 	authed.POST("/catalog/job-types", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateJobType)
 	authed.POST("/catalog/items", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateItem)
 	authed.POST("/catalog/brands", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateBrand)
 	authed.POST("/catalog/workers", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateWorker)
 	authed.POST("/catalog/payment-methods", middleware.RequirePermission(permWorkOrdersUpdate), h.CreatePaymentMethod)
+	authed.POST("/catalog/locations", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateLocation)
 }

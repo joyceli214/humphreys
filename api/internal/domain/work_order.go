@@ -8,6 +8,10 @@ type WorkOrderListItem struct {
 	UpdatedAt     *time.Time `json:"updated_at"`
 	Status        string     `json:"status"`
 	JobType       string     `json:"job_type"`
+	LocationID    *int64     `json:"location_id"`
+	LocationCode  *string    `json:"location_code"`
+	LocationShelf *string    `json:"location_shelf"`
+	LocationFloor *int32     `json:"location_floor"`
 	CustomerName  *string    `json:"customer_name"`
 	CustomerEmail *string    `json:"customer_email"`
 	ItemName      *string    `json:"item_name"`
@@ -51,6 +55,10 @@ type WorkOrderDetail struct {
 	JobTypeID          *int64              `json:"job_type_id"`
 	JobTypeKey         *string             `json:"job_type_key"`
 	JobTypeName        *string             `json:"job_type_name"`
+	LocationID         *int64              `json:"location_id"`
+	LocationCode       *string             `json:"location_code"`
+	LocationShelf      *string             `json:"location_shelf"`
+	LocationFloor      *int32              `json:"location_floor"`
 	Customer           WorkOrderCustomer   `json:"customer"`
 	ItemID             *int64              `json:"item_id"`
 	ItemName           *string             `json:"item_name"`
@@ -77,15 +85,15 @@ type WorkOrderDetail struct {
 }
 
 type RepairLog struct {
-	RepairLogID      int64      `json:"repair_log_id"`
-	ReferenceID      int32      `json:"reference_id"`
-	RepairDate       *time.Time `json:"repair_date"`
-	HoursUsed        float64    `json:"hours_used"`
-	Details          string     `json:"details"`
-	CreatedByUserID  string     `json:"created_by_user_id"`
-	CreatedByName    *string    `json:"created_by_name"`
-	CreatedAt        *time.Time `json:"created_at"`
-	UpdatedAt        *time.Time `json:"updated_at"`
+	RepairLogID     int64      `json:"repair_log_id"`
+	ReferenceID     int32      `json:"reference_id"`
+	RepairDate      *time.Time `json:"repair_date"`
+	HoursUsed       float64    `json:"hours_used"`
+	Details         string     `json:"details"`
+	CreatedByUserID string     `json:"created_by_user_id"`
+	CreatedByName   *string    `json:"created_by_name"`
+	CreatedAt       *time.Time `json:"created_at"`
+	UpdatedAt       *time.Time `json:"updated_at"`
 }
 
 type PartsPurchaseRequest struct {

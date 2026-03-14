@@ -26,12 +26,14 @@ type Repository interface {
 	ListBrands(ctx context.Context, query string) ([]LookupOption, error)
 	ListWorkers(ctx context.Context, query string) ([]LookupOption, error)
 	ListPaymentMethods(ctx context.Context, query string) ([]LookupOption, error)
+	ListLocations(ctx context.Context, query string) ([]LookupOption, error)
 	CreateWorkOrderStatus(ctx context.Context, label string) (LookupOption, error)
 	CreateJobType(ctx context.Context, label string) (LookupOption, error)
 	CreateItem(ctx context.Context, label string) (LookupOption, error)
 	CreateBrand(ctx context.Context, label string) (LookupOption, error)
 	CreateWorker(ctx context.Context, label string) (LookupOption, error)
 	CreatePaymentMethod(ctx context.Context, label string) (LookupOption, error)
+	CreateLocation(ctx context.Context, shelf string, floor int32) (LookupOption, error)
 }
 
 type storeRepository struct {
@@ -105,6 +107,48 @@ func (r *storeRepository) ListWorkers(ctx context.Context, query string) ([]Look
 
 func (r *storeRepository) ListPaymentMethods(ctx context.Context, query string) ([]LookupOption, error) {
 	return r.listLookup(ctx, `SELECT payment_method_id::bigint, display_name FROM public.payment_methods WHERE is_active = true`, "display_name", query)
+}
+
+func (r *storeRepository) ListLocations(ctx context.Context, query string) ([]LookupOption, error) {
+	trimmed := strings.TrimSpace(query)
+	args := make([]any, 0, 1)
+	sql := `
+		SELECT location_id::bigint, shelf, floor
+		FROM public.locations
+		WHERE is_active = true
+	`
+	if trimmed != "" {
+		sql += `
+			AND (
+				shelf ILIKE $1 OR
+				floor::text ILIKE $1 OR
+				location_id::text ILIKE $1
+			)
+		`
+		args = append(args, "%"+trimmed+"%")
+	}
+	sql += ` ORDER BY floor ASC, shelf ASC, location_id ASC`
+
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]LookupOption, 0)
+	for rows.Next() {
+		var id int64
+		var shelf string
+		var floor int32
+		if err := rows.Scan(&id, &shelf, &floor); err != nil {
+			return nil, err
+		}
+		out = append(out, LookupOption{
+			ID:    id,
+			Label: fmt.Sprintf("Shelf: %s, Floor: %d", shelf, floor),
+		})
+	}
+	return out, rows.Err()
 }
 
 func (r *storeRepository) CreateWorkOrderStatus(ctx context.Context, label string) (LookupOption, error) {
@@ -188,6 +232,28 @@ func (r *storeRepository) CreatePaymentMethod(ctx context.Context, label string)
 		VALUES($1, $2, true)
 		RETURNING payment_method_id::bigint, display_name
 	`, key, value).Scan(&option.ID, &option.Label)
+	return option, err
+}
+
+func (r *storeRepository) CreateLocation(ctx context.Context, shelf string, floor int32) (LookupOption, error) {
+	value := strings.TrimSpace(shelf)
+	codeBase := slugify(value)
+	if codeBase == "" {
+		codeBase = "shelf"
+	}
+	locationCode := fmt.Sprintf("loc_%d_%s", floor, codeBase)
+	var option LookupOption
+	var createdShelf string
+	var createdFloor int32
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO public.locations(location_code, shelf, floor, is_active)
+		VALUES($1, $2, $3, true)
+		RETURNING location_id::bigint, shelf, floor
+	`, locationCode, value, floor).Scan(&option.ID, &createdShelf, &createdFloor)
+	if err != nil {
+		return option, err
+	}
+	option.Label = fmt.Sprintf("Shelf: %s, Floor: %d", createdShelf, createdFloor)
 	return option, err
 }
 
