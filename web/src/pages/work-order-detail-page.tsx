@@ -958,6 +958,8 @@ export default function WorkOrderDetailPage() {
   const [aiSummaryLoading, setAISummaryLoading] = useState(false);
   const [aiSummaryError, setAISummaryError] = useState("");
   const [aiSummaryLoadedReference, setAISummaryLoadedReference] = useState<number | null>(null);
+  const [paymentMethodOptions, setPaymentMethodOptions] = useState<LookupOption[]>([]);
+  const [noPaymentMethodID, setNoPaymentMethodID] = useState<number | null>(null);
 
   const [equipmentForm, setEquipmentForm] = useState<EquipmentForm>({
     status_id: null,
@@ -1074,6 +1076,31 @@ export default function WorkOrderDetailPage() {
       setLoadingExtras(false);
     }
   };
+
+  const loadPaymentMethodOptions = useCallback(async () => {
+    const items = (await apiClient.listPaymentMethods("")).items;
+    setPaymentMethodOptions(items);
+    const noPayment = items.find((method) => method.label.trim().toLowerCase() === "no payment");
+    if (noPayment) {
+      setNoPaymentMethodID(noPayment.id);
+    }
+    return items;
+  }, []);
+
+  const ensureNoPaymentMethodID = useCallback(async () => {
+    if (noPaymentMethodID !== null) return noPaymentMethodID;
+    const current =
+      paymentMethodOptions.find((method) => method.label.trim().toLowerCase() === "no payment") ??
+      (await loadPaymentMethodOptions()).find((method) => method.label.trim().toLowerCase() === "no payment");
+    if (current) {
+      setNoPaymentMethodID(current.id);
+      return current.id;
+    }
+    const created = await apiClient.createPaymentMethod("No Payment");
+    setPaymentMethodOptions((prev) => (prev.some((method) => method.id === created.id) ? prev : [...prev, created]));
+    setNoPaymentMethodID(created.id);
+    return created.id;
+  }, [loadPaymentMethodOptions, noPaymentMethodID, paymentMethodOptions]);
 
   useEffect(() => {
     if (!hasPermission("work_orders:read")) return;
@@ -1286,6 +1313,24 @@ export default function WorkOrderDetailPage() {
       next.push(finalPaymentMethodID);
     }
     setWorkNotesForm((prev) => ({ ...prev, payment_method_ids: next }));
+  };
+
+  const handleDepositPaymentMethodChange = async (depositPaymentMethodID: number | null) => {
+    const finalPaymentMethodID = workNotesForm.payment_method_ids[1] ?? null;
+    if (depositPaymentMethodID === null && finalPaymentMethodID !== null) {
+      const fallbackNoPaymentMethodID = await ensureNoPaymentMethodID();
+      setDepositAndFinalPaymentMethods(fallbackNoPaymentMethodID, finalPaymentMethodID);
+      return;
+    }
+    setDepositAndFinalPaymentMethods(depositPaymentMethodID, finalPaymentMethodID);
+  };
+
+  const handleFinalPaymentMethodChange = async (finalPaymentMethodID: number | null) => {
+    let depositPaymentMethodID = workNotesForm.payment_method_ids[0] ?? null;
+    if (finalPaymentMethodID !== null && depositPaymentMethodID === null) {
+      depositPaymentMethodID = await ensureNoPaymentMethodID();
+    }
+    setDepositAndFinalPaymentMethods(depositPaymentMethodID, finalPaymentMethodID);
   };
 
   const completeJob = async () => {
@@ -2010,8 +2055,8 @@ export default function WorkOrderDetailPage() {
                       label="Deposit Payment Method"
                       value={workNotesForm.payment_method_ids[0] ?? null}
                       valueLabel={item.payment_method_names[0] ?? undefined}
-                      onChange={(value) => setDepositAndFinalPaymentMethods(value, workNotesForm.payment_method_ids[1] ?? null)}
-                      loadOptions={async () => (await apiClient.listPaymentMethods("")).items}
+                      onChange={(value) => { void handleDepositPaymentMethodChange(value); }}
+                      loadOptions={loadPaymentMethodOptions}
                       placeholder="Select deposit payment method"
                       onAddNew={(label) => apiClient.createPaymentMethod(label)}
                     />
@@ -2019,8 +2064,8 @@ export default function WorkOrderDetailPage() {
                       label="Final Payment Method"
                       value={workNotesForm.payment_method_ids[1] ?? null}
                       valueLabel={item.payment_method_names[1] ?? undefined}
-                      onChange={(value) => setDepositAndFinalPaymentMethods(workNotesForm.payment_method_ids[0] ?? null, value)}
-                      loadOptions={async () => (await apiClient.listPaymentMethods("")).items}
+                      onChange={(value) => { void handleFinalPaymentMethodChange(value); }}
+                      loadOptions={loadPaymentMethodOptions}
                       placeholder="Select final payment method"
                       onAddNew={(label) => apiClient.createPaymentMethod(label)}
                     />

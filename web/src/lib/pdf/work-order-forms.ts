@@ -93,6 +93,12 @@ function linesForWidth(doc: jsPDF, value: string | null | undefined, width: numb
   return doc.splitTextToSize(text(value), width);
 }
 
+function compactNoteLines(lines: string[]) {
+  const trimmed = lines.map((line) => line.trimEnd());
+  const withoutBlanks = trimmed.filter((line) => line.trim().length > 0);
+  return withoutBlanks.length ? withoutBlanks : ["-"];
+}
+
 function labeledBoxHeight(doc: jsPDF, lines: string | string[], minHeight: number) {
   const titleToTextTop = 12;
   const bottomPadding = 4;
@@ -236,42 +242,28 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number) {
   lineField(doc, 106, y + 35, 40, "Extension", text(item.customer.extension_text));
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-  doc.rect(14, y + 43, 12, 5);
-  doc.text("Location", 29, y + 47);
-  doc.rect(58, y + 43, 12, 5);
-  doc.text("Cord", 73, y + 47);
-  doc.rect(102, y + 43, 12, 5);
-  doc.text("Remote Control", 117, y + 47);
+  doc.setFontSize(8.4);
+  const accessoryRowY = y + 43;
+  const accessoryColumns = [
+    { label: "Cord", width: 22, labelOffset: 14 },
+    { label: "Remote Control", width: 42, labelOffset: 15 },
+    { label: "Albums/CDs/Cassettes", width: 52, labelOffset: 15 },
+    { label: "DVDs/VHS", width: 35, labelOffset: 15 },
+    { label: "Cables", width: 36, labelOffset: 15 }
+  ];
+  let colX = 14;
+  accessoryColumns.forEach((col) => {
+    doc.rect(colX, accessoryRowY, 12, 5);
+    doc.text(fitText(doc, col.label, col.width - col.labelOffset), colX + col.labelOffset, accessoryRowY + 4);
+    colX += col.width;
+  });
 
-  doc.rect(14, y + 52, 12, 5);
-  doc.text("Albums/CDs/Cassettes", 29, y + 56);
-  doc.rect(74, y + 52, 12, 5);
-  doc.text("DVDs/VHS", 91, y + 56);
-  doc.rect(112, y + 52, 12, 5);
-  doc.text("Cables", 127, y + 56);
+  lineField(doc, 14, y + 57, 42, "Item", text(item.item_name));
+  lineField(doc, 60, y + 57, 42, "Brand", item.brand_names.length ? item.brand_names.join(", ") : "-");
+  lineField(doc, 106, y + 57, 42, "Model Number", text(item.model_number));
+  lineField(doc, 152, y + 57, 42, "Serial Number", text(item.serial_number));
 
-  lineField(doc, 54, y + 61, 34, "Deposit", money(item.deposit));
-  lineField(doc, 100, y + 61, 50, "Payment Method", item.payment_method_names.length ? item.payment_method_names.join(", ") : "-");
-
-  doc.setLineWidth(0.8);
-  doc.line(14, y + 70, 196, y + 70);
-
-  lineField(doc, 14, y + 83, 46, "Item", text(item.item_name));
-  lineField(doc, 64, y + 83, 40, "Brand", item.brand_names.length ? item.brand_names.join(", ") : "-");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text(`Customer ID`, 112, y + 83);
-  doc.text(String(item.reference_id), 150, y + 83);
-
-  lineField(doc, 14, y + 95, 46, "Model Number", text(item.model_number));
-  lineField(doc, 64, y + 95, 40, "Serial Number", text(item.serial_number));
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(fitText(doc, accessories(item), 180), 14, y + 104);
-
-  return y + 106;
+  return y + 66;
 }
 
 export function generateDropOffFormPdf(item: WorkOrderDetail) {
@@ -325,11 +317,64 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
   drawHeader(doc, "Customer Pick Up Form");
 
   const y = drawCommon(doc, item, 44);
+  const partsTotal = calculatePartsTotal(item);
+  const subtotal = partsTotal + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
+  const hst = subtotal * 0.13;
+  const total = subtotal + hst;
+  const payable = total - (item.deposit ?? 0);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  const notesLineHeightFactor = 1.08;
+  const notesMinHeight = 12;
+  const problemLines = compactNoteLines(linesForWidth(doc, item.problem_description, 84));
+  const workDoneLines = compactNoteLines(linesForWidth(doc, item.work_done, 84));
+  const notesLineHeightMm = (doc.getFontSize() * notesLineHeightFactor) / doc.internal.scaleFactor;
+  const notesBoxHeightForLines = (lines: string[]) => {
+    const titleToTextTop = 7;
+    const bottomPadding = 1;
+    const lineCount = Math.max(lines.length, 1);
+    const textHeight = lineCount * notesLineHeightMm;
+    return Math.max(notesMinHeight, titleToTextTop + textHeight + bottomPadding);
+  };
+  const problemBoxHeight = notesBoxHeightForLines(problemLines);
+  const workDoneBoxHeight = notesBoxHeightForLines(workDoneLines);
+  const notesRowHeight = Math.max(problemBoxHeight, workDoneBoxHeight);
+  let notesTopY = y + 2;
+  const lowerSectionHeight = 78;
+  if (notesTopY + 8 + notesRowHeight + lowerSectionHeight > pageHeight(doc) - 10) {
+    doc.addPage();
+    drawHeader(doc, "Customer Pick Up Form");
+    notesTopY = 40;
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Problem Description", 14, notesTopY + 4.5);
+  doc.text("Work Done", 108, notesTopY + 4.5);
+
+  doc.setFont("helvetica", "normal");
+  doc.rect(14, notesTopY + 6, 88, notesRowHeight);
+  doc.rect(108, notesTopY + 6, 88, notesRowHeight);
+  doc.setFontSize(10);
+  doc.text(problemLines, 15, notesTopY + 10, { lineHeightFactor: notesLineHeightFactor });
+  doc.text(workDoneLines, 109, notesTopY + 10, { lineHeightFactor: notesLineHeightFactor });
+
+  const lineItemsTopY = notesTopY + 8 + notesRowHeight + 2;
+  const rowLeftX = 14;
+  const rowRightX = 196;
+  const subtotalColumnWidth = 54;
+  const rowGapX = 4;
+  const tableWidth = rowRightX - rowLeftX - subtotalColumnWidth - rowGapX;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Line Items", rowLeftX, lineItemsTopY + 4);
+  doc.text("Subtotal", rowRightX, lineItemsTopY + 4, { align: "right" });
 
   autoTable(doc, {
-    startY: y + 2,
+    startY: lineItemsTopY + 6,
     theme: "grid",
-    head: [["Item", "Price", "Quantity", "Total"]],
+    head: [["Item", "Price", "Qty", "Total"]],
     body: item.line_items.length
       ? item.line_items.map((line) => [
           text(line.item_name),
@@ -338,62 +383,41 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
           text(line.line_total_text)
         ])
       : [["-", "$0.00", "-", "-"]],
-    styles: { fontSize: 9, cellPadding: 1.8 },
+    styles: { fontSize: 9, cellPadding: 0.9 },
     headStyles: { fillColor: [238, 238, 238], textColor: 0 },
-    margin: { left: 14, right: 14 }
+    margin: { left: rowLeftX, right: 210 - rowLeftX - tableWidth },
+    tableWidth,
+    columnStyles: {
+      0: { cellWidth: 70 },
+      1: { cellWidth: 20 },
+      2: { cellWidth: 12 },
+      3: { cellWidth: 22 }
+    }
   });
 
-  let tableY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? y + 40;
+  let tableY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? lineItemsTopY + 40;
+  const pricingY = lineItemsTopY + 10;
+  const rowGap = 4.8;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  const problemLines = linesForWidth(doc, item.problem_description, 84);
-  const workDoneLines = linesForWidth(doc, item.work_done, 84);
-  const notesBoxHeight = Math.max(
-    labeledBoxHeight(doc, problemLines, 44),
-    labeledBoxHeight(doc, workDoneLines, 44)
-  );
-  const detailSectionHeight = 17 + notesBoxHeight;
-  const totalsSectionHeight = 45;
-  const sectionGap = 8;
-  const needsNewPage = tableY + sectionGap + detailSectionHeight + totalsSectionHeight > pageHeight(doc) - 10;
-  if (needsNewPage) {
-    doc.addPage();
-    drawHeader(doc, "Customer Pick Up Form");
-    tableY = 34;
-  }
-
+  doc.setFontSize(9.4);
+  doc.text(`Parts: ${money(partsTotal)}`, rowRightX, pricingY, { align: "right" });
+  doc.text(`Delivery: ${money(item.delivery_total)}`, rowRightX, pricingY + rowGap, { align: "right" });
+  doc.text(`Labour: ${money(item.labour_total)}`, rowRightX, pricingY + rowGap * 2, { align: "right" });
+  doc.text(`Subtotal: ${money(subtotal)}`, rowRightX, pricingY + rowGap * 3, { align: "right" });
+  doc.text(`HST (13%): ${money(hst)}`, rowRightX, pricingY + rowGap * 4, { align: "right" });
+  doc.text(`Deposit: ${money(item.deposit)}`, rowRightX, pricingY + rowGap * 5, { align: "right" });
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Problem Description", 14, tableY + 7);
-  doc.text("Work Done", 108, tableY + 7);
-
+  doc.text(`Total: ${money(total)}`, rowRightX, pricingY + rowGap * 6, { align: "right" });
+  doc.text(`Total Payable: ${money(payable)}`, rowRightX, pricingY + rowGap * 7, { align: "right" });
   doc.setFont("helvetica", "normal");
-  doc.rect(14, tableY + 9, 88, notesBoxHeight);
-  doc.rect(108, tableY + 9, 88, notesBoxHeight);
-  doc.setFontSize(10);
-  doc.text(problemLines, 16, tableY + 15);
-  doc.text(workDoneLines, 110, tableY + 15);
+  const finalPaymentMethod = item.payment_method_names.length ? item.payment_method_names[item.payment_method_names.length - 1] : "-";
+  doc.text(`Payment Method: ${finalPaymentMethod}`, rowRightX, pricingY + rowGap * 8, { align: "right" });
 
-  const totalsY = tableY + 17 + notesBoxHeight;
-  const partsTotal = calculatePartsTotal(item);
-  const subtotal = partsTotal + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
-  const hst = subtotal * 0.13;
-  const total = subtotal + hst;
-  const payable = total - (item.deposit ?? 0);
+  const metadataY = Math.max(tableY, pricingY + rowGap * 9) + 5;
   doc.setFont("helvetica", "normal");
-  doc.text(`Parts Total: ${money(partsTotal)}`, 196, totalsY, { align: "right" });
-  doc.text(`Pick Up / Delivery: ${money(item.delivery_total)}`, 196, totalsY + 7, { align: "right" });
-  doc.text(`Labour Total: ${money(item.labour_total)}`, 196, totalsY + 14, { align: "right" });
-  doc.text(`HST (13%): ${money(hst)}`, 196, totalsY + 21, { align: "right" });
-  doc.text(`Deposit: ${money(item.deposit)}`, 196, totalsY + 28, { align: "right" });
-
-  doc.setFont("helvetica", "bold");
-  doc.text(`Total: ${money(total)}`, 196, totalsY + 36, { align: "right" });
-  doc.text(`Total Payable: ${money(payable)}`, 196, totalsY + 43, { align: "right" });
-
   doc.setFontSize(10);
-  doc.text(`Technician(s): ${item.worker_names.length ? item.worker_names.join(", ") : "-"}`, 14, totalsY + 36);
-  doc.text(`Date Finished: ${dateOnly(item.updated_at)}`, 14, totalsY + 43);
+  doc.text(`Technician(s): ${item.worker_names.length ? item.worker_names.join(", ") : "-"}`, 14, metadataY);
+  doc.text(`Date Finished: ${dateOnly(item.updated_at)}`, 14, metadataY + 6);
 
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
