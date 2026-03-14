@@ -80,7 +80,7 @@ export default function AdminDashboardPage() {
   const [searchInput, setSearchInput] = useState("");
   const [overduePage, setOverduePage] = useState(1);
   const [readyPage, setReadyPage] = useState(1);
-  const pageSize = 10;
+  const pageSize = 5;
 
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState<DashboardData>({
@@ -213,6 +213,68 @@ export default function AdminDashboardPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           <section className="rounded-md border border-border bg-white p-5 shadow-sm">
+            <h2 className="mb-4 text-sm font-semibold text-foreground">Ready for Pickup Queue</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-border text-xs text-muted-foreground">
+                  <tr>
+                    <th className="pb-3 font-medium">Order</th>
+                    <th className="px-4 pb-3 font-medium">Customer</th>
+                    <th className="px-4 pb-3 font-medium">Ready Since</th>
+                    <th className="px-4 pb-3 font-medium">Status</th>
+                    <th className="pb-3 text-right font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {loading && (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                        Loading pickup queue...
+                      </td>
+                    </tr>
+                  )}
+                  {!loading &&
+                    readyRows.map((row) => (
+                      <tr key={row.reference_id}>
+                        <td className="py-3 pr-4 font-medium text-primary">#{row.reference_id}</td>
+                        <td className="px-4 py-3 font-medium text-foreground">{row.customer_name ?? "Unknown"}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{formatDate(row.status_updated_at)}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{row.status}</td>
+                        <td className="py-3 pl-4 text-right">
+                          <Button asChild type="button" size="sm" variant="outline">
+                            <Link to={`/work-orders/${row.reference_id}`}>View</Link>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  {!loading && readyRows.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                        No ready pickups found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {!loading && dashboard.ready_total > 0 && (
+              <div className="mt-3 flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Page {readyPage} of {readyTotalPages}
+                </p>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={readyPage <= 1} onClick={() => setReadyPage((prev) => prev - 1)}>
+                    Prev
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" disabled={readyPage >= readyTotalPages} onClick={() => setReadyPage((prev) => prev + 1)}>
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-md border border-border bg-white p-5 shadow-sm">
             <h2 className="mb-4 text-sm font-semibold text-foreground">Overdue Pickups</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -276,68 +338,6 @@ export default function AdminDashboardPage() {
                     disabled={overduePage >= overdueTotalPages}
                     onClick={() => setOverduePage((prev) => prev + 1)}
                   >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-md border border-border bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold text-foreground">Ready for Pickup Queue</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-border text-xs text-muted-foreground">
-                  <tr>
-                    <th className="pb-3 font-medium">Order</th>
-                    <th className="px-4 pb-3 font-medium">Customer</th>
-                    <th className="px-4 pb-3 font-medium">Ready Since</th>
-                    <th className="px-4 pb-3 font-medium">Status</th>
-                    <th className="pb-3 text-right font-medium">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {loading && (
-                    <tr>
-                      <td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                        Loading pickup queue...
-                      </td>
-                    </tr>
-                  )}
-                  {!loading &&
-                    readyRows.map((row) => (
-                      <tr key={row.reference_id}>
-                        <td className="py-3 pr-4 font-medium text-primary">#{row.reference_id}</td>
-                        <td className="px-4 py-3 font-medium text-foreground">{row.customer_name ?? "Unknown"}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{formatDate(row.status_updated_at)}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{row.status}</td>
-                        <td className="py-3 pl-4 text-right">
-                          <Button asChild type="button" size="sm" variant="outline">
-                            <Link to={`/work-orders/${row.reference_id}`}>View</Link>
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  {!loading && readyRows.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                        No ready pickups found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {!loading && dashboard.ready_total > 0 && (
-              <div className="mt-3 flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">
-                  Page {readyPage} of {readyTotalPages}
-                </p>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="sm" disabled={readyPage <= 1} onClick={() => setReadyPage((prev) => prev - 1)}>
-                    Prev
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" disabled={readyPage >= readyTotalPages} onClick={() => setReadyPage((prev) => prev + 1)}>
                     Next
                   </Button>
                 </div>
