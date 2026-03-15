@@ -1334,7 +1334,7 @@ func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQ
 		return domain.DashboardData{}, err
 	}
 
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.display_name, '') NOT ILIKE '%picked up%' AND (now() - COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at)) > interval '14 days'`, input.RangeStart).Scan(&out.OverdueTotal); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.display_name, '') ILIKE '%finished%' AND wo.status_updated_at IS NOT NULL AND (now() - wo.status_updated_at) > interval '14 days'`, input.RangeStart).Scan(&out.OverdueTotal); err != nil {
 		return domain.DashboardData{}, err
 	}
 
@@ -1370,12 +1370,13 @@ func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQ
 			wo.reference_id,
 			c.full_name_search AS customer_name,
 			i.item_name,
-			FLOOR(EXTRACT(EPOCH FROM (now() - COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at))) / 86400)::int AS late_days,
-			COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) AS status_updated_at
+			FLOOR(EXTRACT(EPOCH FROM (now() - wo.status_updated_at)) / 86400)::int AS late_days,
+			wo.status_updated_at AS status_updated_at
 		`+baseFilter+`
-		  AND COALESCE(st.display_name, '') NOT ILIKE '%picked up%'
-		  AND (now() - COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at)) > interval '14 days'
-		ORDER BY COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) DESC, wo.reference_id DESC
+		  AND COALESCE(st.display_name, '') ILIKE '%finished%'
+		  AND wo.status_updated_at IS NOT NULL
+		  AND (now() - wo.status_updated_at) > interval '14 days'
+		ORDER BY wo.status_updated_at DESC, wo.reference_id DESC
 		LIMIT $2 OFFSET $3
 	`, input.RangeStart, overduePageSize, overdueOffset)
 	if err != nil {
