@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { WorkOrderDetail } from "@/lib/api/generated/types";
+import { formatPhoneNumber } from "@/lib/phone";
 
 function text(value: string | null | undefined) {
   return value && value.trim() ? value.trim() : "-";
@@ -237,8 +238,8 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number) {
   lineField(doc, 60, y + 24, 40, "City", text(item.customer.city));
   lineField(doc, 106, y + 24, 86, "Email", text(item.customer.email));
 
-  lineField(doc, 14, y + 35, 40, "Home Phone", text(item.customer.home_phone));
-  lineField(doc, 60, y + 35, 40, "Work Phone / Cell", text(item.customer.work_phone));
+  lineField(doc, 14, y + 35, 40, "Home Phone", text(formatPhoneNumber(item.customer.home_phone)));
+  lineField(doc, 60, y + 35, 40, "Work Phone / Cell", text(formatPhoneNumber(item.customer.work_phone)));
   lineField(doc, 106, y + 35, 40, "Extension", text(item.customer.extension_text));
 
   doc.setFont("helvetica", "normal");

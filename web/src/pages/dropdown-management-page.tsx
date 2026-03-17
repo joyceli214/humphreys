@@ -32,6 +32,7 @@ export default function DropdownManagementPage() {
   const [statusFilter, setStatusFilter] = useState<"active" | "inactive" | "all">("active");
   const [freezeConfirmTarget, setFreezeConfirmTarget] = useState<{ key: string; label: string; nextFrozen: boolean } | null>(null);
   const [adding, setAdding] = useState(false);
+  const [addingRow, setAddingRow] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [newFloor, setNewFloor] = useState("0");
 
@@ -79,6 +80,12 @@ export default function DropdownManagementPage() {
       setSelectedKey(sortedItems[0].key);
     }
   }, [selectedKey, sortedItems]);
+
+  useEffect(() => {
+    setAddingRow(false);
+    setNewLabel("");
+    setNewFloor("0");
+  }, [selectedKey]);
 
   const setDropdownFrozen = async (key: string, isFrozen: boolean) => {
     const token = `freeze:${key}`;
@@ -175,6 +182,7 @@ export default function DropdownManagementPage() {
       }
       setNewLabel("");
       setNewFloor("0");
+      setAddingRow(false);
       alerts.success("Option added");
     } catch (err) {
       alerts.error("Failed to add option", err instanceof Error ? err.message : "Request failed");
@@ -186,6 +194,8 @@ export default function DropdownManagementPage() {
   if (!canManage) {
     return <p className="text-sm text-muted-foreground">You do not have permission to manage dropdown settings.</p>;
   }
+
+  const addingLocation = selectedEntry?.key === "locations";
 
   return (
     <section className="space-y-4">
@@ -229,24 +239,50 @@ export default function DropdownManagementPage() {
                   {selectedEntry.is_frozen ? "Frozen" : "Open"}
                 </Badge>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busyKey === `freeze:${selectedEntry.key}`}
-                onClick={() =>
-                  setFreezeConfirmTarget({
-                    key: selectedEntry.key,
-                    label: selectedEntry.label,
-                    nextFrozen: !selectedEntry.is_frozen
-                  })
-                }
-              >
-                {selectedEntry.is_frozen ? "Unfreeze" : "Freeze"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={selectedEntry.is_frozen || addingRow}
+                  onClick={() => {
+                    setAddingRow(true);
+                    setNewLabel("");
+                    setNewFloor("0");
+                  }}
+                >
+                  Add New
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busyKey === `freeze:${selectedEntry.key}`}
+                  onClick={() =>
+                    setFreezeConfirmTarget({
+                      key: selectedEntry.key,
+                      label: selectedEntry.label,
+                      nextFrozen: !selectedEntry.is_frozen
+                    })
+                  }
+                >
+                  {selectedEntry.is_frozen ? "Unfreeze" : "Freeze"}
+                </Button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_180px]">
-              <Input placeholder="Search options..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div className="relative">
+                <Input placeholder="Search options..." className="pr-8" value={search} onChange={(e) => setSearch(e.target.value)} />
+                {search.length > 0 && (
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground hover:text-foreground"
+                    onClick={() => setSearch("")}
+                    aria-label="Clear option search"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
               <select
                 className="h-10 rounded-md border border-input bg-white px-3 py-2 text-sm"
                 value={statusFilter}
@@ -258,32 +294,59 @@ export default function DropdownManagementPage() {
               </select>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_120px_auto]">
-              <Input
-                placeholder={selectedEntry.key === "locations" ? "New shelf (e.g. A12)" : "New option label"}
-                value={newLabel}
-                onChange={(e) => setNewLabel(e.target.value)}
-              />
-              {selectedEntry.key === "locations" ? (
-                <Input type="number" min={0} placeholder="Floor" value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
-              ) : (
-                <div />
-              )}
-              <Button type="button" onClick={() => void addOption()} disabled={adding}>
-                {adding ? "Adding..." : "Add New"}
-              </Button>
-            </div>
-
             <div className="overflow-x-auto">
               <Table>
                 <thead>
                   <tr>
                     <Th>Option</Th>
                     <Th className="w-[140px]">Status</Th>
-                    <Th className="w-[140px]">Action</Th>
+                    <Th className="w-[220px]">Action</Th>
                   </tr>
                 </thead>
                 <tbody>
+                  {addingRow && (
+                    <tr>
+                      <Td>
+                        {addingLocation ? (
+                          <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_120px]">
+                            <Input
+                              placeholder="New shelf (e.g. A12)"
+                              value={newLabel}
+                              onChange={(e) => setNewLabel(e.target.value)}
+                            />
+                            <Input type="number" min={0} placeholder="Floor" value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
+                          </div>
+                        ) : (
+                          <Input
+                            placeholder="New option label"
+                            value={newLabel}
+                            onChange={(e) => setNewLabel(e.target.value)}
+                          />
+                        )}
+                      </Td>
+                      <Td />
+                      <Td>
+                        <div className="flex gap-2">
+                          <Button size="sm" type="button" onClick={() => void addOption()} disabled={adding}>
+                            {adding ? "Saving..." : "Save"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            type="button"
+                            onClick={() => {
+                              setAddingRow(false);
+                              setNewLabel("");
+                              setNewFloor("0");
+                            }}
+                            disabled={adding}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  )}
                   {filteredOptions.length === 0 && (
                     <tr>
                       <Td colSpan={3}>No options match your filters.</Td>

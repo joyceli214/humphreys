@@ -23,6 +23,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -225,10 +226,6 @@ function todayDateInputValue() {
 
 function emailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function phoneDigitsOnly(value: string) {
-  return /^\d+$/.test(value);
 }
 
 const workNotesEditorPlugins = [
@@ -1190,8 +1187,8 @@ export default function WorkOrderDetailPage() {
       first_name: item.customer.first_name ?? "",
       last_name: item.customer.last_name ?? "",
       email: item.customer.email ?? "",
-      home_phone: item.customer.home_phone ?? "",
-      work_phone: item.customer.work_phone ?? "",
+      home_phone: phoneDigits(item.customer.home_phone),
+      work_phone: phoneDigits(item.customer.work_phone),
       extension_text: item.customer.extension_text ?? "",
       address_line_1: item.customer.address_line_1 ?? "",
       address_line_2: item.customer.address_line_2 ?? "",
@@ -1501,18 +1498,12 @@ export default function WorkOrderDetailPage() {
   const saveCustomer = async () => {
     setFieldErrors((prev) => ({ ...prev, email: undefined, home_phone: undefined, work_phone: undefined }));
     const email = customerForm.email.trim();
-    const homePhone = customerForm.home_phone.trim();
-    const workPhone = customerForm.work_phone.trim();
+    const homePhone = phoneDigits(customerForm.home_phone);
+    const workPhone = phoneDigits(customerForm.work_phone);
     const nextErrors: FieldErrors = {};
 
     if (email && !emailValid(email)) {
       nextErrors.email = "Email format is invalid";
-    }
-    if (homePhone && !phoneDigitsOnly(homePhone)) {
-      nextErrors.home_phone = "Home phone must contain numbers only";
-    }
-    if (workPhone && !phoneDigitsOnly(workPhone)) {
-      nextErrors.work_phone = "Work phone must contain numbers only";
     }
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors((prev) => ({ ...prev, ...nextErrors }));
@@ -1850,7 +1841,6 @@ export default function WorkOrderDetailPage() {
       ) : (
         <>
           {detailRow("Status", item.status_name ?? "-")}
-          {detailRow("Status Updated At", formatDateTime(item.status_updated_at))}
           {detailRow("Job Type", item.job_type_name ?? "-")}
           {detailRow("Location", formatLocationValue(item.location_id, item.location_shelf, item.location_floor))}
           {detailRow("Original Job", item.original_job_id ? String(item.original_job_id) : "-")}
@@ -2473,10 +2463,12 @@ export default function WorkOrderDetailPage() {
                   <div>
                     <label className="mb-1 block text-sm text-muted-foreground">Home Phone</label>
                     <Input
+                      inputMode="tel"
+                      placeholder="5551234567"
                       className={cn(fieldErrors.home_phone && "border-destructive focus-visible:ring-destructive")}
                       value={customerForm.home_phone}
                       onChange={(e) => {
-                        setCustomerForm((prev) => ({ ...prev, home_phone: e.target.value }));
+                        setCustomerForm((prev) => ({ ...prev, home_phone: phoneDigits(e.target.value) }));
                         setFieldErrors((prev) => ({ ...prev, home_phone: undefined }));
                       }}
                     />
@@ -2485,10 +2477,12 @@ export default function WorkOrderDetailPage() {
                   <div>
                     <label className="mb-1 block text-sm text-muted-foreground">Work Phone</label>
                     <Input
+                      inputMode="tel"
+                      placeholder="5551234567"
                       className={cn(fieldErrors.work_phone && "border-destructive focus-visible:ring-destructive")}
                       value={customerForm.work_phone}
                       onChange={(e) => {
-                        setCustomerForm((prev) => ({ ...prev, work_phone: e.target.value }));
+                        setCustomerForm((prev) => ({ ...prev, work_phone: phoneDigits(e.target.value) }));
                         setFieldErrors((prev) => ({ ...prev, work_phone: undefined }));
                       }}
                     />
@@ -2528,8 +2522,8 @@ export default function WorkOrderDetailPage() {
                 {canViewSensitive && (
                   <>
                     {detailRow("Email", item.customer.email ?? "-")}
-                    {detailRow("Home Phone", item.customer.home_phone ?? "-")}
-                    {detailRow("Work Phone", item.customer.work_phone ?? "-")}
+                    {detailRow("Home Phone", formatPhoneNumber(item.customer.home_phone) || "-")}
+                    {detailRow("Work Phone", formatPhoneNumber(item.customer.work_phone) || "-")}
                     {detailRow("Extension", item.customer.extension_text ?? "-")}
                     {detailRow("Address", item.customer.address_line_1 ?? "-")}
                     {detailRow("Address 2", item.customer.address_line_2 ?? "-")}
@@ -2545,6 +2539,7 @@ export default function WorkOrderDetailPage() {
             <h2 className="font-semibold">Meta</h2>
             {detailRow("Created At", formatDateTime(item.created_at))}
             {detailRow("Updated At", formatDateTime(item.updated_at))}
+            {detailRow("Status Updated At", formatDateTime(item.status_updated_at))}
             {detailRow("Status", item.status_name ?? "-")}
           </aside>
         </div>

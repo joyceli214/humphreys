@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { cn } from "@/lib/utils";
+import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
 
 function parseLocalDate(value: string) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -95,6 +96,13 @@ function parseCustomerLabel(label: string): { name: string; email: string; phone
     .trim();
 
   return { name, email, phone };
+}
+
+function formatCustomerLabel(label: string) {
+  return label.replace(/\((\d+)\)/g, (_, digits: string) => {
+    const formatted = formatPhoneNumber(digits);
+    return formatted || `(${digits})`;
+  });
 }
 
 type WorkOrderListFilters = {
@@ -246,7 +254,7 @@ function CustomerSearchableDropdown({
           onClick={() => setOpen((v) => !v)}
           onKeyDown={onTriggerKeyDown}
         >
-          <span className="truncate text-left">{selectedLabel || placeholder}</span>
+          <span className="truncate text-left">{selectedLabel ? formatCustomerLabel(selectedLabel) : placeholder}</span>
         </button>
         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">▾</span>
         {open && (
@@ -289,7 +297,7 @@ function CustomerSearchableDropdown({
                     setOpen(false);
                   }}
                 >
-                  {option.label}
+                  {formatCustomerLabel(option.label)}
                 </button>
               ))}
               {allowAddNew && onAddNew && (
@@ -1237,8 +1245,8 @@ export default function WorkOrdersPage() {
                       const workPhone = option.work_phone ?? "";
                       setNewCustomerName(fullName || fallback.name);
                       setNewCustomerEmail(option.email ?? fallback.email);
-                      setNewCustomerHomePhone(homePhone || (!workPhone ? fallback.phone : ""));
-                      setNewCustomerWorkPhone(option.work_phone ?? "");
+                      setNewCustomerHomePhone(phoneDigits(homePhone || (!workPhone ? fallback.phone : "")));
+                      setNewCustomerWorkPhone(phoneDigits(option.work_phone ?? ""));
                       setNewCustomerExtension(option.extension_text ?? "");
                       setNewCustomerAddress1(option.address_line_1 ?? "");
                       setNewCustomerAddress2(option.address_line_2 ?? "");
@@ -1266,11 +1274,21 @@ export default function WorkOrdersPage() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm">Home Phone *</label>
-                    <Input value={newCustomerHomePhone} onChange={(e) => setNewCustomerHomePhone(e.target.value)} />
+                    <Input
+                      inputMode="tel"
+                      placeholder="5551234567"
+                      value={newCustomerHomePhone}
+                      onChange={(e) => setNewCustomerHomePhone(phoneDigits(e.target.value))}
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm">Work Phone *</label>
-                    <Input value={newCustomerWorkPhone} onChange={(e) => setNewCustomerWorkPhone(e.target.value)} />
+                    <Input
+                      inputMode="tel"
+                      placeholder="5551234567"
+                      value={newCustomerWorkPhone}
+                      onChange={(e) => setNewCustomerWorkPhone(phoneDigits(e.target.value))}
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="text-sm">Extension</label>
