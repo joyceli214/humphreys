@@ -142,62 +142,64 @@ export default function PartsPurchaseRequestsPage() {
           </div>
         </div>
 
-        <Table>
-          <thead>
-            <tr>
-              <Th className="w-[90px]">Ref #</Th>
-              <Th>Item</Th>
-              <Th className="w-[80px]">Qty</Th>
-              <Th className="w-[120px]">Source</Th>
-              <Th className="w-[160px]">Status</Th>
-              <Th className="w-[130px]">Total</Th>
-              <Th className="w-[170px]">Requested By</Th>
-              <Th className="w-[130px]">Created</Th>
-              <Th className="w-[120px]">Action</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
+        <div className="overflow-x-auto">
+          <Table className="min-w-[1100px]">
+            <thead>
               <tr>
-                <Td colSpan={9}>Loading parts requests...</Td>
+                <Th className="w-[90px]">Ref #</Th>
+                <Th>Item</Th>
+                <Th className="w-[80px]">Qty</Th>
+                <Th className="w-[120px]">Source</Th>
+                <Th className="w-[160px]">Status</Th>
+                <Th className="w-[130px]">Total</Th>
+                <Th className="w-[170px]">Requested By</Th>
+                <Th className="w-[130px]">Created</Th>
+                <Th className="w-[120px]">Action</Th>
               </tr>
-            )}
-            {!loading && visibleItems.length === 0 && (
-              <tr>
-                <Td colSpan={9}>No parts purchase requests found for current filters.</Td>
-              </tr>
-            )}
-            {!loading &&
-              visibleItems.map((item) => (
-                <tr key={item.parts_purchase_request_id}>
-                  <Td>{item.reference_id}</Td>
-                  <Td>
-                    <div className="space-y-1">
-                      <p>{item.item_name}</p>
-                      {item.source_url ? (
-                        <a href={item.source_url} target="_blank" rel="noreferrer" className="text-xs text-primary underline underline-offset-2">
-                          Open source link
-                        </a>
-                      ) : null}
-                    </div>
-                  </Td>
-                  <Td>{item.quantity}</Td>
-                  <Td className="capitalize">{item.source}</Td>
-                  <Td>
-                    <Badge className={statusClass(item.status)}>{item.status.replace("_", " ")}</Badge>
-                  </Td>
-                  <Td>{formatCurrency(item.total_price)}</Td>
-                  <Td>{item.created_by_name ?? item.created_by_user_id}</Td>
-                  <Td>{formatDate(item.created_at)}</Td>
-                  <Td>
-                    <Button variant="outline" size="sm" asChild>
-                      <Link to={`/work-orders/${item.reference_id}`}>Open WO</Link>
-                    </Button>
-                  </Td>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr>
+                  <Td colSpan={9}>Loading parts requests...</Td>
                 </tr>
-              ))}
-          </tbody>
-        </Table>
+              )}
+              {!loading && visibleItems.length === 0 && (
+                <tr>
+                  <Td colSpan={9}>No parts purchase requests found for current filters.</Td>
+                </tr>
+              )}
+              {!loading &&
+                visibleItems.map((item) => (
+                  <tr key={item.parts_purchase_request_id}>
+                    <Td>{item.reference_id}</Td>
+                    <Td>
+                      <div className="space-y-1">
+                        <p>{item.item_name}</p>
+                        {item.source_url ? (
+                          <a href={item.source_url} target="_blank" rel="noreferrer" className="text-xs text-primary underline underline-offset-2">
+                            Open source link
+                          </a>
+                        ) : null}
+                      </div>
+                    </Td>
+                    <Td>{item.quantity}</Td>
+                    <Td className="capitalize">{item.source}</Td>
+                    <Td>
+                      <Badge className={statusClass(item.status)}>{item.status.replace("_", " ")}</Badge>
+                    </Td>
+                    <Td>{formatCurrency(item.total_price)}</Td>
+                    <Td>{item.created_by_name ?? item.created_by_user_id}</Td>
+                    <Td>{formatDate(item.created_at)}</Td>
+                    <Td>
+                      <Button variant="outline" size="sm" asChild>
+                        <Link to={`/work-orders/${item.reference_id}`}>Open WO</Link>
+                      </Button>
+                    </Td>
+                  </tr>
+                ))}
+            </tbody>
+          </Table>
+        </div>
       </div>
     </section>
   );

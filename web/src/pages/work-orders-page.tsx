@@ -1674,60 +1674,62 @@ export default function WorkOrdersPage() {
           )}
         </form>
 
-        <Table>
-          <thead>
-            <tr>
-              <Th className="w-[110px]">Ref #</Th>
-              <Th>Customer</Th>
-              <Th>Status</Th>
-              <Th>Job Type</Th>
-              <Th>Item</Th>
-              <Th>Location</Th>
-              <Th>Created</Th>
-              <Th className="w-[120px]">Action</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && items.length === 0 && (
+        <div className="overflow-x-auto">
+          <Table className="min-w-[920px]">
+            <thead>
               <tr>
-                <Td colSpan={8}>Loading work orders...</Td>
+                <Th className="w-[110px]">Ref #</Th>
+                <Th>Customer</Th>
+                <Th>Status</Th>
+                <Th>Job Type</Th>
+                <Th>Item</Th>
+                <Th>Location</Th>
+                <Th>Created</Th>
+                <Th className="w-[120px]">Action</Th>
               </tr>
-            )}
-            {!loading && items.length === 0 && (
-              <tr>
-                <Td colSpan={8}>No work orders found.</Td>
-              </tr>
-            )}
-            {items.map((item) => (
-              <tr key={item.reference_id}>
-                <Td>{item.reference_id}</Td>
-                <Td>
-                  <div className="space-y-1">
-                    <p>{item.customer_name ?? "-"}</p>
-                    {canViewSensitive && item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
-                  </div>
-                </Td>
-                <Td>
-                  <Badge className={statusClass(item.status)}>{item.status}</Badge>
-                </Td>
-                <Td>{item.job_type}</Td>
-                <Td>
-                  <div className="space-y-1">
-                    <p>{item.item_name ?? "-"}</p>
-                    {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
-                  </div>
-                </Td>
-                <Td>{formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}</Td>
-                <Td>{formatDateTime(item.created_at)}</Td>
-                <Td>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link to={`/work-orders/${item.reference_id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}>View</Link>
-                  </Button>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+            </thead>
+            <tbody>
+              {loading && items.length === 0 && (
+                <tr>
+                  <Td colSpan={8}>Loading work orders...</Td>
+                </tr>
+              )}
+              {!loading && items.length === 0 && (
+                <tr>
+                  <Td colSpan={8}>No work orders found.</Td>
+                </tr>
+              )}
+              {items.map((item) => (
+                <tr key={item.reference_id}>
+                  <Td>{item.reference_id}</Td>
+                  <Td>
+                    <div className="space-y-1">
+                      <p>{item.customer_name ?? "-"}</p>
+                      {canViewSensitive && item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
+                    </div>
+                  </Td>
+                  <Td>
+                    <Badge className={statusClass(item.status)}>{item.status}</Badge>
+                  </Td>
+                  <Td>{item.job_type}</Td>
+                  <Td>
+                    <div className="space-y-1">
+                      <p>{item.item_name ?? "-"}</p>
+                      {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
+                    </div>
+                  </Td>
+                  <Td>{formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}</Td>
+                  <Td>{formatDateTime(item.created_at)}</Td>
+                  <Td>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link to={`/work-orders/${item.reference_id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}>View</Link>
+                    </Button>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
 
         <div className="flex min-h-6 items-center justify-center">
           {loadingMore && <p className="text-xs text-muted-foreground">Loading more work orders...</p>}
