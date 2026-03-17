@@ -818,7 +818,7 @@ function MultiSearchableDropdown({
                   </label>
                 );
               })}
-              {!adding && (
+              {!adding && onAddNew && (
                 <button
                   type="button"
                   className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
@@ -960,6 +960,7 @@ export default function WorkOrderDetailPage() {
   const [aiSummaryLoadedReference, setAISummaryLoadedReference] = useState<number | null>(null);
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<LookupOption[]>([]);
   const [noPaymentMethodID, setNoPaymentMethodID] = useState<number | null>(null);
+  const [frozenDropdowns, setFrozenDropdowns] = useState<Record<string, boolean>>({});
 
   const [equipmentForm, setEquipmentForm] = useState<EquipmentForm>({
     status_id: null,
@@ -1096,11 +1097,32 @@ export default function WorkOrderDetailPage() {
       setNoPaymentMethodID(current.id);
       return current.id;
     }
+    if (frozenDropdowns["payment_methods"] === true) {
+      throw new Error("Payment methods dropdown is frozen. Add a 'No Payment' option from Dropdown Management first.");
+    }
     const created = await apiClient.createPaymentMethod("No Payment");
     setPaymentMethodOptions((prev) => (prev.some((method) => method.id === created.id) ? prev : [...prev, created]));
     setNoPaymentMethodID(created.id);
     return created.id;
-  }, [loadPaymentMethodOptions, noPaymentMethodID, paymentMethodOptions]);
+  }, [frozenDropdowns, loadPaymentMethodOptions, noPaymentMethodID, paymentMethodOptions]);
+
+  useEffect(() => {
+    if (!hasPermission("work_orders:read")) return;
+    apiClient
+      .listDropdownManagement()
+      .then((res) => {
+        const next: Record<string, boolean> = {};
+        for (const entry of res.items) {
+          next[entry.key] = entry.is_frozen;
+        }
+        setFrozenDropdowns(next);
+      })
+      .catch((err) => {
+        alerts.error("Failed to load dropdown settings", err instanceof Error ? err.message : "Request failed");
+      });
+  }, [alerts, hasPermission]);
+
+  const isDropdownFrozen = (key: string) => frozenDropdowns[key] === true;
 
   useEffect(() => {
     if (!hasPermission("work_orders:read")) return;
@@ -1747,7 +1769,7 @@ export default function WorkOrderDetailPage() {
             onChange={(value) => setEquipmentForm((prev) => ({ ...prev, status_id: value }))}
             loadOptions={async () => (await apiClient.listWorkOrderStatuses("")).items}
             placeholder="Select status"
-            onAddNew={canEdit ? (label) => apiClient.createWorkOrderStatus(label) : undefined}
+            onAddNew={canEdit && !isDropdownFrozen("work_order_statuses") ? (label) => apiClient.createWorkOrderStatus(label) : undefined}
           />
           <SingleSearchableDropdown
             label="Location"
@@ -1756,7 +1778,7 @@ export default function WorkOrderDetailPage() {
             onChange={(value) => setEquipmentForm((prev) => ({ ...prev, location_id: value }))}
             loadOptions={async (q) => (await apiClient.listLocations(q)).items}
             placeholder="Select location"
-            onAddLocation={canEdit ? (payload) => apiClient.createLocation(payload) : undefined}
+            onAddLocation={canEdit && !isDropdownFrozen("locations") ? (payload) => apiClient.createLocation(payload) : undefined}
             allowClear
           />
           {canEdit ? (
@@ -1768,7 +1790,7 @@ export default function WorkOrderDetailPage() {
             onChange={(value) => setEquipmentForm((prev) => ({ ...prev, job_type_id: value }))}
             loadOptions={async () => (await apiClient.listJobTypes("")).items}
             placeholder="Select job type"
-            onAddNew={(label) => apiClient.createJobType(label)}
+            onAddNew={isDropdownFrozen("job_types") ? undefined : (label) => apiClient.createJobType(label)}
           />
           <SingleSearchableDropdown
             label="Item"
@@ -1777,7 +1799,7 @@ export default function WorkOrderDetailPage() {
             onChange={(value) => setEquipmentForm((prev) => ({ ...prev, item_id: value }))}
             loadOptions={async (q) => (await apiClient.listItems(q)).items}
             placeholder="Select item"
-            onAddNew={(label) => apiClient.createItem(label)}
+            onAddNew={isDropdownFrozen("items") ? undefined : (label) => apiClient.createItem(label)}
           />
           <MultiSearchableDropdown
             label="Brands"
@@ -1786,7 +1808,7 @@ export default function WorkOrderDetailPage() {
             onChange={(values) => setEquipmentForm((prev) => ({ ...prev, brand_ids: values }))}
             loadOptions={async (q) => (await apiClient.listBrands(q)).items}
             placeholder="Select brands"
-            onAddNew={(label) => apiClient.createBrand(label)}
+            onAddNew={isDropdownFrozen("brands") ? undefined : (label) => apiClient.createBrand(label)}
           />
           <div>
             <label className="mb-1 block text-sm text-muted-foreground">Model</label>
@@ -1904,7 +1926,7 @@ export default function WorkOrderDetailPage() {
                   onChange={(values) => setWorkNotesForm((prev) => ({ ...prev, worker_ids: values }))}
                   loadOptions={async (q) => (await apiClient.listWorkers(q)).items}
                   placeholder="Select technicians"
-                  onAddNew={(label) => apiClient.createWorker(label)}
+                  onAddNew={isDropdownFrozen("workers") ? undefined : (label) => apiClient.createWorker(label)}
                 />
                 <div>
                   <label className="mb-1 block text-sm text-muted-foreground">Problem Description</label>
@@ -2058,7 +2080,7 @@ export default function WorkOrderDetailPage() {
                       onChange={(value) => { void handleDepositPaymentMethodChange(value); }}
                       loadOptions={loadPaymentMethodOptions}
                       placeholder="Select deposit payment method"
-                      onAddNew={(label) => apiClient.createPaymentMethod(label)}
+                      onAddNew={isDropdownFrozen("payment_methods") ? undefined : (label) => apiClient.createPaymentMethod(label)}
                     />
                     <SingleDropdown
                       label="Final Payment Method"
@@ -2067,7 +2089,7 @@ export default function WorkOrderDetailPage() {
                       onChange={(value) => { void handleFinalPaymentMethodChange(value); }}
                       loadOptions={loadPaymentMethodOptions}
                       placeholder="Select final payment method"
-                      onAddNew={(label) => apiClient.createPaymentMethod(label)}
+                      onAddNew={isDropdownFrozen("payment_methods") ? undefined : (label) => apiClient.createPaymentMethod(label)}
                     />
                     <div>
                       <label className="mb-1 block text-sm text-muted-foreground">Parts (from line totals)</label>

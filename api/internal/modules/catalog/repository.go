@@ -17,9 +17,99 @@ type LookupOption struct {
 	Label string `json:"label"`
 }
 
+type ManagedLookupOption struct {
+	ID       int64  `json:"id"`
+	Label    string `json:"label"`
+	IsActive bool   `json:"is_active"`
+}
+
+type DropdownManagementEntry struct {
+	Key      string                `json:"key"`
+	Label    string                `json:"label"`
+	IsFrozen bool                  `json:"is_frozen"`
+	Options  []ManagedLookupOption `json:"options"`
+}
+
+const (
+	DropdownKeyWorkOrderStatuses = "work_order_statuses"
+	DropdownKeyJobTypes          = "job_types"
+	DropdownKeyItems             = "items"
+	DropdownKeyBrands            = "brands"
+	DropdownKeyWorkers           = "workers"
+	DropdownKeyPaymentMethods    = "payment_methods"
+	DropdownKeyLocations         = "locations"
+)
+
+type dropdownSpec struct {
+	Key      string
+	Label    string
+	Table    string
+	IDColumn string
+	LabelSQL string
+}
+
+var managedDropdownSpecs = []dropdownSpec{
+	{
+		Key:      DropdownKeyWorkOrderStatuses,
+		Label:    "Work Order Statuses",
+		Table:    "work_order_statuses",
+		IDColumn: "status_id",
+		LabelSQL: "display_name",
+	},
+	{
+		Key:      DropdownKeyJobTypes,
+		Label:    "Job Types",
+		Table:    "job_types",
+		IDColumn: "job_type_id",
+		LabelSQL: "display_name",
+	},
+	{
+		Key:      DropdownKeyItems,
+		Label:    "Items",
+		Table:    "items",
+		IDColumn: "item_id",
+		LabelSQL: "item_name",
+	},
+	{
+		Key:      DropdownKeyBrands,
+		Label:    "Brands",
+		Table:    "brands",
+		IDColumn: "brand_id",
+		LabelSQL: "brand_name",
+	},
+	{
+		Key:      DropdownKeyWorkers,
+		Label:    "Workers",
+		Table:    "workers",
+		IDColumn: "worker_id",
+		LabelSQL: "worker_name",
+	},
+	{
+		Key:      DropdownKeyPaymentMethods,
+		Label:    "Payment Methods",
+		Table:    "payment_methods",
+		IDColumn: "payment_method_id",
+		LabelSQL: "display_name",
+	},
+	{
+		Key:      DropdownKeyLocations,
+		Label:    "Locations",
+		Table:    "locations",
+		IDColumn: "location_id",
+		LabelSQL: `CASE
+			WHEN floor = 0 THEN shelf || '-FLOOR'
+			ELSE shelf || '-' || floor::text
+		END`,
+	},
+}
+
 type Repository interface {
 	ListResources(ctx context.Context) ([]domain.Resource, error)
 	ListPermissions(ctx context.Context) ([]domain.Permission, error)
+	ListDropdownManagement(ctx context.Context) ([]DropdownManagementEntry, error)
+	SetDropdownFrozen(ctx context.Context, dropdownKey string, frozen bool) error
+	SetDropdownOptionActive(ctx context.Context, dropdownKey string, optionID int64, active bool) error
+	IsDropdownFrozen(ctx context.Context, dropdownKey string) (bool, error)
 	ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error)
 	ListJobTypes(ctx context.Context, query string) ([]LookupOption, error)
 	ListItems(ctx context.Context, query string) ([]LookupOption, error)
@@ -86,11 +176,11 @@ func (r *storeRepository) ListPermissions(ctx context.Context) ([]domain.Permiss
 }
 
 func (r *storeRepository) ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error) {
-	return r.listLookup(ctx, `SELECT status_id, display_name FROM public.work_order_statuses`, "display_name", query)
+	return r.listLookup(ctx, `SELECT status_id, display_name FROM public.work_order_statuses WHERE is_active = true`, "display_name", query)
 }
 
 func (r *storeRepository) ListJobTypes(ctx context.Context, query string) ([]LookupOption, error) {
-	return r.listLookup(ctx, `SELECT job_type_id, display_name FROM public.job_types`, "display_name", query)
+	return r.listLookup(ctx, `SELECT job_type_id, display_name FROM public.job_types WHERE is_active = true`, "display_name", query)
 }
 
 func (r *storeRepository) ListItems(ctx context.Context, query string) ([]LookupOption, error) {
@@ -102,7 +192,7 @@ func (r *storeRepository) ListBrands(ctx context.Context, query string) ([]Looku
 }
 
 func (r *storeRepository) ListWorkers(ctx context.Context, query string) ([]LookupOption, error) {
-	return r.listLookup(ctx, `SELECT worker_id::bigint, worker_name FROM public.workers`, "worker_name", query)
+	return r.listLookup(ctx, `SELECT worker_id::bigint, worker_name FROM public.workers WHERE is_active = true`, "worker_name", query)
 }
 
 func (r *storeRepository) ListPaymentMethods(ctx context.Context, query string) ([]LookupOption, error) {
@@ -174,8 +264,8 @@ func (r *storeRepository) CreateWorkOrderStatus(ctx context.Context, label strin
 
 	var option LookupOption
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO public.work_order_statuses(status_key, display_name)
-		VALUES($1, $2)
+		INSERT INTO public.work_order_statuses(status_key, display_name, is_active)
+		VALUES($1, $2, true)
 		RETURNING status_id::bigint, display_name
 	`, key, value).Scan(&option.ID, &option.Label)
 	return option, err
@@ -191,8 +281,8 @@ func (r *storeRepository) CreateJobType(ctx context.Context, label string) (Look
 
 	var option LookupOption
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO public.job_types(job_type_key, display_name)
-		VALUES($1, $2)
+		INSERT INTO public.job_types(job_type_key, display_name, is_active)
+		VALUES($1, $2, true)
 		RETURNING job_type_id::bigint, display_name
 	`, key, value).Scan(&option.ID, &option.Label)
 	return option, err
@@ -224,8 +314,8 @@ func (r *storeRepository) CreateWorker(ctx context.Context, label string) (Looku
 	value := strings.TrimSpace(label)
 	var option LookupOption
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO public.workers(worker_name)
-		VALUES($1)
+		INSERT INTO public.workers(worker_name, is_active)
+		VALUES($1, true)
 		RETURNING worker_id::bigint, worker_name
 	`, value).Scan(&option.ID, &option.Label)
 	return option, err
@@ -268,6 +358,114 @@ func (r *storeRepository) CreateLocation(ctx context.Context, shelf string, floo
 	}
 	option.Label = fmt.Sprintf("%s-%s", createdShelf, formatFloorLabel(createdFloor))
 	return option, err
+}
+
+func (r *storeRepository) ListDropdownManagement(ctx context.Context) ([]DropdownManagementEntry, error) {
+	out := make([]DropdownManagementEntry, 0, len(managedDropdownSpecs))
+	for _, spec := range managedDropdownSpecs {
+		var isFrozen bool
+		if err := r.db.QueryRow(ctx, `
+			SELECT COALESCE(
+				(SELECT is_frozen FROM public.dropdown_management_settings WHERE dropdown_key = $1),
+				false
+			)
+		`, spec.Key).Scan(&isFrozen); err != nil {
+			return nil, err
+		}
+
+		rows, err := r.db.Query(ctx, fmt.Sprintf(`
+			SELECT %s::bigint, %s, is_active
+			FROM public.%s
+			ORDER BY %s ASC, %s ASC
+		`, spec.IDColumn, spec.LabelSQL, spec.Table, spec.LabelSQL, spec.IDColumn))
+		if err != nil {
+			return nil, err
+		}
+
+		options := make([]ManagedLookupOption, 0)
+		for rows.Next() {
+			var option ManagedLookupOption
+			if err := rows.Scan(&option.ID, &option.Label, &option.IsActive); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			options = append(options, option)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+
+		out = append(out, DropdownManagementEntry{
+			Key:      spec.Key,
+			Label:    spec.Label,
+			IsFrozen: isFrozen,
+			Options:  options,
+		})
+	}
+	return out, nil
+}
+
+func (r *storeRepository) SetDropdownFrozen(ctx context.Context, dropdownKey string, frozen bool) error {
+	if _, ok := getDropdownSpec(dropdownKey); !ok {
+		return ErrUnknownDropdownKey
+	}
+
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO public.dropdown_management_settings(dropdown_key, is_frozen, updated_at)
+		VALUES($1, $2, now())
+		ON CONFLICT (dropdown_key)
+		DO UPDATE SET
+			is_frozen = EXCLUDED.is_frozen,
+			updated_at = now()
+	`, dropdownKey, frozen)
+	return err
+}
+
+func (r *storeRepository) SetDropdownOptionActive(ctx context.Context, dropdownKey string, optionID int64, active bool) error {
+	spec, ok := getDropdownSpec(dropdownKey)
+	if !ok {
+		return ErrUnknownDropdownKey
+	}
+
+	sql := fmt.Sprintf(`
+		UPDATE public.%s
+		SET is_active = $1
+		WHERE %s = $2
+	`, spec.Table, spec.IDColumn)
+	cmd, err := r.db.Exec(ctx, sql, active, optionID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrDropdownOptionNotFound
+	}
+	return nil
+}
+
+func (r *storeRepository) IsDropdownFrozen(ctx context.Context, dropdownKey string) (bool, error) {
+	if _, ok := getDropdownSpec(dropdownKey); !ok {
+		return false, ErrUnknownDropdownKey
+	}
+
+	var frozen bool
+	err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(
+			(SELECT is_frozen FROM public.dropdown_management_settings WHERE dropdown_key = $1),
+			false
+		)
+	`, dropdownKey).Scan(&frozen)
+	return frozen, err
+}
+
+func getDropdownSpec(key string) (dropdownSpec, bool) {
+	for _, spec := range managedDropdownSpecs {
+		if spec.Key == key {
+			return spec, true
+		}
+	}
+	return dropdownSpec{}, false
 }
 
 func formatFloorLabel(floor int32) string {

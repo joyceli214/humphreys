@@ -3,6 +3,7 @@ package catalog
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +21,14 @@ type createLocationRequest struct {
 	Label *string `json:"label"`
 	Shelf *string `json:"shelf"`
 	Floor *int32  `json:"floor"`
+}
+
+type setDropdownFrozenRequest struct {
+	IsFrozen *bool `json:"is_frozen"`
+}
+
+type setDropdownOptionActiveRequest struct {
+	IsActive *bool `json:"is_active"`
 }
 
 func New(db *pgxpool.Pool) *Handler {
@@ -48,6 +57,61 @@ func (h *Handler) ListPermissions(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": permissions})
+}
+
+func (h *Handler) ListDropdownManagement(c *gin.Context) {
+	items, err := h.service.ListDropdownManagement(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list dropdown management data"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) SetDropdownFrozen(c *gin.Context) {
+	var req setDropdownFrozenRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.IsFrozen == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	if err := h.service.SetDropdownFrozen(c.Request.Context(), c.Param("key"), *req.IsFrozen); errors.Is(err, ErrUnknownDropdownKey) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update dropdown freeze state"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) SetDropdownOptionActive(c *gin.Context) {
+	optionID, err := strconv.ParseInt(c.Param("optionId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid dropdown option id"})
+		return
+	}
+
+	var req setDropdownOptionActiveRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.IsActive == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	err = h.service.SetDropdownOptionActive(c.Request.Context(), c.Param("key"), optionID, *req.IsActive)
+	if errors.Is(err, ErrUnknownDropdownKey) || errors.Is(err, ErrInvalidDropdownOptionID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownOptionNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update dropdown option status"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) ListWorkOrderStatuses(c *gin.Context) {
@@ -124,6 +188,10 @@ func (h *Handler) CreateWorkOrderStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -140,6 +208,10 @@ func (h *Handler) CreateJobType(c *gin.Context) {
 	item, err := h.service.CreateJobType(c.Request.Context(), req.Label)
 	if errors.Is(err, ErrInvalidLookupLabel) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {
@@ -160,6 +232,10 @@ func (h *Handler) CreateItem(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -176,6 +252,10 @@ func (h *Handler) CreateBrand(c *gin.Context) {
 	item, err := h.service.CreateBrand(c.Request.Context(), req.Label)
 	if errors.Is(err, ErrInvalidLookupLabel) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {
@@ -196,6 +276,10 @@ func (h *Handler) CreateWorker(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -212,6 +296,10 @@ func (h *Handler) CreatePaymentMethod(c *gin.Context) {
 	item, err := h.service.CreatePaymentMethod(c.Request.Context(), req.Label)
 	if errors.Is(err, ErrInvalidLookupLabel) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {
@@ -243,6 +331,10 @@ func (h *Handler) CreateLocation(c *gin.Context) {
 	item, err := h.service.CreateLocation(c.Request.Context(), shelf, floor)
 	if errors.Is(err, ErrInvalidLocationShelf) || errors.Is(err, ErrInvalidLocationFloor) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	if err != nil {

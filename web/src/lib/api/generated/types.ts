@@ -147,6 +147,19 @@ export interface LookupOption {
   label: string;
 }
 
+export interface ManagedLookupOption {
+  id: number;
+  label: string;
+  is_active: boolean;
+}
+
+export interface DropdownManagementEntry {
+  key: string;
+  label: string;
+  is_frozen: boolean;
+  options: ManagedLookupOption[];
+}
+
 export interface CustomerLookupOption {
   id: number;
   label: string;

@@ -16,6 +16,9 @@ const (
 func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	authed.GET("/resources", middleware.RequirePermission(permResourcesRead), h.ListResources)
 	authed.GET("/permissions", middleware.RequirePermission(permPermissionsRead), h.ListPermissions)
+	authed.GET("/catalog/dropdown-management", middleware.RequirePermission(permWorkOrdersRead), h.ListDropdownManagement)
+	authed.PATCH("/catalog/dropdown-management/:key/freeze", middleware.RequirePermission(permWorkOrdersUpdate), h.SetDropdownFrozen)
+	authed.PATCH("/catalog/dropdown-management/:key/options/:optionId/active", middleware.RequirePermission(permWorkOrdersUpdate), h.SetDropdownOptionActive)
 	authed.GET("/catalog/work-order-statuses", middleware.RequirePermission(permWorkOrdersRead), h.ListWorkOrderStatuses)
 	authed.GET("/catalog/job-types", middleware.RequirePermission(permWorkOrdersRead), h.ListJobTypes)
 	authed.GET("/catalog/items", middleware.RequirePermission(permWorkOrdersRead), h.ListItems)

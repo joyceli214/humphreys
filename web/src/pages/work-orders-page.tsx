@@ -934,6 +934,7 @@ export default function WorkOrdersPage() {
   const [modelNumber, setModelNumber] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
   const [paymentMethods, setPaymentMethods] = useState<LookupOption[]>([]);
+  const [frozenDropdowns, setFrozenDropdowns] = useState<Record<string, boolean>>({});
   const [depositPaymentMethodId, setDepositPaymentMethodId] = useState("");
   const pageSize = 100;
   const toListSearch = (nextQuery: string, nextFilters: WorkOrderListFilters) => {
@@ -1052,6 +1053,22 @@ export default function WorkOrdersPage() {
   }, [filters]);
 
   useEffect(() => {
+    if (!hasPermission("work_orders:read")) return;
+    apiClient
+      .listDropdownManagement()
+      .then((res) => {
+        const next: Record<string, boolean> = {};
+        for (const entry of res.items) {
+          next[entry.key] = entry.is_frozen;
+        }
+        setFrozenDropdowns(next);
+      })
+      .catch((err) => {
+        alerts.error("Failed to load dropdown settings", err instanceof Error ? err.message : "Request failed");
+      });
+  }, [alerts, hasPermission]);
+
+  useEffect(() => {
     if (!createOpen || !canCreateWorkOrders) return;
     apiClient
       .listPaymentMethods("")
@@ -1062,6 +1079,8 @@ export default function WorkOrdersPage() {
         alerts.error("Failed to load create form options", err instanceof Error ? err.message : "Request failed");
       });
   }, [alerts, canCreateWorkOrders, createOpen]);
+
+  const isDropdownFrozen = (key: string) => frozenDropdowns[key] === true;
 
   const resetCreateForm = () => {
     setCreationMode("new_job");
@@ -1287,7 +1306,7 @@ export default function WorkOrdersPage() {
                   onChange={setLocationId}
                   loadOptions={async (q) => (await apiClient.listLocations(q)).items}
                   placeholder="Select location"
-                  onAddLocation={(payload) => apiClient.createLocation(payload)}
+                  onAddLocation={isDropdownFrozen("locations") ? undefined : (payload) => apiClient.createLocation(payload)}
                   allowClear
                   clearLabel="None"
                 />
@@ -1297,7 +1316,7 @@ export default function WorkOrdersPage() {
                   onChange={setItemId}
                   loadOptions={async (q) => (await apiClient.listItems(q)).items}
                   placeholder="Select item"
-                  onAddNew={(label) => apiClient.createItem(label)}
+                  onAddNew={isDropdownFrozen("items") ? undefined : (label) => apiClient.createItem(label)}
                 />
                 <MultiSearchableDropdown
                   label="Brands"
@@ -1306,7 +1325,7 @@ export default function WorkOrdersPage() {
                   onChange={setBrandIds}
                   loadOptions={async (q) => (await apiClient.listBrands(q)).items}
                   placeholder="Select brands"
-                  onAddNew={(label) => apiClient.createBrand(label)}
+                  onAddNew={isDropdownFrozen("brands") ? undefined : (label) => apiClient.createBrand(label)}
                 />
                 <div className="space-y-1">
                   <label className="text-sm">Model Number</label>

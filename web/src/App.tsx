@@ -9,6 +9,7 @@ import PartsPurchaseRequestsPage from "@/pages/parts-purchase-requests-page";
 import UsersPage from "@/pages/users-page";
 import RolesPage from "@/pages/roles-page";
 import AdminDashboardPage from "@/pages/admin-dashboard-page";
+import DropdownManagementPage from "@/pages/dropdown-management-page";
 
 function HomeRedirect() {
   const { loading, scope } = useAuth();
@@ -66,6 +67,14 @@ export default function App() {
         element={
           <ProtectedShell>
             <RolesPage />
+          </ProtectedShell>
+        }
+      />
+      <Route
+        path="/dropdown-management"
+        element={
+          <ProtectedShell>
+            <DropdownManagementPage />
           </ProtectedShell>
         }
       />

@@ -1,6 +1,7 @@
 import type {
   AuthResponse,
   CustomerLookupOption,
+  DropdownManagementEntry,
   DashboardData,
   LookupOption,
   PartsPurchaseRequest,
@@ -458,6 +459,29 @@ export class APIClient {
     return this.cachedLookup("/catalog/locations", q);
   }
 
+  listDropdownManagement() {
+    return this.request<{ items: DropdownManagementEntry[] }>("/catalog/dropdown-management");
+  }
+
+  setDropdownFrozen(key: string, isFrozen: boolean) {
+    return this.request<void>(`/catalog/dropdown-management/${encodeURIComponent(key)}/freeze`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_frozen: isFrozen })
+    });
+  }
+
+  setDropdownOptionActive(key: string, optionID: number, isActive: boolean) {
+    const path = this.catalogPathByDropdownKey(key);
+    return this.request<void>(`/catalog/dropdown-management/${encodeURIComponent(key)}/options/${optionID}/active`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive })
+    }).then(() => {
+      if (path) {
+        this.invalidateLookupCache(path);
+      }
+    });
+  }
+
   createWorkOrderStatus(label: string) {
     return this.createLookup("/catalog/work-order-statuses", label);
   }
@@ -549,6 +573,17 @@ export class APIClient {
         this.lookupCache.delete(key);
       }
     }
+  }
+
+  private catalogPathByDropdownKey(key: string): string | null {
+    if (key === "work_order_statuses") return "/catalog/work-order-statuses";
+    if (key === "job_types") return "/catalog/job-types";
+    if (key === "items") return "/catalog/items";
+    if (key === "brands") return "/catalog/brands";
+    if (key === "workers") return "/catalog/workers";
+    if (key === "payment_methods") return "/catalog/payment-methods";
+    if (key === "locations") return "/catalog/locations";
+    return null;
   }
 }
 
