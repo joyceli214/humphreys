@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
+import { normalizeMarkdownInput } from "@/lib/markdown";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -121,7 +122,8 @@ function detailRow(label: string, value: string) {
 }
 
 function markdownBlock(value: string | null) {
-  const content = value?.trim() ? value : "-";
+  const normalized = normalizeMarkdownInput(value);
+  const content = normalized || "-";
   return (
     <div className="rounded-md border border-border p-3 text-sm break-words">
       <ReactMarkdown
@@ -155,7 +157,8 @@ function markdownBlock(value: string | null) {
 }
 
 function markdownPlain(value: string | null) {
-  const content = value?.trim() ? value : "-";
+  const normalized = normalizeMarkdownInput(value);
+  const content = normalized || "-";
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}

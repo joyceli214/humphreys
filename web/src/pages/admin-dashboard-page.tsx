@@ -8,6 +8,10 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { normalizeMarkdownInput } from "@/lib/markdown";
+import rehypeRaw from "rehype-raw";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type DashboardDateRange = "90d" | "2w" | "1m" | "1y";
 
@@ -66,6 +70,33 @@ function formatCurrency(value: number) {
 
 function totalPages(total: number, pageSize: number) {
   return Math.max(1, Math.ceil(total / pageSize));
+}
+
+function markdownPlain(value: string | null | undefined) {
+  const content = normalizeMarkdownInput(value) || "-";
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw]}
+      components={{
+        p: ({ children }) => <p className="mb-1.5 leading-6 last:mb-0">{children}</p>,
+        a: ({ children, href }) => (
+          <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 break-all">
+            {children}
+          </a>
+        ),
+        ul: ({ children }) => <ul className="mb-2 list-disc pl-6">{children}</ul>,
+        ol: ({ children }) => <ol className="mb-2 list-decimal pl-6">{children}</ol>,
+        li: ({ children }) => <li>{children}</li>,
+        blockquote: ({ children }) => (
+          <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>
+        ),
+        strong: ({ children }) => <strong className="font-semibold">{children}</strong>
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 export default function AdminDashboardPage() {
@@ -385,7 +416,7 @@ export default function AdminDashboardPage() {
                           <Link to={`/work-orders/${activity.reference_id}`}>Job #{activity.reference_id}</Link>
                         </Button>
                       </div>
-                      <p className="mt-1 text-xs italic text-muted-foreground">&quot;{activity.details}&quot;</p>
+                      <div className="mt-1 text-xs italic text-muted-foreground">{markdownPlain(activity.details)}</div>
                       <p className="mt-1 text-xs text-muted-foreground">Logged: {formatDateTime(activity.logged_at)}</p>
                     </div>
                   ))}

@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { WorkOrderDetail } from "@/lib/api/generated/types";
+import { markdownToPlainText } from "@/lib/markdown";
 import { formatPhoneNumber } from "@/lib/phone";
 
 function text(value: string | null | undefined) {
@@ -91,7 +92,7 @@ function pageHeight(doc: jsPDF) {
 }
 
 function linesForWidth(doc: jsPDF, value: string | null | undefined, width: number) {
-  return doc.splitTextToSize(text(value), width);
+  return doc.splitTextToSize(markdownToPlainText(value), width);
 }
 
 function compactNoteLines(lines: string[]) {
