@@ -38,6 +38,7 @@ const (
 	DropdownKeyWorkers           = "workers"
 	DropdownKeyPaymentMethods    = "payment_methods"
 	DropdownKeyLocations         = "locations"
+	DropdownKeyPartsItemPresets  = "parts_item_presets"
 )
 
 type dropdownSpec struct {
@@ -101,6 +102,13 @@ var managedDropdownSpecs = []dropdownSpec{
 			ELSE shelf || '-' || floor::text
 		END`,
 	},
+	{
+		Key:      DropdownKeyPartsItemPresets,
+		Label:    "Parts Item Presets",
+		Table:    "parts_item_presets",
+		IDColumn: "parts_item_preset_id",
+		LabelSQL: "preset_name",
+	},
 }
 
 type Repository interface {
@@ -117,6 +125,7 @@ type Repository interface {
 	ListWorkers(ctx context.Context, query string) ([]LookupOption, error)
 	ListPaymentMethods(ctx context.Context, query string) ([]LookupOption, error)
 	ListLocations(ctx context.Context, query string) ([]LookupOption, error)
+	ListPartsItemPresets(ctx context.Context, query string) ([]LookupOption, error)
 	CreateWorkOrderStatus(ctx context.Context, label string) (LookupOption, error)
 	CreateJobType(ctx context.Context, label string) (LookupOption, error)
 	CreateItem(ctx context.Context, label string) (LookupOption, error)
@@ -124,6 +133,7 @@ type Repository interface {
 	CreateWorker(ctx context.Context, label string) (LookupOption, error)
 	CreatePaymentMethod(ctx context.Context, label string) (LookupOption, error)
 	CreateLocation(ctx context.Context, shelf string, floor int32) (LookupOption, error)
+	CreatePartsItemPreset(ctx context.Context, label string) (LookupOption, error)
 }
 
 type storeRepository struct {
@@ -254,6 +264,10 @@ func (r *storeRepository) ListLocations(ctx context.Context, query string) ([]Lo
 	return out, rows.Err()
 }
 
+func (r *storeRepository) ListPartsItemPresets(ctx context.Context, query string) ([]LookupOption, error) {
+	return r.listLookup(ctx, `SELECT parts_item_preset_id::bigint, preset_name FROM public.parts_item_presets WHERE is_active = true`, "preset_name", query)
+}
+
 func (r *storeRepository) CreateWorkOrderStatus(ctx context.Context, label string) (LookupOption, error) {
 	value := strings.TrimSpace(label)
 	key := slugify(value)
@@ -357,6 +371,17 @@ func (r *storeRepository) CreateLocation(ctx context.Context, shelf string, floo
 		return option, err
 	}
 	option.Label = fmt.Sprintf("%s-%s", createdShelf, formatFloorLabel(createdFloor))
+	return option, err
+}
+
+func (r *storeRepository) CreatePartsItemPreset(ctx context.Context, label string) (LookupOption, error) {
+	value := strings.TrimSpace(label)
+	var option LookupOption
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO public.parts_item_presets(preset_name, is_active)
+		VALUES($1, true)
+		RETURNING parts_item_preset_id::bigint, preset_name
+	`, value).Scan(&option.ID, &option.Label)
 	return option, err
 }
 

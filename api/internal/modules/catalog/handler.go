@@ -177,6 +177,15 @@ func (h *Handler) ListLocations(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (h *Handler) ListPartsItemPresets(c *gin.Context) {
+	items, err := h.service.ListPartsItemPresets(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list parts item presets"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
 func (h *Handler) CreateWorkOrderStatus(c *gin.Context) {
 	var req createLookupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -330,6 +339,28 @@ func (h *Handler) CreateLocation(c *gin.Context) {
 
 	item, err := h.service.CreateLocation(c.Request.Context(), shelf, floor)
 	if errors.Is(err, ErrInvalidLocationShelf) || errors.Is(err, ErrInvalidLocationFloor) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownFrozen) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, item)
+}
+
+func (h *Handler) CreatePartsItemPreset(c *gin.Context) {
+	var req createLookupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	item, err := h.service.CreatePartsItemPreset(c.Request.Context(), req.Label)
+	if errors.Is(err, ErrInvalidLookupLabel) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

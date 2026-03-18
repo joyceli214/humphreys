@@ -459,6 +459,10 @@ export class APIClient {
     return this.cachedLookup("/catalog/locations", q);
   }
 
+  listPartsItemPresets(q = "") {
+    return this.cachedLookup("/catalog/parts-item-presets", q);
+  }
+
   listDropdownManagement() {
     return this.request<{ items: DropdownManagementEntry[] }>("/catalog/dropdown-management");
   }
@@ -515,6 +519,10 @@ export class APIClient {
       this.invalidateLookupCache("/catalog/locations");
       return created;
     });
+  }
+
+  createPartsItemPreset(label: string) {
+    return this.createLookup("/catalog/parts-item-presets", label);
   }
 
   private async refreshAccessToken(): Promise<boolean> {
@@ -583,6 +591,7 @@ export class APIClient {
     if (key === "workers") return "/catalog/workers";
     if (key === "payment_methods") return "/catalog/payment-methods";
     if (key === "locations") return "/catalog/locations";
+    if (key === "parts_item_presets") return "/catalog/parts-item-presets";
     return null;
   }
 }

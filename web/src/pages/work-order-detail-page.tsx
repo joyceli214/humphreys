@@ -219,6 +219,26 @@ function parseDecimalInput(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function sanitizeDecimalInput(value: string) {
+  const normalized = value.replace(",", ".");
+  const cleaned = normalized.replace(/[^0-9.]/g, "");
+  const firstDotIndex = cleaned.indexOf(".");
+  if (firstDotIndex === -1) return cleaned;
+  return `${cleaned.slice(0, firstDotIndex + 1)}${cleaned.slice(firstDotIndex + 1).replace(/\./g, "")}`;
+}
+
+function sanitizeIntegerInput(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function calculateLineSubtotalText(unitPriceValue: string, quantityValue: string): string | null {
+  const unitPrice = parseDecimalInput(unitPriceValue);
+  const quantity = parseDecimalInput(quantityValue);
+  if (unitPrice === null || quantity === null) return null;
+  const subtotal = unitPrice * quantity;
+  return subtotal.toFixed(2);
+}
+
 function todayDateInputValue() {
   const now = new Date();
   const y = now.getFullYear();
@@ -343,6 +363,7 @@ function SingleSearchableDropdown({
   placeholder,
   onAddNew,
   onAddLocation,
+  onAddOther,
   searchable = true,
   allowClear = false
 }: {
@@ -354,6 +375,7 @@ function SingleSearchableDropdown({
   placeholder: string;
   onAddNew?: (label: string) => Promise<LookupOption>;
   onAddLocation?: (payload: { shelf: string; floor: number }) => Promise<LookupOption>;
+  onAddOther?: (label: string) => void;
   searchable?: boolean;
   allowClear?: boolean;
 }) {
@@ -365,7 +387,9 @@ function SingleSearchableDropdown({
   const [options, setOptions] = useState<LookupOption[]>([]);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [adding, setAdding] = useState(false);
+  const [addingOther, setAddingOther] = useState(false);
   const [newValue, setNewValue] = useState("");
+  const [otherValue, setOtherValue] = useState("");
   const [newShelf, setNewShelf] = useState("");
   const [newFloor, setNewFloor] = useState("0");
 
@@ -387,6 +411,7 @@ function SingleSearchableDropdown({
       if (rootRef.current && target && !rootRef.current.contains(target)) {
         setOpen(false);
         setAdding(false);
+        setAddingOther(false);
       }
     };
     document.addEventListener("mousedown", onPointerDown);
@@ -520,11 +545,26 @@ function SingleSearchableDropdown({
                   {option.label}
                 </button>
               ))}
-              {!adding && (onAddNew || onAddLocation) && (
+              {!adding && !addingOther && onAddOther && (
                 <button
                   type="button"
                   className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
-                  onClick={() => setAdding(true)}
+                  onClick={() => {
+                    setAddingOther(true);
+                    setAdding(false);
+                  }}
+                >
+                  + Other...
+                </button>
+              )}
+              {!adding && !addingOther && (onAddNew || onAddLocation) && (
+                <button
+                  type="button"
+                  className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
+                  onClick={() => {
+                    setAdding(true);
+                    setAddingOther(false);
+                  }}
                 >
                   + Add new...
                 </button>
@@ -610,6 +650,7 @@ function SingleSearchableDropdown({
                         if (!value) return;
                         try {
                           const created = await onAddNew(value);
+                          setOptions((prev) => (prev.some((option) => option.id === created.id) ? prev : [created, ...prev]));
                           onChange(created.id);
                           setAdding(false);
                           setNewValue("");
@@ -621,6 +662,44 @@ function SingleSearchableDropdown({
                       }}
                     >
                       Add
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {addingOther && onAddOther && (
+                <div className="p-0">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      autoFocus
+                      className="focus-visible:ring-0 focus-visible:ring-transparent"
+                      placeholder={`Other ${label.toLowerCase()}`}
+                      value={otherValue}
+                      onChange={(e) => setOtherValue(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAddingOther(false);
+                        setOtherValue("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        const value = otherValue.trim();
+                        if (!value) return;
+                        onAddOther(value);
+                        setAddingOther(false);
+                        setOtherValue("");
+                        setOpen(false);
+                      }}
+                    >
+                      OK
                     </Button>
                   </div>
                 </div>
@@ -959,6 +1038,7 @@ export default function WorkOrderDetailPage() {
   const [aiSummaryError, setAISummaryError] = useState("");
   const [aiSummaryLoadedReference, setAISummaryLoadedReference] = useState<number | null>(null);
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<LookupOption[]>([]);
+  const [partsItemPresetOptions, setPartsItemPresetOptions] = useState<LookupOption[]>([]);
   const [noPaymentMethodID, setNoPaymentMethodID] = useState<number | null>(null);
   const [frozenDropdowns, setFrozenDropdowns] = useState<Record<string, boolean>>({});
 
@@ -1106,6 +1186,12 @@ export default function WorkOrderDetailPage() {
     return created.id;
   }, [frozenDropdowns, loadPaymentMethodOptions, noPaymentMethodID, paymentMethodOptions]);
 
+  const loadPartsItemPresetOptions = useCallback(async (query: string) => {
+    const items = (await apiClient.listPartsItemPresets(query)).items;
+    setPartsItemPresetOptions(items);
+    return items;
+  }, []);
+
   useEffect(() => {
     if (!hasPermission("work_orders:read")) return;
     apiClient
@@ -1236,6 +1322,26 @@ export default function WorkOrderDetailPage() {
     );
   }
 
+  const applyCalculatedLineSubtotal = (draft: LineItemForm): LineItemForm => {
+    const calculatedSubtotal = calculateLineSubtotalText(draft.unit_price, draft.quantity_text);
+    if (calculatedSubtotal === null) return draft;
+    return { ...draft, line_total_text: calculatedSubtotal };
+  };
+
+  const editParts = parseOptionalNumber(totalsForm.parts_total) ?? 0;
+  const editDelivery = parseOptionalNumber(totalsForm.delivery_total) ?? 0;
+  const editLabour = parseOptionalNumber(totalsForm.labour_total) ?? 0;
+  const editDepositRaw = Number(totalsForm.deposit.trim() || "0");
+  const editDeposit = Number.isFinite(editDepositRaw) ? editDepositRaw : 0;
+  const editTotal = editParts + editDelivery + editLabour;
+  const editTotalPayable = editTotal - editDeposit;
+
+  const viewParts = item.parts_total ?? 0;
+  const viewDelivery = item.delivery_total ?? 0;
+  const viewLabour = item.labour_total ?? 0;
+  const viewTotal = viewParts + viewDelivery + viewLabour;
+  const viewTotalPayable = viewTotal - item.deposit;
+
   const cancelEditing = () => {
     setEditingSection(null);
     setSectionError("");
@@ -1245,26 +1351,26 @@ export default function WorkOrderDetailPage() {
   const openCreateLineItemModal = () => {
     setLineItemModalMode("create");
     setLineItemEditIndex(null);
-    setLineItemDraft({
+    setLineItemDraft(applyCalculatedLineSubtotal({
       line_item_id: null,
       item_name: "",
       unit_price: "",
       quantity_text: "",
       line_total_text: ""
-    });
+    }));
     setLineItemModalOpen(true);
   };
 
   const openEditLineItemModal = (line: LineItemForm, index: number) => {
     setLineItemModalMode("edit");
     setLineItemEditIndex(index);
-    setLineItemDraft({
+    setLineItemDraft(applyCalculatedLineSubtotal({
       line_item_id: line.line_item_id,
       item_name: line.item_name,
       unit_price: line.unit_price,
       quantity_text: line.quantity_text,
       line_total_text: line.line_total_text
-    });
+    }));
     setLineItemModalOpen(true);
   };
 
@@ -1402,14 +1508,18 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  const saveLineItems = async (nextLineItems: LineItemForm[], successMessage = "Line items updated") => {
+  const saveLineItems = async (nextLineItems: LineItemForm[], successMessage = "Parts items updated") => {
     setSavingSection("line_items");
     setSectionError("");
     try {
       const payload = nextLineItems.map((line, index) => {
-        const unitPrice = parseOptionalNumber(line.unit_price);
+        const unitPrice = parseDecimalInput(line.unit_price);
         if (line.unit_price.trim() !== "" && unitPrice === null) {
           throw new Error(`Line ${index + 1}: Unit price must be a valid number`);
+        }
+        const quantity = parseDecimalInput(line.quantity_text);
+        if (line.quantity_text.trim() !== "" && quantity === null) {
+          throw new Error(`Line ${index + 1}: Qty must be a valid number`);
         }
         const parsedLineTotal = parseLooseNumber(line.line_total_text);
         if (line.line_total_text.trim() !== "" && parsedLineTotal === null) {
@@ -1438,27 +1548,28 @@ export default function WorkOrderDetailPage() {
       );
       alerts.success(successMessage);
     } catch (err) {
-      setSectionError(err instanceof Error ? err.message : "Failed to save line items");
-      alerts.error("Failed to save line items", err instanceof Error ? err.message : "Request failed");
+      setSectionError(err instanceof Error ? err.message : "Failed to save parts items");
+      alerts.error("Failed to save parts items", err instanceof Error ? err.message : "Request failed");
     } finally {
       setSavingSection(null);
     }
   };
 
   const saveLineItemFromModal = async () => {
+    const nextLineDraft = applyCalculatedLineSubtotal(lineItemDraft);
     const next =
       lineItemModalMode === "edit" && lineItemEditIndex !== null
-        ? lineItemsForm.map((line, index) => (index === lineItemEditIndex ? lineItemDraft : line))
-        : [...lineItemsForm, { ...lineItemDraft, line_item_id: null }];
+        ? lineItemsForm.map((line, index) => (index === lineItemEditIndex ? nextLineDraft : line))
+        : [...lineItemsForm, { ...nextLineDraft, line_item_id: null }];
 
     setLineItemModalOpen(false);
     setLineItemEditIndex(null);
-    await saveLineItems(next, lineItemModalMode === "edit" ? "Line item updated" : "Line item added");
+    await saveLineItems(next, lineItemModalMode === "edit" ? "Parts item updated" : "Parts item added");
   };
 
   const deleteLineItem = async (index: number) => {
     const next = lineItemsForm.filter((_, rowIndex) => rowIndex !== index);
-    await saveLineItems(next, "Line item deleted");
+    await saveLineItems(next, "Parts item deleted");
   };
 
   const saveTotals = async () => {
@@ -1972,7 +2083,7 @@ export default function WorkOrderDetailPage() {
               <div className="flex flex-wrap gap-2">
                 {canEdit && (
                   <Button variant="outline" size="sm" onClick={openCreateLineItemModal}>
-                    New Line Item
+                    New Parts Item
                   </Button>
                 )}
                 {canEdit && editingSection !== "totals" && (
@@ -1982,22 +2093,22 @@ export default function WorkOrderDetailPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm text-muted-foreground">Line Items</p>
+              <p className="text-sm text-muted-foreground">Parts Items</p>
               <div className="overflow-x-auto">
                 <Table className="min-w-[640px]">
                   <thead>
                     <tr>
-                      <Th>Item</Th>
+                      <Th>Parts Item</Th>
                       <Th className="w-[140px]">Unit Price</Th>
                       <Th className="w-[140px]">Qty</Th>
-                      <Th className="w-[180px]">Line Total</Th>
+                      <Th className="w-[180px]">Subtotal</Th>
                       {canEdit && <Th className="w-[70px]" />}
                     </tr>
                   </thead>
                   <tbody>
                     {lineItemsForm.length === 0 && (
                       <tr>
-                        <Td colSpan={canEdit ? 5 : 4}>No line items.</Td>
+                        <Td colSpan={canEdit ? 5 : 4}>No parts items.</Td>
                       </tr>
                     )}
                     {lineItemsForm.map((line, index) => (
@@ -2005,7 +2116,13 @@ export default function WorkOrderDetailPage() {
                         <Td>{line.item_name.trim() || "-"}</Td>
                         <Td>{line.unit_price.trim() ? formatCurrency(parseOptionalNumber(line.unit_price)) : "-"}</Td>
                         <Td>{line.quantity_text.trim() || "-"}</Td>
-                        <Td>{line.line_total_text.trim() || "-"}</Td>
+                        <Td>
+                          {line.line_total_text.trim()
+                            ? (parseLooseNumber(line.line_total_text) === null
+                              ? line.line_total_text
+                              : formatCurrency(parseLooseNumber(line.line_total_text)))
+                            : "-"}
+                        </Td>
                         {canEdit && (
                           <Td>
                             <DropdownMenu>
@@ -2029,31 +2146,76 @@ export default function WorkOrderDetailPage() {
             {canEdit && (
               <Dialog open={lineItemModalOpen} onOpenChange={setLineItemModalOpen}>
                 <DialogContent className="max-w-lg">
-                  <DialogTitle className="text-lg font-semibold">{lineItemModalMode === "edit" ? "Edit Line Item" : "New Line Item"}</DialogTitle>
+                  <DialogTitle className="text-lg font-semibold">{lineItemModalMode === "edit" ? "Edit Parts Item" : "New Parts Item"}</DialogTitle>
                   <DialogDescription className="text-sm text-muted-foreground">
                     Update fields below and save to apply changes to this work order.
                   </DialogDescription>
                   <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="sm:col-span-2">
-                      <label className="mb-1 block text-sm text-muted-foreground">Item</label>
-                      <Input value={lineItemDraft.item_name} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, item_name: e.target.value }))} />
+                      <SingleSearchableDropdown
+                        label="Parts Item"
+                        value={null}
+                        valueLabel={lineItemDraft.item_name || undefined}
+                        onChange={(value) => {
+                          if (value === null) {
+                            setLineItemDraft((prev) => ({ ...prev, item_name: "" }));
+                            return;
+                          }
+                          const selected = partsItemPresetOptions.find((option) => option.id === value);
+                          if (!selected) return;
+                          setLineItemDraft((prev) => ({ ...prev, item_name: selected.label }));
+                        }}
+                        loadOptions={loadPartsItemPresetOptions}
+                        placeholder="Select parts item"
+                        onAddNew={
+                          isDropdownFrozen("parts_item_presets")
+                            ? undefined
+                            : async (label) => {
+                              const created = await apiClient.createPartsItemPreset(label);
+                              setPartsItemPresetOptions((prev) =>
+                                prev.some((option) => option.id === created.id) ? prev : [...prev, created]
+                              );
+                              setLineItemDraft((prev) => ({ ...prev, item_name: created.label }));
+                              return created;
+                            }
+                        }
+                        onAddOther={(value) => setLineItemDraft((prev) => ({ ...prev, item_name: value }))}
+                      />
                     </div>
                     <div>
                       <label className="mb-1 block text-sm text-muted-foreground">Unit Price</label>
-                      <Input value={lineItemDraft.unit_price} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, unit_price: e.target.value }))} />
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={lineItemDraft.unit_price}
+                        onChange={(e) =>
+                          setLineItemDraft((prev) =>
+                            applyCalculatedLineSubtotal({ ...prev, unit_price: sanitizeDecimalInput(e.target.value) })
+                          )
+                        }
+                      />
                     </div>
                     <div>
                       <label className="mb-1 block text-sm text-muted-foreground">Qty</label>
-                      <Input value={lineItemDraft.quantity_text} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, quantity_text: e.target.value }))} />
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={lineItemDraft.quantity_text}
+                        onChange={(e) =>
+                          setLineItemDraft((prev) =>
+                            applyCalculatedLineSubtotal({ ...prev, quantity_text: sanitizeIntegerInput(e.target.value) })
+                          )
+                        }
+                      />
                     </div>
                     <div className="sm:col-span-2">
-                      <label className="mb-1 block text-sm text-muted-foreground">Line Total</label>
-                      <Input value={lineItemDraft.line_total_text} onChange={(e) => setLineItemDraft((prev) => ({ ...prev, line_total_text: e.target.value }))} />
+                      <label className="mb-1 block text-sm text-muted-foreground">Subtotal (auto-calculated)</label>
+                      <Input value={lineItemDraft.line_total_text} readOnly disabled />
                     </div>
                     <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
                       <Button variant="outline" onClick={() => setLineItemModalOpen(false)} disabled={savingSection === "line_items"}>Cancel</Button>
                       <Button onClick={() => void saveLineItemFromModal()} disabled={savingSection === "line_items"}>
-                        {savingSection === "line_items" ? "Saving..." : lineItemModalMode === "edit" ? "Save Changes" : "Add Line Item"}
+                        {savingSection === "line_items" ? "Saving..." : lineItemModalMode === "edit" ? "Save Changes" : "Add Parts Item"}
                       </Button>
                     </div>
                   </div>
@@ -2108,6 +2270,14 @@ export default function WorkOrderDetailPage() {
                       />
                       {fieldErrors.deposit && <p className="mt-1 text-xs text-destructive">{fieldErrors.deposit}</p>}
                     </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-muted-foreground">Total</label>
+                      <Input value={formatCurrency(editTotal)} disabled />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-muted-foreground">Total Payable</label>
+                      <Input value={formatCurrency(editTotalPayable)} disabled />
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={saveTotals} disabled={savingSection === "totals"}>{savingSection === "totals" ? "Saving..." : "Save"}</Button>
@@ -2121,7 +2291,9 @@ export default function WorkOrderDetailPage() {
                   {detailRow("Parts", formatCurrency(item.parts_total))}
                   {detailRow("Delivery", formatCurrency(item.delivery_total))}
                   {detailRow("Labour", formatCurrency(item.labour_total))}
+                  {detailRow("Total", formatCurrency(viewTotal))}
                   {detailRow("Deposit", formatCurrency(item.deposit))}
+                  {detailRow("Total Payable", formatCurrency(viewTotalPayable))}
                 </>
               )}
             </div>

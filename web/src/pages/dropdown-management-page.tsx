@@ -167,6 +167,8 @@ export default function DropdownManagementPage() {
                     ? await apiClient.createWorker(value)
                     : selectedEntry.key === "payment_methods"
                       ? await apiClient.createPaymentMethod(value)
+                      : selectedEntry.key === "parts_item_presets"
+                        ? await apiClient.createPartsItemPreset(value)
                       : null;
         if (!created) {
           alerts.error("Unsupported dropdown", "Cannot add to this dropdown.");

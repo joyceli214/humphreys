@@ -75,6 +75,10 @@ func (s *Service) ListLocations(ctx context.Context, query string) ([]LookupOpti
 	return s.repo.ListLocations(ctx, query)
 }
 
+func (s *Service) ListPartsItemPresets(ctx context.Context, query string) ([]LookupOption, error) {
+	return s.repo.ListPartsItemPresets(ctx, query)
+}
+
 func (s *Service) CreateWorkOrderStatus(ctx context.Context, label string) (LookupOption, error) {
 	value := strings.TrimSpace(label)
 	if value == "" {
@@ -153,6 +157,17 @@ func (s *Service) CreateLocation(ctx context.Context, shelf string, floor int32)
 		return LookupOption{}, err
 	}
 	return s.repo.CreateLocation(ctx, value, floor)
+}
+
+func (s *Service) CreatePartsItemPreset(ctx context.Context, label string) (LookupOption, error) {
+	value := strings.TrimSpace(label)
+	if value == "" {
+		return LookupOption{}, ErrInvalidLookupLabel
+	}
+	if err := s.ensureDropdownNotFrozen(ctx, DropdownKeyPartsItemPresets); err != nil {
+		return LookupOption{}, err
+	}
+	return s.repo.CreatePartsItemPreset(ctx, value)
 }
 
 func (s *Service) ensureDropdownNotFrozen(ctx context.Context, key string) error {

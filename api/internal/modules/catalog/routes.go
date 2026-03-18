@@ -26,6 +26,7 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	authed.GET("/catalog/workers", middleware.RequirePermission(permWorkOrdersRead), h.ListWorkers)
 	authed.GET("/catalog/payment-methods", middleware.RequirePermission(permWorkOrdersRead), h.ListPaymentMethods)
 	authed.GET("/catalog/locations", middleware.RequirePermission(permWorkOrdersRead), h.ListLocations)
+	authed.GET("/catalog/parts-item-presets", middleware.RequirePermission(permWorkOrdersRead), h.ListPartsItemPresets)
 	authed.POST("/catalog/work-order-statuses", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateWorkOrderStatus)
 	authed.POST("/catalog/job-types", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateJobType)
 	authed.POST("/catalog/items", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateItem)
@@ -33,4 +34,5 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	authed.POST("/catalog/workers", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateWorker)
 	authed.POST("/catalog/payment-methods", middleware.RequirePermission(permWorkOrdersUpdate), h.CreatePaymentMethod)
 	authed.POST("/catalog/locations", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateLocation)
+	authed.POST("/catalog/parts-item-presets", middleware.RequirePermission(permWorkOrdersUpdate), h.CreatePartsItemPreset)
 }
