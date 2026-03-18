@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
@@ -117,6 +117,15 @@ function detailRow(label: string, value: string) {
     <div className="grid grid-cols-[130px_minmax(0,1fr)] gap-2 text-sm sm:grid-cols-[170px_minmax(0,1fr)]">
       <p className="text-muted-foreground">{label}</p>
       <p className="min-w-0 break-words [overflow-wrap:anywhere]">{value || "-"}</p>
+    </div>
+  );
+}
+
+function detailRowContent(label: string, value: ReactNode) {
+  return (
+    <div className="grid grid-cols-[130px_minmax(0,1fr)] gap-2 text-sm sm:grid-cols-[170px_minmax(0,1fr)]">
+      <p className="text-muted-foreground">{label}</p>
+      <div className="min-w-0 break-words [overflow-wrap:anywhere]">{value}</div>
     </div>
   );
 }
@@ -1028,6 +1037,7 @@ export default function WorkOrderDetailPage() {
   const [deletingPartsRequest, setDeletingPartsRequest] = useState(false);
   const [deleteWorkOrderOpen, setDeleteWorkOrderOpen] = useState(false);
   const [deletingWorkOrder, setDeletingWorkOrder] = useState(false);
+  const [creatingWarranty, setCreatingWarranty] = useState(false);
   const [editingRepairLogID, setEditingRepairLogID] = useState<number | null>(null);
   const [editingPartsRequestID, setEditingPartsRequestID] = useState<number | null>(null);
   const [editingPartsRequestStatus, setEditingPartsRequestStatus] = useState<"draft" | "waiting_approval" | "ordered" | "used" | null>(null);
@@ -1841,6 +1851,62 @@ export default function WorkOrderDetailPage() {
     }
   };
 
+  const createWarrantyWorkOrder = async () => {
+    if (!canAdminDeleteJob) return;
+    if (!item.customer.customer_id) {
+      alerts.error("Cannot create warranty", "Current work order has no customer.");
+      return;
+    }
+    setCreatingWarranty(true);
+    try {
+      const jobTypes = (await apiClient.listJobTypes("")).items;
+      const warrantyType = jobTypes.find((option) => option.label.trim().toLowerCase() === "warranty" || option.label.trim().toLowerCase().includes("warranty"));
+      if (!warrantyType) {
+        throw new Error("Warranty job type not found. Add a 'Warranty' job type first.");
+      }
+
+      const firstName = (item.customer.first_name ?? "").trim();
+      const lastName = (item.customer.last_name ?? "").trim();
+      const customerName = [firstName, lastName].filter(Boolean).join(" ").trim() || `Customer #${item.customer.customer_id}`;
+
+      const created = await apiClient.createWorkOrder({
+        creation_mode: "new_job",
+        original_job_id: item.reference_id,
+        customer_id: item.customer.customer_id,
+        customer_updates: {
+          name: customerName,
+          email: item.customer.email ?? undefined,
+          home_phone: phoneDigits(item.customer.home_phone).trim() || undefined,
+          work_phone: phoneDigits(item.customer.work_phone).trim() || undefined,
+          extension_text: item.customer.extension_text?.trim() || undefined,
+          address_line_1: item.customer.address_line_1?.trim() || undefined,
+          address_line_2: item.customer.address_line_2?.trim() || undefined,
+          city: item.customer.city?.trim() || undefined,
+          province: item.customer.province?.trim() || undefined
+        },
+        job_type_id: warrantyType.id,
+        location_id: item.location_id ?? undefined,
+        item_id: item.item_id ?? undefined,
+        brand_ids: item.brand_ids ?? [],
+        model_number: item.model_number?.trim() || undefined,
+        serial_number: item.serial_number?.trim() || undefined,
+        remote_control_qty: Math.max(0, item.remote_control_qty),
+        cable_qty: Math.max(0, item.cable_qty),
+        cord_qty: Math.max(0, item.cord_qty),
+        dvd_vhs_qty: Math.max(0, item.dvd_vhs_qty),
+        album_cd_cassette_qty: Math.max(0, item.album_cd_cassette_qty),
+        deposit: 0
+      });
+
+      alerts.success(`Warranty work order #${created.reference_id} created`);
+      navigate(`/work-orders/${created.reference_id}${location.search || ""}`);
+    } catch (err) {
+      alerts.error("Failed to create warranty", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setCreatingWarranty(false);
+    }
+  };
+
   const markPartsRequestOrdered = async (request: PartsPurchaseRequest) => {
     try {
       await apiClient.updatePartsPurchaseRequest(parsedReferenceId, request.parts_purchase_request_id, {
@@ -1957,7 +2023,29 @@ export default function WorkOrderDetailPage() {
           {detailRow("Status", item.status_name ?? "-")}
           {detailRow("Job Type", item.job_type_name ?? "-")}
           {detailRow("Location", formatLocationValue(item.location_id, item.location_shelf, item.location_floor))}
-          {detailRow("Original Job", item.original_job_id ? String(item.original_job_id) : "-")}
+          {item.original_job_id
+            ? detailRowContent(
+                "Original Job",
+                <Link
+                  className="text-primary underline underline-offset-2"
+                  to={`/work-orders/${item.original_job_id}${location.search || ""}`}
+                >
+                  #{item.original_job_id}
+                </Link>
+              )
+            : null}
+          {item.warranty_job_ids && item.warranty_job_ids.length > 0
+            ? detailRowContent(
+                "Warranty Jobs",
+                <div className="flex flex-wrap items-center gap-2">
+                  {item.warranty_job_ids.map((jobID) => (
+                    <Link key={jobID} className="text-primary underline underline-offset-2" to={`/work-orders/${jobID}${location.search || ""}`}>
+                      #{jobID}
+                    </Link>
+                  ))}
+                </div>
+              )
+            : null}
           {detailRow("Item", item.item_name ?? "-")}
           {detailRow("Brands", item.brand_names.join(", ") || "-")}
           {detailRow("Model", item.model_number ?? "-")}
@@ -1981,6 +2069,16 @@ export default function WorkOrderDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge className={statusClass(item.status_name)}>{item.status_name ?? "Unknown"}</Badge>
+          {canAdminDeleteJob && (
+            <Button
+              className="h-auto whitespace-normal py-2 text-center leading-tight"
+              variant="outline"
+              onClick={() => void createWarrantyWorkOrder()}
+              disabled={creatingWarranty}
+            >
+              {creatingWarranty ? "Creating Warranty..." : "Create Warranty"}
+            </Button>
+          )}
           {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</Button>}
           {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</Button>}
           <Button variant="outline" asChild>

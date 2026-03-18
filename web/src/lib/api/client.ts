@@ -202,6 +202,7 @@ export class APIClient {
 
   createWorkOrder(payload: {
     creation_mode?: "new_job" | "stock";
+    original_job_id?: number;
     customer_id?: number;
     new_customer?: {
       name: string;
@@ -225,6 +226,7 @@ export class APIClient {
       city?: string;
       province?: string;
     };
+    job_type_id?: number;
     location_id?: number;
     item_id?: number;
     brand_ids?: number[];

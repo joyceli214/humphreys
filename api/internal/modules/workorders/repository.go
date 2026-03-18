@@ -259,6 +259,7 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 	detail := domain.WorkOrderDetail{
 		BrandIDs:           make([]int64, 0),
 		BrandNames:         make([]string, 0),
+		WarrantyJobIDs:     make([]int32, 0),
 		WorkerIDs:          make([]int64, 0),
 		WorkerNames:        make([]string, 0),
 		PaymentMethodIDs:   make([]int64, 0),
@@ -270,6 +271,14 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 		SELECT
 			wo.reference_id,
 			wo.original_job_id,
+			COALESCE(
+				(
+					SELECT array_agg(w.reference_id ORDER BY w.reference_id DESC)
+					FROM public.work_orders w
+					WHERE w.original_job_id = wo.reference_id
+				),
+				ARRAY[]::integer[]
+			),
 			wo.created_at,
 			wo.updated_at,
 			wo.status_id,
@@ -348,6 +357,7 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 	if err := r.db.QueryRow(ctx, mainSQL, referenceID).Scan(
 		&detail.ReferenceID,
 		&detail.OriginalJobID,
+		&detail.WarrantyJobIDs,
 		&detail.CreatedAt,
 		&detail.UpdatedAt,
 		&detail.StatusID,
@@ -716,9 +726,35 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 		return domain.WorkOrderDetail{}, statusErr
 	}
 
-	jobTypeID, err := resolveJobTypeIDForCreationMode(ctx, tx, input.CreationMode)
-	if err != nil {
-		return domain.WorkOrderDetail{}, err
+	var jobTypeID *int64
+	if input.JobTypeID != nil {
+		if *input.JobTypeID <= 0 {
+			return domain.WorkOrderDetail{}, ErrJobTypeNotFound
+		}
+		var jobTypeExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.job_types WHERE job_type_id = $1 AND is_active = true)`, *input.JobTypeID).Scan(&jobTypeExists); err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		if !jobTypeExists {
+			return domain.WorkOrderDetail{}, ErrJobTypeNotFound
+		}
+		jobTypeID = input.JobTypeID
+	} else {
+		resolvedJobTypeID, err := resolveJobTypeIDForCreationMode(ctx, tx, input.CreationMode)
+		if err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		jobTypeID = resolvedJobTypeID
+	}
+
+	if input.OriginalJobID != nil {
+		var originalJobExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.work_orders WHERE reference_id = $1)`, *input.OriginalJobID).Scan(&originalJobExists); err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		if !originalJobExists {
+			return domain.WorkOrderDetail{}, ErrOriginalJobNotFound
+		}
 	}
 
 	var referenceID int
@@ -729,6 +765,7 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO public.work_orders(
 			reference_id,
+			original_job_id,
 			customer_id,
 			status_id,
 			job_type_id,
@@ -750,17 +787,18 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 			status_updated_at
 		)
 		VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-			COALESCE($12::bigint[], ARRAY[]::bigint[]),
-			$13,
-			COALESCE($14::bigint[], ARRAY[]::bigint[]),
-			COALESCE($15::integer[], ARRAY[]::integer[]),
-			$16,
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+			COALESCE($13::bigint[], ARRAY[]::bigint[]),
+			$14,
+			COALESCE($15::bigint[], ARRAY[]::bigint[]),
+			COALESCE($16::integer[], ARRAY[]::integer[]),
 			$17,
+			$18,
 			now(), now(), now()
 		)
 	`,
 		referenceID,
+		input.OriginalJobID,
 		customerID,
 		statusID,
 		jobTypeID,

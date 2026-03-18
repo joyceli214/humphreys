@@ -107,9 +107,11 @@ type updateWorkOrderCustomerRequest struct {
 
 type createWorkOrderRequest struct {
 	CreationMode           string                          `json:"creation_mode"`
+	OriginalJobID          *int64                          `json:"original_job_id"`
 	CustomerID             *int64                          `json:"customer_id"`
 	NewCustomer            *createWorkOrderCustomerRequest `json:"new_customer"`
 	CustomerUpdates        *updateWorkOrderCustomerRequest `json:"customer_updates"`
+	JobTypeID              *int64                          `json:"job_type_id"`
 	LocationID             *int64                          `json:"location_id"`
 	ItemID                 *int64                          `json:"item_id"`
 	BrandIDs               []int64                         `json:"brand_ids"`
@@ -432,9 +434,11 @@ func (h *Handler) CreateWorkOrder(c *gin.Context) {
 
 	item, err := h.service.CreateWorkOrder(c.Request.Context(), CreateWorkOrderInput{
 		CreationMode:           req.CreationMode,
+		OriginalJobID:          req.OriginalJobID,
 		CustomerID:             req.CustomerID,
 		NewCustomer:            newCustomer,
 		CustomerUpdates:        customerUpdates,
+		JobTypeID:              req.JobTypeID,
 		LocationID:             req.LocationID,
 		ItemID:                 req.ItemID,
 		BrandIDs:               req.BrandIDs,
@@ -456,6 +460,9 @@ func (h *Handler) CreateWorkOrder(c *gin.Context) {
 			errors.Is(err, ErrInvalidEmailFormat) ||
 			errors.Is(err, ErrInvalidCreationMode) ||
 			errors.Is(err, ErrStockJobTypeNotFound) ||
+			errors.Is(err, ErrJobTypeNotFound) ||
+			errors.Is(err, ErrOriginalJobNotFound) ||
+			errors.Is(err, ErrInvalidOriginalJobID) ||
 			errors.Is(err, ErrInvalidDeposit) ||
 			errors.Is(err, ErrDepositPaymentMethodRequired) ||
 			errors.Is(err, ErrPhoneDigitsOnly) ||

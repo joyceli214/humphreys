@@ -46,6 +46,7 @@ type WorkOrderLineItem struct {
 type WorkOrderDetail struct {
 	ReferenceID        int32               `json:"reference_id"`
 	OriginalJobID      *int32              `json:"original_job_id"`
+	WarrantyJobIDs     []int32             `json:"warranty_job_ids"`
 	CreatedAt          *time.Time          `json:"created_at"`
 	UpdatedAt          *time.Time          `json:"updated_at"`
 	StatusID           *int64              `json:"status_id"`

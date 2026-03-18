@@ -77,6 +77,7 @@ export interface WorkOrderLineItem {
 export interface WorkOrderDetail {
   reference_id: number;
   original_job_id: number | null;
+  warranty_job_ids: number[];
   created_at: string | null;
   updated_at: string | null;
   status_id: number | null;

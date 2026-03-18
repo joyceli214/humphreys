@@ -36,6 +36,9 @@ var ErrRepairLogNotFound = errors.New("repair log not found")
 var ErrPartsPurchaseRequestNotFound = errors.New("parts purchase request not found")
 var ErrInvalidCreationMode = errors.New("creation mode must be new_job or stock")
 var ErrStockJobTypeNotFound = errors.New("stock job type not found")
+var ErrJobTypeNotFound = errors.New("job type not found")
+var ErrOriginalJobNotFound = errors.New("original job not found")
+var ErrInvalidOriginalJobID = errors.New("original_job_id must be a positive integer")
 
 type Service struct {
 	repo Repository
@@ -194,9 +197,11 @@ type CreateWorkOrderCustomerInput struct {
 
 type CreateWorkOrderInput struct {
 	CreationMode           string
+	OriginalJobID          *int64
 	CustomerID             *int64
 	NewCustomer            *CreateWorkOrderCustomerInput
 	CustomerUpdates        *CreateWorkOrderCustomerInput
+	JobTypeID              *int64
 	LocationID             *int64
 	ItemID                 *int64
 	BrandIDs               []int64
@@ -234,6 +239,9 @@ func (s *Service) CreateWorkOrder(ctx context.Context, input CreateWorkOrderInpu
 
 	if input.Deposit < 0 {
 		return domain.WorkOrderDetail{}, ErrInvalidDeposit
+	}
+	if input.OriginalJobID != nil && *input.OriginalJobID <= 0 {
+		return domain.WorkOrderDetail{}, ErrInvalidOriginalJobID
 	}
 	if input.Deposit > 0 && (input.DepositPaymentMethodID == nil || *input.DepositPaymentMethodID <= 0) {
 		return domain.WorkOrderDetail{}, ErrDepositPaymentMethodRequired
