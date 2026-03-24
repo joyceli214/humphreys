@@ -32,6 +32,7 @@ type updateEquipmentRequest struct {
 	BrandIDs           []int64 `json:"brand_ids"`
 	ModelNumber        *string `json:"model_number"`
 	SerialNumber       *string `json:"serial_number"`
+	OtherRemarks       *string `json:"other_remarks"`
 	RemoteControlQty   int32   `json:"remote_control_qty" binding:"gte=0"`
 	CableQty           int32   `json:"cable_qty" binding:"gte=0"`
 	CordQty            int32   `json:"cord_qty" binding:"gte=0"`
@@ -518,6 +519,7 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 		BrandIDs:           req.BrandIDs,
 		ModelNumber:        req.ModelNumber,
 		SerialNumber:       req.SerialNumber,
+		OtherRemarks:       req.OtherRemarks,
 		RemoteControlQty:   req.RemoteControlQty,
 		CableQty:           req.CableQty,
 		CordQty:            req.CordQty,
@@ -540,6 +542,7 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 		input.BrandIDs = current.BrandIDs
 		input.ModelNumber = current.ModelNumber
 		input.SerialNumber = current.SerialNumber
+		input.OtherRemarks = current.OtherRemarks
 		input.RemoteControlQty = current.RemoteControlQty
 		input.CableQty = current.CableQty
 		input.CordQty = current.CordQty

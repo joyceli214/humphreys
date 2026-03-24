@@ -67,6 +67,7 @@ type WorkOrderDetail struct {
 	BrandNames         []string            `json:"brand_names"`
 	ModelNumber        *string             `json:"model_number"`
 	SerialNumber       *string             `json:"serial_number"`
+	OtherRemarks       *string             `json:"other_remarks"`
 	RemoteControlQty   int32               `json:"remote_control_qty"`
 	CableQty           int32               `json:"cable_qty"`
 	CordQty            int32               `json:"cord_qty"`

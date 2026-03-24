@@ -91,6 +91,7 @@ type EquipmentUpdateInput struct {
 	BrandIDs           []int64
 	ModelNumber        *string
 	SerialNumber       *string
+	OtherRemarks       *string
 	RemoteControlQty   int32
 	CableQty           int32
 	CordQty            int32

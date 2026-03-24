@@ -331,9 +331,11 @@ function SingleSearchableDropdown({
   onAddLocation,
   searchable = true,
   allowClear = false,
-  clearLabel = "Any"
+  clearLabel = "Any",
+  disabled = false,
+  className
 }: {
-  label: string;
+  label?: string;
   value: number | null;
   valueLabel?: string;
   onChange: (value: number | null) => void;
@@ -344,6 +346,8 @@ function SingleSearchableDropdown({
   searchable?: boolean;
   allowClear?: boolean;
   clearLabel?: string;
+  disabled?: boolean;
+  className?: string;
 }) {
   const alerts = useAlerts();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -452,19 +456,29 @@ function SingleSearchableDropdown({
   const selectedLabel = selected?.label ?? valueLabel ?? "";
 
   return (
-    <div ref={rootRef} className="space-y-1">
-      <label className="block text-sm text-muted-foreground">{label}</label>
+    <div ref={rootRef} className={cn("space-y-1", className)}>
+      {label && <label className="block text-sm text-muted-foreground">{label}</label>}
       <div className="relative">
         <button
           type="button"
-          className="flex h-10 w-full items-center rounded-md border border-input bg-white px-3 py-2 pr-10 text-sm"
-          onClick={() => setOpen((v) => !v)}
-          onKeyDown={onTriggerKeyDown}
+          className={cn(
+            "flex h-10 w-full items-center rounded-md border border-input bg-white px-3 py-2 pr-10 text-sm",
+            disabled && "cursor-not-allowed opacity-60"
+          )}
+          onClick={() => {
+            if (disabled) return;
+            setOpen((v) => !v);
+          }}
+          onKeyDown={(event) => {
+            if (disabled) return;
+            onTriggerKeyDown(event);
+          }}
+          disabled={disabled}
         >
           <span className="truncate text-left">{selectedLabel || placeholder}</span>
         </button>
         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">▾</span>
-        {open && (
+        {open && !disabled && (
           <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-white p-2 shadow-lg">
             {searchable && (
               <div className="relative">
@@ -875,6 +889,7 @@ export default function WorkOrdersPage() {
   const alerts = useAlerts();
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canCreateWorkOrders = hasPermission("work_orders:create");
+  const canUpdateWorkOrders = hasPermission("work_orders:update");
   const initialQuery = searchParams.get("q")?.trim() ?? "";
   const initialFilters: WorkOrderListFilters = {
     customerId: parsePositiveIntParam(searchParams.get("customer_id")),
@@ -943,6 +958,7 @@ export default function WorkOrdersPage() {
   const [serialNumber, setSerialNumber] = useState("");
   const [paymentMethods, setPaymentMethods] = useState<LookupOption[]>([]);
   const [frozenDropdowns, setFrozenDropdowns] = useState<Record<string, boolean>>({});
+  const [updatingLocationByReferenceID, setUpdatingLocationByReferenceID] = useState<Record<number, boolean>>({});
   const [depositPaymentMethodId, setDepositPaymentMethodId] = useState("");
   const pageSize = 100;
   const toListSearch = (nextQuery: string, nextFilters: WorkOrderListFilters) => {
@@ -1089,6 +1105,47 @@ export default function WorkOrdersPage() {
   }, [alerts, canCreateWorkOrders, createOpen]);
 
   const isDropdownFrozen = (key: string) => frozenDropdowns[key] === true;
+
+  const updateLocationFromList = async (row: WorkOrderListItem, nextLocationID: number | null) => {
+    if (row.location_id === nextLocationID) return;
+    if (updatingLocationByReferenceID[row.reference_id] === true) return;
+    setUpdatingLocationByReferenceID((prev) => ({ ...prev, [row.reference_id]: true }));
+    try {
+      const detail = await apiClient.getWorkOrderDetail(row.reference_id);
+      const updated = await apiClient.updateWorkOrderEquipment(row.reference_id, {
+        model_number: detail.model_number,
+        serial_number: detail.serial_number,
+        other_remarks: detail.other_remarks,
+        status_id: detail.status_id,
+        job_type_id: detail.job_type_id,
+        location_id: nextLocationID,
+        item_id: detail.item_id,
+        brand_ids: detail.brand_ids,
+        remote_control_qty: detail.remote_control_qty,
+        cable_qty: detail.cable_qty,
+        cord_qty: detail.cord_qty,
+        dvd_vhs_qty: detail.dvd_vhs_qty,
+        album_cd_cassette_qty: detail.album_cd_cassette_qty
+      });
+      setItems((prev) =>
+        prev.map((item) =>
+          item.reference_id === row.reference_id
+            ? {
+                ...item,
+                location_id: updated.location_id,
+                location_shelf: updated.location_shelf,
+                location_floor: updated.location_floor
+              }
+            : item
+        )
+      );
+      alerts.success(`Location updated for #${row.reference_id}`);
+    } catch (err) {
+      alerts.error("Failed to update location", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setUpdatingLocationByReferenceID((prev) => ({ ...prev, [row.reference_id]: false }));
+    }
+  };
 
   const resetCreateForm = () => {
     setCreationMode("new_job");
@@ -1718,7 +1775,26 @@ export default function WorkOrdersPage() {
                       {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
                     </div>
                   </Td>
-                  <Td>{formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}</Td>
+                  <Td>
+                    {canUpdateWorkOrders ? (
+                      <SingleSearchableDropdown
+                        className="min-w-[170px]"
+                        value={item.location_id}
+                        valueLabel={formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}
+                        disabled={updatingLocationByReferenceID[item.reference_id] === true}
+                        onChange={(nextLocationID) => {
+                          void updateLocationFromList(item, nextLocationID);
+                        }}
+                        loadOptions={async (q) => (await apiClient.listLocations(q)).items}
+                        placeholder="-"
+                        onAddLocation={isDropdownFrozen("locations") ? undefined : (payload) => apiClient.createLocation(payload)}
+                        allowClear
+                        clearLabel="None"
+                      />
+                    ) : (
+                      formatLocationValue(item.location_id, item.location_shelf, item.location_floor)
+                    )}
+                  </Td>
                   <Td>{formatDateTime(item.created_at)}</Td>
                   <Td>
                     <Button variant="outline" size="sm" asChild>

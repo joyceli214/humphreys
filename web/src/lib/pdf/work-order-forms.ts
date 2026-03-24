@@ -242,6 +242,7 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number) {
   lineField(doc, 14, y + 35, 40, "Home Phone", text(formatPhoneNumber(item.customer.home_phone)));
   lineField(doc, 60, y + 35, 40, "Work Phone / Cell", text(formatPhoneNumber(item.customer.work_phone)));
   lineField(doc, 106, y + 35, 40, "Extension", text(item.customer.extension_text));
+  lineField(doc, 152, y + 35, 40, "Other Remarks", text(item.other_remarks));
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.4);
@@ -407,9 +408,11 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
   doc.text(`Labour: ${money(item.labour_total)}`, rowRightX, pricingY + rowGap * 2, { align: "right" });
   doc.text(`Subtotal: ${money(subtotal)}`, rowRightX, pricingY + rowGap * 3, { align: "right" });
   doc.text(`HST (13%): ${money(hst)}`, rowRightX, pricingY + rowGap * 4, { align: "right" });
-  doc.text(`Deposit: ${money(item.deposit)}`, rowRightX, pricingY + rowGap * 5, { align: "right" });
   doc.setFont("helvetica", "bold");
-  doc.text(`Total: ${money(total)}`, rowRightX, pricingY + rowGap * 6, { align: "right" });
+  doc.text(`Total: ${money(total)}`, rowRightX, pricingY + rowGap * 5, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.text(`Deposit: ${money(item.deposit)}`, rowRightX, pricingY + rowGap * 6, { align: "right" });
+  doc.setFont("helvetica", "bold");
   doc.text(`Total Payable: ${money(payable)}`, rowRightX, pricingY + rowGap * 7, { align: "right" });
   doc.setFont("helvetica", "normal");
   const finalPaymentMethod = item.payment_method_names.length ? item.payment_method_names[item.payment_method_names.length - 1] : "-";

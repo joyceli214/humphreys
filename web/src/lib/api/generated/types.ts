@@ -98,6 +98,7 @@ export interface WorkOrderDetail {
   brand_names: string[];
   model_number: string | null;
   serial_number: string | null;
+  other_remarks: string | null;
   remote_control_qty: number;
   cable_qty: number;
   cord_qty: number;

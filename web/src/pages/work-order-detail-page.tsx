@@ -236,10 +236,6 @@ function sanitizeDecimalInput(value: string) {
   return `${cleaned.slice(0, firstDotIndex + 1)}${cleaned.slice(firstDotIndex + 1).replace(/\./g, "")}`;
 }
 
-function sanitizeIntegerInput(value: string) {
-  return value.replace(/\D/g, "");
-}
-
 function calculateLineSubtotalText(unitPriceValue: string, quantityValue: string): string | null {
   const unitPrice = parseDecimalInput(unitPriceValue);
   const quantity = parseDecimalInput(quantityValue);
@@ -303,6 +299,7 @@ type EquipmentForm = {
   brand_ids: number[];
   model_number: string;
   serial_number: string;
+  other_remarks: string;
   remote_control_qty: number;
   cable_qty: number;
   cord_qty: number;
@@ -1060,6 +1057,7 @@ export default function WorkOrderDetailPage() {
     brand_ids: [],
     model_number: "",
     serial_number: "",
+    other_remarks: "",
     remote_control_qty: 0,
     cable_qty: 0,
     cord_qty: 0,
@@ -1255,6 +1253,7 @@ export default function WorkOrderDetailPage() {
       brand_ids: item.brand_ids ?? [],
       model_number: item.model_number ?? "",
       serial_number: item.serial_number ?? "",
+      other_remarks: item.other_remarks ?? "",
       remote_control_qty: item.remote_control_qty,
       cable_qty: item.cable_qty,
       cord_qty: item.cord_qty,
@@ -1343,13 +1342,17 @@ export default function WorkOrderDetailPage() {
   const editLabour = parseOptionalNumber(totalsForm.labour_total) ?? 0;
   const editDepositRaw = Number(totalsForm.deposit.trim() || "0");
   const editDeposit = Number.isFinite(editDepositRaw) ? editDepositRaw : 0;
-  const editTotal = editParts + editDelivery + editLabour;
+  const editSubtotal = editParts + editDelivery + editLabour;
+  const editTax = editSubtotal * 0.13;
+  const editTotal = editSubtotal + editTax;
   const editTotalPayable = editTotal - editDeposit;
 
   const viewParts = item.parts_total ?? 0;
   const viewDelivery = item.delivery_total ?? 0;
   const viewLabour = item.labour_total ?? 0;
-  const viewTotal = viewParts + viewDelivery + viewLabour;
+  const viewSubtotal = viewParts + viewDelivery + viewLabour;
+  const viewTax = viewSubtotal * 0.13;
+  const viewTotal = viewSubtotal + viewTax;
   const viewTotalPayable = viewTotal - item.deposit;
 
   const cancelEditing = () => {
@@ -1396,6 +1399,7 @@ export default function WorkOrderDetailPage() {
         brand_ids: equipmentForm.brand_ids,
         model_number: blankToNull(equipmentForm.model_number),
         serial_number: blankToNull(equipmentForm.serial_number),
+        other_remarks: blankToNull(equipmentForm.other_remarks),
         remote_control_qty: Math.max(0, equipmentForm.remote_control_qty),
         cable_qty: Math.max(0, equipmentForm.cable_qty),
         cord_qty: Math.max(0, equipmentForm.cord_qty),
@@ -1425,6 +1429,7 @@ export default function WorkOrderDetailPage() {
         brand_ids: equipmentForm.brand_ids,
         model_number: blankToNull(equipmentForm.model_number),
         serial_number: blankToNull(equipmentForm.serial_number),
+        other_remarks: blankToNull(equipmentForm.other_remarks),
         remote_control_qty: Math.max(0, equipmentForm.remote_control_qty),
         cable_qty: Math.max(0, equipmentForm.cable_qty),
         cord_qty: Math.max(0, equipmentForm.cord_qty),
@@ -1945,7 +1950,13 @@ export default function WorkOrderDetailPage() {
           <SingleSearchableDropdown
             label="Location"
             value={equipmentForm.location_id}
-            valueLabel={formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}
+            valueLabel={
+              equipmentForm.location_id === null
+                ? "-"
+                : equipmentForm.location_id === item.location_id
+                  ? formatLocationValue(item.location_id, item.location_shelf, item.location_floor)
+                  : undefined
+            }
             onChange={(value) => setEquipmentForm((prev) => ({ ...prev, location_id: value }))}
             loadOptions={async (q) => (await apiClient.listLocations(q)).items}
             placeholder="Select location"
@@ -2010,6 +2021,10 @@ export default function WorkOrderDetailPage() {
               <label className="mb-1 block text-sm text-muted-foreground">Album/CD/Cassette Qty</label>
               <Input type="number" min={0} value={equipmentForm.album_cd_cassette_qty} onChange={(e) => setEquipmentForm((prev) => ({ ...prev, album_cd_cassette_qty: Number(e.target.value || "0") }))} />
             </div>
+            <div>
+              <label className="mb-1 block text-sm text-muted-foreground">Others</label>
+              <Input value={equipmentForm.other_remarks} onChange={(e) => setEquipmentForm((prev) => ({ ...prev, other_remarks: e.target.value }))} />
+            </div>
           </div>
             </>
           ) : null}
@@ -2055,6 +2070,7 @@ export default function WorkOrderDetailPage() {
           {detailRow("Cord", String(item.cord_qty))}
           {detailRow("DVD/VHS", String(item.dvd_vhs_qty ?? 0))}
           {detailRow("Album/CD/Cassette", String(item.album_cd_cassette_qty))}
+          {detailRow("Other Remarks", item.other_remarks ?? "-")}
         </>
       )}
     </article>
@@ -2297,11 +2313,11 @@ export default function WorkOrderDetailPage() {
                       <label className="mb-1 block text-sm text-muted-foreground">Qty</label>
                       <Input
                         type="text"
-                        inputMode="numeric"
+                        inputMode="decimal"
                         value={lineItemDraft.quantity_text}
                         onChange={(e) =>
                           setLineItemDraft((prev) =>
-                            applyCalculatedLineSubtotal({ ...prev, quantity_text: sanitizeIntegerInput(e.target.value) })
+                            applyCalculatedLineSubtotal({ ...prev, quantity_text: sanitizeDecimalInput(e.target.value) })
                           )
                         }
                       />
@@ -2357,6 +2373,18 @@ export default function WorkOrderDetailPage() {
                       <Input value={totalsForm.labour_total} onChange={(e) => setTotalsForm((prev) => ({ ...prev, labour_total: e.target.value }))} />
                     </div>
                     <div>
+                      <label className="mb-1 block text-sm text-muted-foreground">Subtotal</label>
+                      <Input value={formatCurrency(editSubtotal)} disabled />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-muted-foreground">HST (13%)</label>
+                      <Input value={formatCurrency(editTax)} disabled />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-muted-foreground">Total</label>
+                      <Input value={formatCurrency(editTotal)} disabled />
+                    </div>
+                    <div>
                       <label className="mb-1 block text-sm text-muted-foreground">Deposit</label>
                       <Input
                         value={totalsForm.deposit}
@@ -2367,10 +2395,6 @@ export default function WorkOrderDetailPage() {
                         }}
                       />
                       {fieldErrors.deposit && <p className="mt-1 text-xs text-destructive">{fieldErrors.deposit}</p>}
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-sm text-muted-foreground">Total</label>
-                      <Input value={formatCurrency(editTotal)} disabled />
                     </div>
                     <div>
                       <label className="mb-1 block text-sm text-muted-foreground">Total Payable</label>
@@ -2389,6 +2413,8 @@ export default function WorkOrderDetailPage() {
                   {detailRow("Parts", formatCurrency(item.parts_total))}
                   {detailRow("Delivery", formatCurrency(item.delivery_total))}
                   {detailRow("Labour", formatCurrency(item.labour_total))}
+                  {detailRow("Subtotal", formatCurrency(viewSubtotal))}
+                  {detailRow("HST (13%)", formatCurrency(viewTax))}
                   {detailRow("Total", formatCurrency(viewTotal))}
                   {detailRow("Deposit", formatCurrency(item.deposit))}
                   {detailRow("Total Payable", formatCurrency(viewTotalPayable))}

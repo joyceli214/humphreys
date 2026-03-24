@@ -274,6 +274,7 @@ export class APIClient {
     payload: {
       model_number: string | null;
       serial_number: string | null;
+      other_remarks: string | null;
       status_id: number | null;
       job_type_id: number | null;
       location_id: number | null;
