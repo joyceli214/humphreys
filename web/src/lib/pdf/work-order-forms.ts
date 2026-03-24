@@ -69,7 +69,7 @@ function parseLooseNumber(value: string | null | undefined) {
 
 function parseQuantity(value: string | null | undefined) {
   if (!value) return null;
-  const match = value.match(/-?\d+(\.\d+)?/);
+  const match = value.match(/-?(?:\d+\.?\d*|\.\d+)/);
   if (!match) return null;
   const parsed = Number(match[0]);
   return Number.isFinite(parsed) ? parsed : null;

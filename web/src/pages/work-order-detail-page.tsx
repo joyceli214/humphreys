@@ -258,7 +258,7 @@ function parseDecimalInput(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   const normalized = trimmed.replace(",", ".");
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null;
+  if (!/^-?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
