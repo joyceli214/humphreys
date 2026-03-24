@@ -1,6 +1,7 @@
 package workorders
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"humphreys/api/internal/domain"
 	"humphreys/api/internal/middleware"
+	"humphreys/api/internal/modules/uploads"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,6 +20,7 @@ import (
 
 type Handler struct {
 	service          *Service
+	uploads          *uploads.Handler
 	openRouterAPIKey string
 	openRouterModel  string
 	httpClient       *http.Client
@@ -192,6 +195,10 @@ func NewWithService(service *Service) *Handler {
 	}
 }
 
+func (h *Handler) SetUploadsHandler(uploadHandler *uploads.Handler) {
+	h.uploads = uploadHandler
+}
+
 func (h *Handler) ListWorkOrders(c *gin.Context) {
 	query := c.Query("q")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -282,6 +289,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load dashboard"})
 		return
 	}
+	h.signDashboardActivityMarkdown(c.Request.Context(), data.ActivityItems)
 
 	c.JSON(http.StatusOK, dashboardResponse{
 		ReadyTotal:       data.ReadyTotal,
@@ -366,6 +374,7 @@ func (h *Handler) GetWorkOrder(c *gin.Context) {
 	if !hasPermission(c, permSensitiveRead) {
 		item = sanitizeWorkOrderDetail(item)
 	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -476,6 +485,7 @@ func (h *Handler) CreateWorkOrder(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create work order", "detail": err.Error()})
 		return
 	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusCreated, item)
 }
 
@@ -563,6 +573,7 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order"})
 		return
 	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -593,6 +604,7 @@ func (h *Handler) UpdateStatus(c *gin.Context) {
 	if !hasPermission(c, permSensitiveRead) {
 		item = sanitizeWorkOrderDetail(item)
 	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -609,6 +621,47 @@ func (h *Handler) UpdateWorkNotes(c *gin.Context) {
 		return
 	}
 
+	var previousProblemDescription string
+	var previousWorkDone string
+	if h.uploads != nil {
+		claims, ok := middleware.Claims(c)
+		if !ok || strings.TrimSpace(claims.UserID) == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+			return
+		}
+
+		existing, err := h.service.GetWorkOrderDetail(c.Request.Context(), referenceID)
+		if err != nil {
+			if errors.Is(err, ErrWorkOrderNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch work order"})
+			return
+		}
+		previousProblemDescription = pointerStringValue(existing.ProblemDescription)
+		previousWorkDone = pointerStringValue(existing.WorkDone)
+
+		if req.ProblemDescription != nil {
+			promoted, err := h.uploads.PromoteTempImagesInMarkdown(c.Request.Context(), *req.ProblemDescription, referenceID, claims.UserID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process markdown images", "detail": err.Error()})
+				return
+			}
+			normalized := h.uploads.NormalizeMarkdownImageURLsForStorage(promoted)
+			req.ProblemDescription = &normalized
+		}
+		if req.WorkDone != nil {
+			promoted, err := h.uploads.PromoteTempImagesInMarkdown(c.Request.Context(), *req.WorkDone, referenceID, claims.UserID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process markdown images", "detail": err.Error()})
+				return
+			}
+			normalized := h.uploads.NormalizeMarkdownImageURLsForStorage(promoted)
+			req.WorkDone = &normalized
+		}
+	}
+
 	item, err := h.service.UpdateWorkNotes(c.Request.Context(), referenceID, WorkNotesUpdateInput{
 		ProblemDescription: req.ProblemDescription,
 		WorkerIDs:          req.WorkerIDs,
@@ -623,6 +676,19 @@ func (h *Handler) UpdateWorkNotes(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order"})
 		return
 	}
+	if h.uploads != nil {
+		h.uploads.DeleteRemovedManagedImages(
+			c.Request.Context(),
+			previousProblemDescription,
+			pointerStringValue(item.ProblemDescription),
+		)
+		h.uploads.DeleteRemovedManagedImages(
+			c.Request.Context(),
+			previousWorkDone,
+			pointerStringValue(item.WorkDone),
+		)
+	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -656,6 +722,7 @@ func (h *Handler) UpdateTotals(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order"})
 		return
 	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -696,6 +763,7 @@ func (h *Handler) UpdateLineItems(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update line items"})
 		return
 	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -732,6 +800,7 @@ func (h *Handler) UpdateCustomer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order"})
 		return
 	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -746,6 +815,7 @@ func (h *Handler) ListRepairLogs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repair logs"})
 		return
 	}
+	h.signRepairLogsMarkdown(c.Request.Context(), items)
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
@@ -776,6 +846,14 @@ func (h *Handler) CreateRepairLog(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	if h.uploads != nil {
+		promoted, err := h.uploads.PromoteTempImagesInMarkdown(c.Request.Context(), req.Details, referenceID, claims.UserID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process markdown images", "detail": err.Error()})
+			return
+		}
+		req.Details = h.uploads.NormalizeMarkdownImageURLsForStorage(promoted)
+	}
 
 	item, err := h.service.CreateRepairLog(c.Request.Context(), referenceID, CreateRepairLogInput{
 		RepairDate:      req.RepairDate,
@@ -791,6 +869,7 @@ func (h *Handler) CreateRepairLog(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create repair log"})
 		return
 	}
+	h.signRepairLogMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusCreated, item)
 }
 
@@ -812,6 +891,37 @@ func (h *Handler) UpdateRepairLog(c *gin.Context) {
 		return
 	}
 
+	previousDetails := ""
+	if h.uploads != nil {
+		claims, ok := middleware.Claims(c)
+		if !ok || strings.TrimSpace(claims.UserID) == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+			return
+		}
+
+		logs, err := h.service.ListRepairLogs(c.Request.Context(), referenceID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch repair logs"})
+			return
+		}
+		for _, log := range logs {
+			if log.RepairLogID == repairLogID {
+				previousDetails = log.Details
+				break
+			}
+		}
+
+		if req.Details != nil {
+			promoted, err := h.uploads.PromoteTempImagesInMarkdown(c.Request.Context(), *req.Details, referenceID, claims.UserID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process markdown images", "detail": err.Error()})
+				return
+			}
+			normalized := h.uploads.NormalizeMarkdownImageURLsForStorage(promoted)
+			req.Details = &normalized
+		}
+	}
+
 	item, err := h.service.UpdateRepairLog(c.Request.Context(), referenceID, repairLogID, UpdateRepairLogInput{
 		RepairDate: req.RepairDate,
 		HoursUsed:  req.HoursUsed,
@@ -829,6 +939,10 @@ func (h *Handler) UpdateRepairLog(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update repair log"})
 		return
 	}
+	if h.uploads != nil && req.Details != nil {
+		h.uploads.DeleteRemovedManagedImages(c.Request.Context(), previousDetails, item.Details)
+	}
+	h.signRepairLogMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -844,6 +958,21 @@ func (h *Handler) DeleteRepairLog(c *gin.Context) {
 		return
 	}
 
+	repairLogDetails := ""
+	if h.uploads != nil {
+		logs, err := h.service.ListRepairLogs(c.Request.Context(), referenceID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch repair logs"})
+			return
+		}
+		for _, log := range logs {
+			if log.RepairLogID == repairLogID {
+				repairLogDetails = log.Details
+				break
+			}
+		}
+	}
+
 	if err := h.service.DeleteRepairLog(c.Request.Context(), referenceID, repairLogID); err != nil {
 		if errors.Is(err, ErrRepairLogNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -851,6 +980,9 @@ func (h *Handler) DeleteRepairLog(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete repair log"})
 		return
+	}
+	if h.uploads != nil && strings.TrimSpace(repairLogDetails) != "" {
+		h.uploads.DeleteManagedImagesInMarkdown(c.Request.Context(), repairLogDetails)
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -1007,4 +1139,55 @@ func sanitizeWorkOrderDetail(detail domain.WorkOrderDetail) domain.WorkOrderDeta
 	detail.PaymentMethodIDs = []int64{}
 	detail.PaymentMethodNames = []string{}
 	return detail
+}
+
+func pointerStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func (h *Handler) signMarkdownForResponse(ctx context.Context, markdown string) string {
+	if h.uploads == nil || strings.TrimSpace(markdown) == "" {
+		return markdown
+	}
+	signed, err := h.uploads.RewriteMarkdownImageURLsToPresigned(ctx, markdown, 7*24*time.Hour)
+	if err != nil {
+		return markdown
+	}
+	return signed
+}
+
+func (h *Handler) signWorkOrderDetailMarkdown(ctx context.Context, item *domain.WorkOrderDetail) {
+	if item == nil {
+		return
+	}
+	if item.ProblemDescription != nil {
+		signed := h.signMarkdownForResponse(ctx, *item.ProblemDescription)
+		item.ProblemDescription = &signed
+	}
+	if item.WorkDone != nil {
+		signed := h.signMarkdownForResponse(ctx, *item.WorkDone)
+		item.WorkDone = &signed
+	}
+}
+
+func (h *Handler) signRepairLogMarkdown(ctx context.Context, item *domain.RepairLog) {
+	if item == nil {
+		return
+	}
+	item.Details = h.signMarkdownForResponse(ctx, item.Details)
+}
+
+func (h *Handler) signRepairLogsMarkdown(ctx context.Context, items []domain.RepairLog) {
+	for i := range items {
+		h.signRepairLogMarkdown(ctx, &items[i])
+	}
+}
+
+func (h *Handler) signDashboardActivityMarkdown(ctx context.Context, items []domain.DashboardActivityItem) {
+	for i := range items {
+		items[i].Details = h.signMarkdownForResponse(ctx, items[i].Details)
+	}
 }

@@ -38,3 +38,19 @@ body {
   list-style: decimal !important;
   padding-left: 1.5rem !important;
 }
+
+/* Keep only file-upload in MDX image dialog (hide URL / alt / title fields). */
+[class*="dialogContent"] form [class*="formField"]:has(> label[for="src"]),
+[class*="dialogContent"] form [class*="formField"]:has(> label[for="alt"]),
+[class*="dialogContent"] form [class*="formField"]:has(> label[for="title"]) {
+  display: none !important;
+}
+
+/* Hide MDX image dialog heading/tooltip label text. */
+[class*="dialogContent"] > h2 {
+  display: none !important;
+}
+
+[role="tooltip"] {
+  display: none !important;
+}

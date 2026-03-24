@@ -11,6 +11,15 @@
 
 Default migration directory is `./migrations` (override with `MIGRATIONS_DIR`).
 
+For markdown image uploads to Railway Bucket (S3-compatible), set:
+- `S3_ENDPOINT`
+- `S3_REGION`
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `S3_BUCKET`
+- `S3_USE_SSL`
+- Optional: `S3_PUBLIC_BASE_URL` (if your bucket is exposed via CDN/custom domain)
+
 ## Highlights
 - JWT access token (15m default)
 - Rotating refresh token in HttpOnly cookie

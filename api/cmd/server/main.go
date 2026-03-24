@@ -17,6 +17,7 @@ import (
 	authsecurity "humphreys/api/internal/modules/auth/security"
 	"humphreys/api/internal/modules/catalog"
 	"humphreys/api/internal/modules/roles"
+	"humphreys/api/internal/modules/uploads"
 	"humphreys/api/internal/modules/users"
 	"humphreys/api/internal/modules/workorders"
 
@@ -58,6 +59,8 @@ func main() {
 	rolesHandler := roles.New(pool)
 	catalogHandler := catalog.New(pool)
 	workOrdersHandler := workorders.New(pool)
+	uploadsHandler := uploads.New(cfg)
+	workOrdersHandler.SetUploadsHandler(uploadsHandler)
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
@@ -76,6 +79,7 @@ func main() {
 	roles.RegisterRoutes(authed, rolesHandler)
 	catalog.RegisterRoutes(authed, catalogHandler)
 	workorders.RegisterRoutes(authed, workOrdersHandler)
+	uploads.RegisterRoutes(authed, uploadsHandler)
 
 	srv := &http.Server{Addr: cfg.ServerAddr, Handler: r}
 	go func() {

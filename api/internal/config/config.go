@@ -27,6 +27,13 @@ type Config struct {
 	OwnerPassword      string
 	OwnerFullName      string
 	MigrationsDir      string
+	S3Endpoint         string
+	S3Region           string
+	S3AccessKeyID      string
+	S3SecretAccessKey  string
+	S3Bucket           string
+	S3UseSSL           bool
+	S3PublicBaseURL    string
 }
 
 func Load() (Config, error) {
@@ -50,6 +57,13 @@ func Load() (Config, error) {
 		OwnerPassword:   env("OWNER_PASSWORD", "ChangeMe123!"),
 		OwnerFullName:   env("OWNER_FULL_NAME", "Owner"),
 		MigrationsDir:   env("MIGRATIONS_DIR", "./migrations"),
+		S3Endpoint:      env("S3_ENDPOINT", ""),
+		S3Region:        env("S3_REGION", "us-east-1"),
+		S3AccessKeyID:   env("S3_ACCESS_KEY_ID", ""),
+		S3SecretAccessKey: env("S3_SECRET_ACCESS_KEY", ""),
+		S3Bucket:          env("S3_BUCKET", ""),
+		S3UseSSL:          envBool("S3_USE_SSL", true),
+		S3PublicBaseURL:   env("S3_PUBLIC_BASE_URL", ""),
 	}
 
 	if cfg.JWTSecret == "" {

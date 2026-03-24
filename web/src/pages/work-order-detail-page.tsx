@@ -29,11 +29,13 @@ import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
   CreateLink,
+  InsertImage,
   InsertThematicBreak,
   ListsToggle,
   MDXEditor,
   UndoRedo,
   headingsPlugin,
+  imagePlugin,
   linkDialogPlugin,
   linkPlugin,
   listsPlugin,
@@ -130,7 +132,16 @@ function detailRowContent(label: string, value: ReactNode) {
   );
 }
 
-function markdownBlock(value: string | null) {
+function parseImageDimension(value: number | string | undefined) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function markdownBlock(value: string | null, onImageClick?: (src: string, alt?: string | null) => void) {
   const normalized = normalizeMarkdownInput(value);
   const content = normalized || "-";
   return (
@@ -151,6 +162,18 @@ function markdownBlock(value: string | null) {
           ul: ({ children }) => <ul className="mb-2 list-disc pl-6">{children}</ul>,
           ol: ({ children }) => <ol className="mb-2 list-decimal pl-6">{children}</ol>,
           li: ({ children }) => <li>{children}</li>,
+          img: ({ src, alt, width, height }) =>
+            src ? (
+              <button type="button" className="my-3 inline-block align-top cursor-zoom-in" onClick={() => onImageClick?.(src, alt)}>
+                <img
+                  src={src}
+                  alt={alt ?? "Embedded image"}
+                  width={parseImageDimension(width)}
+                  height={parseImageDimension(height)}
+                  className="max-w-full rounded-md"
+                />
+              </button>
+            ) : null,
           u: ({ children }) => <u className="underline">{children}</u>,
           blockquote: ({ children }) => (
             <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>
@@ -165,7 +188,7 @@ function markdownBlock(value: string | null) {
   );
 }
 
-function markdownPlain(value: string | null) {
+function markdownPlain(value: string | null, onImageClick?: (src: string, alt?: string | null) => void) {
   const normalized = normalizeMarkdownInput(value);
   const content = normalized || "-";
   return (
@@ -185,6 +208,18 @@ function markdownPlain(value: string | null) {
         ul: ({ children }) => <ul className="mb-2 list-disc pl-6">{children}</ul>,
         ol: ({ children }) => <ol className="mb-2 list-decimal pl-6">{children}</ol>,
         li: ({ children }) => <li>{children}</li>,
+        img: ({ src, alt, width, height }) =>
+          src ? (
+            <button type="button" className="my-3 inline-block align-top cursor-zoom-in" onClick={() => onImageClick?.(src, alt)}>
+              <img
+                src={src}
+                alt={alt ?? "Embedded image"}
+                width={parseImageDimension(width)}
+                height={parseImageDimension(height)}
+                className="max-w-full rounded-md"
+              />
+            </button>
+          ) : null,
         u: ({ children }) => <u className="underline">{children}</u>,
         blockquote: ({ children }) => (
           <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>
@@ -256,6 +291,120 @@ function emailValid(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+const markdownImagePattern = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<img[^>]*\s+src=["']([^"']+)["'][^>]*>/g;
+const markdownImageWithMetadataPattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g;
+
+function extractMarkdownImageURLs(markdown: string) {
+  const urls: string[] = [];
+  let match: RegExpExecArray | null = markdownImagePattern.exec(markdown);
+  while (match) {
+    const imageURL = (match[1] || match[2] || "").trim().replace(/^<|>$/g, "");
+    if (imageURL) urls.push(imageURL);
+    match = markdownImagePattern.exec(markdown);
+  }
+  markdownImagePattern.lastIndex = 0;
+  return urls;
+}
+
+function tempMarkdownImageKeyFromURL(url: string) {
+  const match = url.match(/markdown-temp\/[^?#\s)"']+/);
+  return match ? match[0] : null;
+}
+
+function tempMarkdownImageMap(markdown: string) {
+  const map = new Map<string, string>();
+  for (const imageURL of extractMarkdownImageURLs(markdown)) {
+    const key = tempMarkdownImageKeyFromURL(imageURL);
+    if (!key) continue;
+    if (!map.has(key)) {
+      map.set(key, imageURL);
+    }
+  }
+  return map;
+}
+
+function tempMarkdownImageSet(markdown: string) {
+  return new Set(tempMarkdownImageMap(markdown).keys());
+}
+
+function cleanupRemovedTempMarkdownImages(previousMarkdown: string, nextMarkdown: string) {
+  const previousMap = tempMarkdownImageMap(previousMarkdown);
+  const previous = new Set(previousMap.keys());
+  const next = tempMarkdownImageSet(nextMarkdown);
+  for (const key of previous) {
+    if (next.has(key)) continue;
+    const url = previousMap.get(key);
+    if (!url) continue;
+    void apiClient.deleteMarkdownImage(url).catch(() => {});
+  }
+}
+
+function cleanupAllTempMarkdownImages(markdown: string) {
+  for (const url of tempMarkdownImageSet(markdown)) {
+    void apiClient.deleteMarkdownImage(url).catch(() => {});
+  }
+}
+
+function normalizeMarkdownImageMetadata(markdown: string) {
+  return markdown.replace(markdownImageWithMetadataPattern, (_, altText: string, imageURL: string, title: string | undefined) => {
+    const normalizedAlt = altText.trim() || "Image";
+    const normalizedTitle = (title ?? "").trim() || "Image";
+    const escapedAlt = normalizedAlt.replace(/]/g, "\\]");
+    const escapedTitle = normalizedTitle.replace(/"/g, '\\"');
+    return `![${escapedAlt}](${imageURL} "${escapedTitle}")`;
+  });
+}
+
+async function convertImageFileToJpeg(file: File) {
+  const objectURL = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to load image"));
+      img.src = objectURL;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Failed to prepare image canvas");
+    ctx.drawImage(image, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) throw new Error("Failed to convert image");
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
+    return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+  } finally {
+    URL.revokeObjectURL(objectURL);
+  }
+}
+
+async function normalizeImageFileForUpload(file: File) {
+  const contentType = file.type.toLowerCase();
+  const needsJpegConversion =
+    contentType === "image/webp" ||
+    contentType === "image/avif" ||
+    contentType === "image/heic" ||
+    contentType === "image/heif";
+
+  if (!needsJpegConversion) return file;
+
+  try {
+    return await convertImageFileToJpeg(file);
+  } catch (error) {
+    if (contentType === "image/webp") {
+      throw new Error("WebP images are not supported. Please upload JPG/PNG/HEIC.");
+    }
+    return file;
+  }
+}
+
+async function markdownImageUploadHandler(file: File) {
+  const normalizedFile = await normalizeImageFileForUpload(file);
+  const { url } = await apiClient.uploadMarkdownImage(normalizedFile);
+  return url;
+}
+
 const workNotesEditorPlugins = [
   headingsPlugin(),
   listsPlugin(),
@@ -263,6 +412,10 @@ const workNotesEditorPlugins = [
   thematicBreakPlugin(),
   linkPlugin(),
   linkDialogPlugin(),
+  imagePlugin({
+    imageUploadHandler: markdownImageUploadHandler,
+    disableImageSettingsButton: true
+  }),
   markdownShortcutPlugin(),
   toolbarPlugin({
     toolbarContents: () => (
@@ -271,6 +424,7 @@ const workNotesEditorPlugins = [
         <BoldItalicUnderlineToggles />
         <ListsToggle />
         <CreateLink />
+        <InsertImage />
         <InsertThematicBreak />
         <BlockTypeSelect />
       </>
@@ -285,6 +439,7 @@ const workNotesEditorContentClassName =
   "[&_a]:text-primary [&_a]:underline " +
   "[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-6 [&_ol]:pl-6 " +
   "[&_li]:my-1 " +
+  "[&_img]:my-3 [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-md " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground " +
   "[&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:text-lg [&_h3]:font-semibold " +
   "[&_hr]:my-3 [&_hr]:border-border";
@@ -1048,6 +1203,7 @@ export default function WorkOrderDetailPage() {
   const [partsItemPresetOptions, setPartsItemPresetOptions] = useState<LookupOption[]>([]);
   const [noPaymentMethodID, setNoPaymentMethodID] = useState<number | null>(null);
   const [frozenDropdowns, setFrozenDropdowns] = useState<Record<string, boolean>>({});
+  const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
 
   const [equipmentForm, setEquipmentForm] = useState<EquipmentForm>({
     status_id: null,
@@ -1260,11 +1416,17 @@ export default function WorkOrderDetailPage() {
       dvd_vhs_qty: item.dvd_vhs_qty ?? 0,
       album_cd_cassette_qty: item.album_cd_cassette_qty
     });
-    setWorkNotesForm({
-      problem_description: item.problem_description ?? "",
-      worker_ids: item.worker_ids ?? [],
-      work_done: item.work_done ?? "",
-      payment_method_ids: item.payment_method_ids ?? []
+    setWorkNotesForm((prev) => {
+      const nextProblemDescription = item.problem_description ?? "";
+      const nextWorkDone = item.work_done ?? "";
+      cleanupRemovedTempMarkdownImages(prev.problem_description, nextProblemDescription);
+      cleanupRemovedTempMarkdownImages(prev.work_done, nextWorkDone);
+      return {
+        problem_description: nextProblemDescription,
+        worker_ids: item.worker_ids ?? [],
+        work_done: nextWorkDone,
+        payment_method_ids: item.payment_method_ids ?? []
+      };
     });
     setTotalsForm({
       parts_total: item.parts_total == null ? "" : String(item.parts_total),
@@ -1354,11 +1516,41 @@ export default function WorkOrderDetailPage() {
   const viewTax = viewSubtotal * 0.13;
   const viewTotal = viewSubtotal + viewTax;
   const viewTotalPayable = viewTotal - item.deposit;
-
+  const openFullscreenImage = (src: string, alt?: string | null) => {
+    setFullscreenImage({ src, alt: alt?.trim() || "Image preview" });
+  };
   const cancelEditing = () => {
+    if (editingSection === "work_notes") {
+      cleanupRemovedTempMarkdownImages(workNotesForm.problem_description, item.problem_description ?? "");
+      cleanupRemovedTempMarkdownImages(workNotesForm.work_done, item.work_done ?? "");
+    }
     setEditingSection(null);
     setSectionError("");
     setFieldErrors({});
+  };
+
+  const handleProblemDescriptionChange = (value: string) => {
+    const normalizedValue = normalizeMarkdownImageMetadata(value);
+    setWorkNotesForm((prev) => {
+      cleanupRemovedTempMarkdownImages(prev.problem_description, normalizedValue);
+      return { ...prev, problem_description: normalizedValue };
+    });
+  };
+
+  const handleWorkDoneChange = (value: string) => {
+    const normalizedValue = normalizeMarkdownImageMetadata(value);
+    setWorkNotesForm((prev) => {
+      cleanupRemovedTempMarkdownImages(prev.work_done, normalizedValue);
+      return { ...prev, work_done: normalizedValue };
+    });
+  };
+
+  const handleRepairLogDetailsChange = (value: string) => {
+    const normalizedValue = normalizeMarkdownImageMetadata(value);
+    setRepairLogForm((prev) => {
+      cleanupRemovedTempMarkdownImages(prev.details, normalizedValue);
+      return { ...prev, details: normalizedValue };
+    });
   };
 
   const openCreateLineItemModal = () => {
@@ -1771,12 +1963,14 @@ export default function WorkOrderDetailPage() {
   };
 
   const openCreateRepairLogModal = () => {
+    cleanupAllTempMarkdownImages(repairLogForm.details);
     setEditingRepairLogID(null);
     setRepairLogForm({ repair_date: todayDateInputValue(), hours_used: "0", details: "" });
     setRepairLogModalOpen(true);
   };
 
   const openEditRepairLogModal = (log: RepairLog) => {
+    cleanupRemovedTempMarkdownImages(repairLogForm.details, log.details);
     setEditingRepairLogID(log.repair_log_id);
     setRepairLogForm({
       repair_date: log.repair_date ? log.repair_date.slice(0, 10) : "",
@@ -2123,7 +2317,7 @@ export default function WorkOrderDetailPage() {
               )}
               {aiSummary ? (
                 <div className="space-y-2">
-                  {markdownBlock(aiSummary)}
+                  {markdownBlock(aiSummary, openFullscreenImage)}
                 </div>
               ) : null}
             </article>
@@ -2152,7 +2346,7 @@ export default function WorkOrderDetailPage() {
                     <MDXEditor
                       markdown={workNotesForm.problem_description}
                       contentEditableClassName={workNotesEditorContentClassName}
-                      onChange={(value) => setWorkNotesForm((prev) => ({ ...prev, problem_description: value }))}
+                      onChange={handleProblemDescriptionChange}
                       plugins={workNotesEditorPlugins}
                     />
                   </div>
@@ -2163,7 +2357,7 @@ export default function WorkOrderDetailPage() {
                     <MDXEditor
                       markdown={workNotesForm.work_done}
                       contentEditableClassName={workNotesEditorContentClassName}
-                      onChange={(value) => setWorkNotesForm((prev) => ({ ...prev, work_done: value }))}
+                      onChange={handleWorkDoneChange}
                       plugins={workNotesEditorPlugins}
                     />
                   </div>
@@ -2178,11 +2372,11 @@ export default function WorkOrderDetailPage() {
                 {detailRow("Technicians", item.worker_names.join(", ") || "-")}
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">Problem Description</p>
-                  {markdownBlock(item.problem_description)}
+                  {markdownBlock(item.problem_description, openFullscreenImage)}
                 </div>
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">Work Done</p>
-                  {markdownBlock(item.work_done)}
+                  {markdownBlock(item.work_done, openFullscreenImage)}
                 </div>
                 {detailRow("Updated", formatDateTime(item.updated_at))}
               </>
@@ -2447,7 +2641,16 @@ export default function WorkOrderDetailPage() {
               </div>
 
               {canCreateRepairLogs && (
-                <Dialog open={repairLogModalOpen} onOpenChange={setRepairLogModalOpen}>
+                <Dialog
+                  open={repairLogModalOpen}
+                  onOpenChange={(open) => {
+                    if (!open) {
+                      cleanupAllTempMarkdownImages(repairLogForm.details);
+                      setEditingRepairLogID(null);
+                    }
+                    setRepairLogModalOpen(open);
+                  }}
+                >
                   <DialogContent className="max-w-xl">
                     <DialogTitle className="text-lg font-semibold">{editingRepairLogID !== null ? "Edit Repair Log" : "Add Repair Log"}</DialogTitle>
                     <DialogDescription className="text-sm text-muted-foreground">
@@ -2477,7 +2680,7 @@ export default function WorkOrderDetailPage() {
                           <MDXEditor
                             markdown={repairLogForm.details}
                             contentEditableClassName={workNotesEditorContentClassName}
-                            onChange={(value) => setRepairLogForm((prev) => ({ ...prev, details: value }))}
+                            onChange={handleRepairLogDetailsChange}
                             plugins={workNotesEditorPlugins}
                           />
                         </div>
@@ -2486,6 +2689,7 @@ export default function WorkOrderDetailPage() {
                         <Button
                           variant="outline"
                           onClick={() => {
+                            cleanupAllTempMarkdownImages(repairLogForm.details);
                             setRepairLogModalOpen(false);
                             setEditingRepairLogID(null);
                           }}
@@ -2532,7 +2736,7 @@ export default function WorkOrderDetailPage() {
                             )}
                           </div>
                         </div>
-                        <div className="text-sm leading-6">{markdownPlain(log.details)}</div>
+                        <div className="text-sm leading-6">{markdownPlain(log.details, openFullscreenImage)}</div>
                       </div>
                     </div>
                   ))}
@@ -2861,6 +3065,23 @@ export default function WorkOrderDetailPage() {
           </div>
         </article>
       )}
+
+      <Dialog
+        open={fullscreenImage !== null}
+        onOpenChange={(open) => {
+          if (!open) setFullscreenImage(null);
+        }}
+      >
+        <DialogContent className="max-w-5xl p-3">
+          <DialogTitle className="sr-only">Image Preview</DialogTitle>
+          <DialogDescription className="sr-only">{fullscreenImage?.alt ?? "Image preview"}</DialogDescription>
+          {fullscreenImage ? (
+            <div className="flex max-h-[85vh] items-center justify-center overflow-auto rounded-md">
+              <img src={fullscreenImage.src} alt={fullscreenImage.alt} className="max-h-[80vh] w-auto max-w-full object-contain" />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={repairLogDeleteTarget !== null}

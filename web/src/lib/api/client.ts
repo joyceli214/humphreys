@@ -59,7 +59,9 @@ export class APIClient {
 
   private async request<T>(path: string, init?: RequestInit, allowRefreshRetry = true): Promise<T> {
     const headers = new Headers(init?.headers);
-    headers.set("Content-Type", "application/json");
+    if (!(init?.body instanceof FormData) && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
     if (this.accessToken) headers.set("Authorization", `Bearer ${this.accessToken}`);
     const csrf = this.getCSRFToken();
     if (csrf && init?.method && ["POST", "PATCH", "DELETE"].includes(init.method.toUpperCase())) {
@@ -431,6 +433,22 @@ export class APIClient {
   deletePartsPurchaseRequest(referenceID: number, partsPurchaseRequestID: number) {
     return this.request<void>(`/work-orders/${referenceID}/parts-purchase-requests/${partsPurchaseRequestID}`, {
       method: "DELETE"
+    });
+  }
+
+  uploadMarkdownImage(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request<{ url: string }>("/uploads/markdown-image", {
+      method: "POST",
+      body: formData
+    });
+  }
+
+  deleteMarkdownImage(url: string) {
+    return this.request<void>("/uploads/markdown-image", {
+      method: "DELETE",
+      body: JSON.stringify({ url })
     });
   }
 
