@@ -350,6 +350,7 @@ function SingleSearchableDropdown({
   className?: string;
 }) {
   const alerts = useAlerts();
+  const labelText = label ?? "item";
   const rootRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -572,9 +573,9 @@ function SingleSearchableDropdown({
                           setNewShelf("");
                           setNewFloor("0");
                           setOpen(false);
-                          alerts.success(`${label} added`);
+                          alerts.success(`${labelText} added`);
                         } catch (err) {
-                          alerts.error(`Failed to add ${label.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
+                          alerts.error(`Failed to add ${labelText.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
                         }
                       }}
                     >
@@ -589,7 +590,7 @@ function SingleSearchableDropdown({
                     <Input
                       autoFocus
                       className="focus-visible:ring-0 focus-visible:ring-transparent"
-                      placeholder={`New ${label.toLowerCase()}`}
+                      placeholder={`New ${labelText.toLowerCase()}`}
                       value={newValue}
                       onChange={(e) => setNewValue(e.target.value)}
                     />
@@ -616,9 +617,9 @@ function SingleSearchableDropdown({
                           setAdding(false);
                           setNewValue("");
                           setOpen(false);
-                          alerts.success(`${label} added`);
+                          alerts.success(`${labelText} added`);
                         } catch (err) {
-                          alerts.error(`Failed to add ${label.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
+                          alerts.error(`Failed to add ${labelText.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
                         }
                       }}
                     >
