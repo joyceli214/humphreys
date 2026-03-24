@@ -223,7 +223,7 @@ function drawHeader(doc: jsPDF, title: string) {
   doc.line(14, 34, 196, 34);
 }
 
-function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number) {
+function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number, options?: { includeDropOffItemHeader?: boolean }) {
   const y = yStart;
 
   doc.setFontSize(12);
@@ -261,6 +261,20 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number) {
     colX += col.width;
   });
 
+  if (options?.includeDropOffItemHeader) {
+    doc.setLineWidth(0.35);
+    doc.line(14, y + 51, 196, y + 51);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.text(`Job ID: ${item.reference_id}`, 14, y + 56);
+    doc.setFont("helvetica", "normal");
+    lineField(doc, 14, y + 69, 42, "Item", text(item.item_name));
+    lineField(doc, 60, y + 69, 42, "Brand", item.brand_names.length ? item.brand_names.join(", ") : "-");
+    lineField(doc, 106, y + 69, 42, "Model Number", text(item.model_number));
+    lineField(doc, 152, y + 69, 42, "Serial Number", text(item.serial_number));
+    return y + 78;
+  }
+
   lineField(doc, 14, y + 57, 42, "Item", text(item.item_name));
   lineField(doc, 60, y + 57, 42, "Brand", item.brand_names.length ? item.brand_names.join(", ") : "-");
   lineField(doc, 106, y + 57, 42, "Model Number", text(item.model_number));
@@ -275,7 +289,7 @@ export function generateDropOffFormPdf(item: WorkOrderDetail) {
 
   const pageBottomY = pageHeight(doc) - 10;
   const nextPageTopY = 44;
-  let y = drawCommon(doc, item, 44);
+  let y = drawCommon(doc, item, 44, { includeDropOffItemHeader: true });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
