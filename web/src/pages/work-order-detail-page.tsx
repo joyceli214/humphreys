@@ -2651,7 +2651,7 @@ export default function WorkOrderDetailPage() {
                     setRepairLogModalOpen(open);
                   }}
                 >
-                  <DialogContent className="max-w-xl">
+                  <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto p-4 sm:p-6">
                     <DialogTitle className="text-lg font-semibold">{editingRepairLogID !== null ? "Edit Repair Log" : "Add Repair Log"}</DialogTitle>
                     <DialogDescription className="text-sm text-muted-foreground">
                       Record time spent and repair details for this work order.
