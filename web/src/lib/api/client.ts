@@ -258,6 +258,16 @@ export class APIClient {
     });
   }
 
+  sendWorkOrderCustomerEmail(
+    referenceID: number,
+    payload: { template: "job_started" | "job_completed"; to: string; subject: string; body: string }
+  ) {
+    return this.request<{ sent: boolean }>(`/work-orders/${referenceID}/customer-email`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   deleteWorkOrder(referenceID: number) {
     return this.request<void>(`/work-orders/${referenceID}`, {
       method: "DELETE"

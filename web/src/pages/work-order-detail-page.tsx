@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
-import { normalizeMarkdownInput } from "@/lib/markdown";
+import { markdownToPlainText, normalizeMarkdownInput } from "@/lib/markdown";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -117,6 +117,13 @@ function fullName(firstName: string | null, lastName: string | null) {
 
 type CustomerEmailTemplate = "job_started" | "job_completed";
 
+type CustomerEmailDraft = {
+  template: CustomerEmailTemplate;
+  to: string;
+  subject: string;
+  body: string;
+};
+
 function emailCustomerName(item: WorkOrderDetail) {
   const name = fullName(item.customer.first_name, item.customer.last_name);
   return name === "-" ? "there" : name;
@@ -128,14 +135,8 @@ function emailEquipmentName(item: WorkOrderDetail) {
 }
 
 function stripMarkdownForEmail(value: string | null) {
-  if (!value) return "";
-  return value
-    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[*_`>#-]/g, "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const text = markdownToPlainText(value);
+  return text === "-" ? "" : text;
 }
 
 function emailJobDetails(item: WorkOrderDetail) {
@@ -152,9 +153,9 @@ function emailJobDetails(item: WorkOrderDetail) {
     details.push(`Work done: ${workDone}`);
   }
 
-  const totalPayable = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
+  const subtotal = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
   if (item.parts_total !== null || item.delivery_total !== null || item.labour_total !== null) {
-    details.push(`Estimated total before deposit: ${formatCurrency(totalPayable * 1.13)}`);
+    details.push(`Estimated total before deposit: ${formatCurrency(subtotal * 1.13)}`);
   }
 
   if (item.deposit > 0) {
@@ -164,12 +165,14 @@ function emailJobDetails(item: WorkOrderDetail) {
   return details.join("\n");
 }
 
-function buildCustomerEmail(item: WorkOrderDetail, template: CustomerEmailTemplate) {
+function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailTemplate): CustomerEmailDraft {
   const customerName = emailCustomerName(item);
   const equipmentName = emailEquipmentName(item);
 
   if (template === "job_completed") {
     return {
+      template,
+      to: item.customer.email ?? "",
       subject: `Job #${item.reference_id} completed - ${equipmentName}`,
       body: [
         `Hi ${customerName},`,
@@ -188,6 +191,8 @@ function buildCustomerEmail(item: WorkOrderDetail, template: CustomerEmailTempla
   }
 
   return {
+    template,
+    to: item.customer.email ?? "",
     subject: `Job #${item.reference_id} started - ${equipmentName}`,
     body: [
       `Hi ${customerName},`,
@@ -1271,6 +1276,9 @@ export default function WorkOrderDetailPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [savingRepairLog, setSavingRepairLog] = useState(false);
   const [savingPartsRequest, setSavingPartsRequest] = useState(false);
+  const [sendingCustomerEmail, setSendingCustomerEmail] = useState<CustomerEmailTemplate | null>(null);
+  const [customerEmailDraft, setCustomerEmailDraft] = useState<CustomerEmailDraft | null>(null);
+  const [customerEmailDialogOpen, setCustomerEmailDialogOpen] = useState(false);
   const [completingJob, setCompletingJob] = useState(false);
   const [repairLogModalOpen, setRepairLogModalOpen] = useState(false);
   const [partsRequestModalOpen, setPartsRequestModalOpen] = useState(false);
@@ -1785,8 +1793,14 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  const openCustomerEmail = (template: CustomerEmailTemplate) => {
-    const email = item.customer.email?.trim() ?? "";
+  const openCustomerEmailPreview = (template: CustomerEmailTemplate) => {
+    setCustomerEmailDraft(buildCustomerEmailDraft(item, template));
+    setCustomerEmailDialogOpen(true);
+  };
+
+  const sendCustomerEmail = async () => {
+    if (!customerEmailDraft) return;
+    const email = customerEmailDraft.to.trim();
     if (!email) {
       alerts.error("Customer email missing", "Add an email address to the customer before sending.");
       return;
@@ -1795,9 +1809,33 @@ export default function WorkOrderDetailPage() {
       alerts.error("Customer email invalid", "Fix the customer email address before sending.");
       return;
     }
+    const subject = customerEmailDraft.subject.trim();
+    const body = customerEmailDraft.body.trim();
+    if (!subject) {
+      alerts.error("Subject required", "Enter an email subject before sending.");
+      return;
+    }
+    if (!body) {
+      alerts.error("Email body required", "Enter an email message before sending.");
+      return;
+    }
 
-    const message = buildCustomerEmail(item, template);
-    window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
+    setSendingCustomerEmail(customerEmailDraft.template);
+    try {
+      await apiClient.sendWorkOrderCustomerEmail(parsedReferenceId, {
+        template: customerEmailDraft.template,
+        to: email,
+        subject,
+        body
+      });
+      alerts.success(customerEmailDraft.template === "job_completed" ? "Job completed email sent" : "Job started email sent");
+      setCustomerEmailDialogOpen(false);
+      setCustomerEmailDraft(null);
+    } catch (err) {
+      alerts.error("Failed to send email", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setSendingCustomerEmail(null);
+    }
   };
 
   const saveWorkNotes = async () => {
@@ -2398,15 +2436,15 @@ export default function WorkOrderDetailPage() {
           {canViewSensitive && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline">
+                <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" disabled={sendingCustomerEmail !== null}>
                   <Mail className="mr-2 h-4 w-4" />
-                  Email Customer
+                  {sendingCustomerEmail ? "Sending..." : "Email Customer"}
                   <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => openCustomerEmail("job_started")}>Job Started Email</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openCustomerEmail("job_completed")}>Job Completed Email</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openCustomerEmailPreview("job_started")}>Job Started Email</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openCustomerEmailPreview("job_completed")}>Job Completed Email</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -2419,6 +2457,69 @@ export default function WorkOrderDetailPage() {
       </div>
 
       {sectionError && <p className="text-sm text-destructive">{sectionError}</p>}
+
+      {canViewSensitive && (
+        <Dialog
+          open={customerEmailDialogOpen}
+          onOpenChange={(open) => {
+            if (!open && sendingCustomerEmail === null) {
+              setCustomerEmailDraft(null);
+            }
+            setCustomerEmailDialogOpen(open);
+          }}
+        >
+          <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+            <DialogTitle className="text-lg font-semibold">
+              {customerEmailDraft?.template === "job_completed" ? "Job Completed Email" : "Job Started Email"}
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              Review and edit the email before sending it to the customer.
+            </DialogDescription>
+            {customerEmailDraft && (
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="mb-1 block text-sm text-muted-foreground">To</label>
+                  <Input
+                    type="email"
+                    value={customerEmailDraft.to}
+                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, to: event.target.value } : prev)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm text-muted-foreground">Subject</label>
+                  <Input
+                    value={customerEmailDraft.subject}
+                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, subject: event.target.value } : prev)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm text-muted-foreground">Message</label>
+                  <textarea
+                    className="min-h-[320px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={customerEmailDraft.body}
+                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, body: event.target.value } : prev)}
+                  />
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setCustomerEmailDialogOpen(false);
+                      setCustomerEmailDraft(null);
+                    }}
+                    disabled={sendingCustomerEmail !== null}
+                  >
+                    Cancel
+                  </Button>
+                  <Button onClick={() => void sendCustomerEmail()} disabled={sendingCustomerEmail !== null}>
+                    {sendingCustomerEmail ? "Sending..." : "Send Email"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[7fr_3fr] gap-4 items-start min-w-0">
         <div className="min-w-0 space-y-4">

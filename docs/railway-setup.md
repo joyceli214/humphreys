@@ -27,10 +27,15 @@ In each Railway service settings:
 - `COOKIE_SECURE=true`
 - `DB_SSLMODE=require`
 - `CORS_ORIGIN=<your web service domain>`
+- `MICROSOFT_TENANT_ID=<microsoft tenant id>`
+- `MICROSOFT_CLIENT_ID=<microsoft app client id>`
+- `MICROSOFT_CLIENT_SECRET=<microsoft app client secret>`
+- `MICROSOFT_SENDER_EMAIL=<outlook sender mailbox>`
 
 Notes:
 - `DATABASE_URL` is supported directly by the API config.
 - API listens on Railway `PORT` automatically if `SERVER_ADDR` is not set.
+- Direct customer email sending requires Microsoft Graph application permission `Mail.Send` with admin consent.
 
 ### Web service variables
 - `API_UPSTREAM_URL=<your api service domain>`

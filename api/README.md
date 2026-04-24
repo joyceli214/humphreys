@@ -20,6 +20,12 @@ For markdown image uploads to Railway Bucket (S3-compatible), set:
 - `S3_USE_SSL`
 - Optional: `S3_PUBLIC_BASE_URL` (if your bucket is exposed via CDN/custom domain)
 
+For direct Outlook email sending, create a Microsoft Entra app registration with Microsoft Graph application permission `Mail.Send`, grant admin consent, then set:
+- `MICROSOFT_TENANT_ID`
+- `MICROSOFT_CLIENT_ID`
+- `MICROSOFT_CLIENT_SECRET`
+- `MICROSOFT_SENDER_EMAIL` (the mailbox that sends customer emails)
+
 ## Highlights
 - JWT access token (15m default)
 - Rotating refresh token in HttpOnly cookie

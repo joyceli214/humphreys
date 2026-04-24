@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 type Handler struct {
 	service          *Service
 	uploads          *uploads.Handler
+	emailClient      *graphEmailClient
 	openRouterAPIKey string
 	openRouterModel  string
 	httpClient       *http.Client
@@ -83,6 +85,13 @@ type updateCustomerRequest struct {
 	HomePhone    *string `json:"home_phone"`
 	WorkPhone    *string `json:"work_phone"`
 	Extension    *string `json:"extension_text"`
+}
+
+type sendCustomerEmailRequest struct {
+	Template string `json:"template" binding:"required"`
+	To       string `json:"to"`
+	Subject  string `json:"subject"`
+	Body     string `json:"body"`
 }
 
 type createWorkOrderCustomerRequest struct {
@@ -172,12 +181,14 @@ type dashboardResponse struct {
 func New(db *pgxpool.Pool) *Handler {
 	aiCache := ttlcache.New[string, aiSummaryCacheItem](ttlcache.WithTTL[string, aiSummaryCacheItem](30 * time.Second))
 	go aiCache.Start()
+	httpClient := &http.Client{Timeout: 25 * time.Second}
 
 	return &Handler{
 		service:          NewService(NewRepository(db)),
+		emailClient:      newGraphEmailClientFromEnv(httpClient),
 		openRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
 		openRouterModel:  getOpenRouterModel(),
-		httpClient:       &http.Client{Timeout: 25 * time.Second},
+		httpClient:       httpClient,
 		aiSummaryCache:   aiCache,
 	}
 }
@@ -185,12 +196,14 @@ func New(db *pgxpool.Pool) *Handler {
 func NewWithService(service *Service) *Handler {
 	aiCache := ttlcache.New[string, aiSummaryCacheItem](ttlcache.WithTTL[string, aiSummaryCacheItem](30 * time.Second))
 	go aiCache.Start()
+	httpClient := &http.Client{Timeout: 25 * time.Second}
 
 	return &Handler{
 		service:          service,
+		emailClient:      newGraphEmailClientFromEnv(httpClient),
 		openRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
 		openRouterModel:  getOpenRouterModel(),
-		httpClient:       &http.Client{Timeout: 25 * time.Second},
+		httpClient:       httpClient,
 		aiSummaryCache:   aiCache,
 	}
 }
@@ -376,6 +389,64 @@ func (h *Handler) GetWorkOrder(c *gin.Context) {
 	}
 	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
+}
+
+func (h *Handler) SendCustomerEmail(c *gin.Context) {
+	referenceID, err := strconv.Atoi(c.Param("reference_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
+		return
+	}
+
+	var req sendCustomerEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	item, err := h.service.GetWorkOrderDetail(c.Request.Context(), referenceID)
+	if errors.Is(err, ErrWorkOrderNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch work order"})
+		return
+	}
+
+	msg, err := buildCustomerEmailMessage(item, strings.TrimSpace(req.Template))
+	if err != nil {
+		if errors.Is(err, ErrInvalidEmailFormat) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.To) != "" {
+		if _, err := mail.ParseAddress(strings.TrimSpace(req.To)); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": ErrInvalidEmailFormat.Error()})
+			return
+		}
+		msg.To = strings.TrimSpace(req.To)
+	}
+	if strings.TrimSpace(req.Subject) != "" {
+		msg.Subject = strings.TrimSpace(req.Subject)
+	}
+	if strings.TrimSpace(req.Body) != "" {
+		msg.Body = strings.TrimSpace(req.Body)
+	}
+
+	if err := h.emailClient.Send(c.Request.Context(), msg); err != nil {
+		if errors.Is(err, ErrEmailNotConfigured) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email sending is not configured"})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to send customer email", "detail": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"sent": true})
 }
 
 func (h *Handler) ListCustomers(c *gin.Context) {

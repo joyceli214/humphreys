@@ -44,6 +44,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		middleware.RequirePermission(permSensitiveRead),
 		h.GenerateAISummary,
 	)
+	group.POST(
+		"/:reference_id/customer-email",
+		middleware.RequirePermission(permRead),
+		middleware.RequirePermission(permSensitiveRead),
+		h.SendCustomerEmail,
+	)
 	group.PATCH("/:reference_id/status", middleware.RequirePermission(permStatusUpdate), h.UpdateStatus)
 	group.PATCH("/:reference_id/equipment", requireEquipmentUpdatePermission(), h.UpdateEquipment)
 	group.PATCH("/:reference_id/work-notes", middleware.RequirePermission(permUpdate), h.UpdateWorkNotes)
