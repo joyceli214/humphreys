@@ -11,3 +11,4 @@
 - Refresh token uses HttpOnly cookie from API.
 - Access token is kept in client memory in auth context.
 - CSRF header is sent from `csrf_token` cookie for mutating requests.
+
