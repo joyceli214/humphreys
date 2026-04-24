@@ -10,6 +10,7 @@ import UsersPage from "@/pages/users-page";
 import RolesPage from "@/pages/roles-page";
 import AdminDashboardPage from "@/pages/admin-dashboard-page";
 import DropdownManagementPage from "@/pages/dropdown-management-page";
+import WorkOrderLayoutPage from "@/pages/work-order-layout-page";
 
 function HomeRedirect() {
   const { loading, scope } = useAuth();
@@ -43,6 +44,14 @@ export default function App() {
         element={
           <ProtectedShell>
             <WorkOrderDetailPage />
+          </ProtectedShell>
+        }
+      />
+      <Route
+        path="/work-order-layout"
+        element={
+          <ProtectedShell>
+            <WorkOrderLayoutPage />
           </ProtectedShell>
         }
       />

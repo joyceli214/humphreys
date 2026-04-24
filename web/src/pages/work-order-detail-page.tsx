@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
@@ -50,6 +50,7 @@ import rehypeRaw from "rehype-raw";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { generateDropOffFormPdf, generatePickupFormPdf } from "@/lib/pdf/work-order-forms";
+import { DEFAULT_WORK_ORDER_LAYOUT, type WorkOrderLayoutBlockID, normalizeWorkOrderLayout } from "@/lib/work-order-layout";
 
 function parseLocalDate(value: string) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -1250,7 +1251,7 @@ function SingleDropdown({
 export default function WorkOrderDetailPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const alerts = useAlerts();
   const canEdit = hasPermission("work_orders:update");
   const canAdminDeleteJob = hasPermission("work_orders:create");
@@ -1286,6 +1287,7 @@ export default function WorkOrderDetailPage() {
   const [partsRequestDeleteTarget, setPartsRequestDeleteTarget] = useState<PartsPurchaseRequest | null>(null);
   const [deletingRepairLog, setDeletingRepairLog] = useState(false);
   const [deletingPartsRequest, setDeletingPartsRequest] = useState(false);
+  const [workOrderLayout, setWorkOrderLayout] = useState(DEFAULT_WORK_ORDER_LAYOUT);
   const [deleteWorkOrderOpen, setDeleteWorkOrderOpen] = useState(false);
   const [deletingWorkOrder, setDeletingWorkOrder] = useState(false);
   const [creatingWarranty, setCreatingWarranty] = useState(false);
@@ -1303,6 +1305,25 @@ export default function WorkOrderDetailPage() {
   const [noPaymentMethodID, setNoPaymentMethodID] = useState<number | null>(null);
   const [frozenDropdowns, setFrozenDropdowns] = useState<Record<string, boolean>>({});
   const [fullscreenImage, setFullscreenImage] = useState<{ src: string; alt: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user?.id) {
+      setWorkOrderLayout(DEFAULT_WORK_ORDER_LAYOUT);
+      return;
+    }
+    apiClient
+      .getWorkOrderLayoutPreference()
+      .then((res) => {
+        if (!cancelled) setWorkOrderLayout(normalizeWorkOrderLayout(res.value));
+      })
+      .catch(() => {
+        if (!cancelled) setWorkOrderLayout(DEFAULT_WORK_ORDER_LAYOUT);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   const [equipmentForm, setEquipmentForm] = useState<EquipmentForm>({
     status_id: null,
@@ -2414,6 +2435,38 @@ export default function WorkOrderDetailPage() {
     </article>
   );
 
+  const registeredLayoutBlocks: Partial<Record<WorkOrderLayoutBlockID, ReactNode>> = {};
+  const registerLayoutBlock = (id: WorkOrderLayoutBlockID, node: ReactNode) => {
+    registeredLayoutBlocks[id] = node;
+    return null;
+  };
+  const renderLayoutColumn = (column: "left" | "right") => (
+    <div className="min-w-0 space-y-4">
+      {workOrderLayout.blocks
+        .filter((block) => block.column === column)
+        .map((block) => registeredLayoutBlocks[block.id] ? <div key={block.id}>{registeredLayoutBlocks[block.id]}</div> : null)}
+    </div>
+  );
+  const renderWorkOrderLayout = () => (
+    <>
+      <div className="min-w-0 space-y-4 xl:hidden">
+        {workOrderLayout.mobileOrder.map((blockID) =>
+          registeredLayoutBlocks[blockID] ? <div key={blockID}>{registeredLayoutBlocks[blockID]}</div> : null
+        )}
+      </div>
+      <div
+        className="hidden gap-4 items-start min-w-0 xl:grid xl:grid-cols-[minmax(0,var(--wo-left))_minmax(0,var(--wo-right))]"
+        style={{
+          "--wo-left": `${workOrderLayout.leftWidth}fr`,
+          "--wo-right": `${workOrderLayout.rightWidth}fr`
+        } as CSSProperties}
+      >
+        {renderLayoutColumn("left")}
+        {renderLayoutColumn("right")}
+      </div>
+    </>
+  );
+
   return (
     <section className="min-w-0 space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2521,9 +2574,9 @@ export default function WorkOrderDetailPage() {
         </Dialog>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[7fr_3fr] gap-4 items-start min-w-0">
-        <div className="min-w-0 space-y-4">
-          {canViewSensitive && (
+      <div className="min-w-0">
+        <div className="contents">
+          {canViewSensitive && registerLayoutBlock("ai_summary", (
             <article className="rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -2543,8 +2596,9 @@ export default function WorkOrderDetailPage() {
                 </div>
               ) : null}
             </article>
-          )}
+          ))}
 
+          {registerLayoutBlock("work_notes", (
           <article className="rounded-lg border border-border bg-white p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Work Notes</h2>
@@ -2604,9 +2658,11 @@ export default function WorkOrderDetailPage() {
               </>
             )}
           </article>
+          ))}
 
           {canViewSensitive && (
           <>
+          {registerLayoutBlock("payment_breakdown", (
           <article className="rounded-lg border border-border bg-white p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Payment Breakdown</h2>
@@ -2838,10 +2894,12 @@ export default function WorkOrderDetailPage() {
               )}
             </div>
           </article>
+          ))}
           </>
           )}
 
           {(canReadRepairLogs || canCreateRepairLogs) && (
+            registerLayoutBlock("repair_logs", (
             <article className="rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Repair Logs</h2>
@@ -2965,9 +3023,11 @@ export default function WorkOrderDetailPage() {
                 </div>
               )}
             </article>
+            ))
           )}
 
           {(canReadPartsRequests || canCreatePartsRequests) && (
+            registerLayoutBlock("parts_order", (
             <article className="rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Parts Purchase Requests</h2>
@@ -3140,12 +3200,14 @@ export default function WorkOrderDetailPage() {
                 </div>
               )}
             </article>
+            ))
           )}
         </div>
 
-        <div className="min-w-0 space-y-4">
-          {equipmentBlock}
+        <div className="contents">
+          {registerLayoutBlock("equipment", equipmentBlock)}
 
+          {registerLayoutBlock("customer", (
           <aside className="rounded-lg border border-border bg-white p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold">Customer</h2>
@@ -3259,7 +3321,9 @@ export default function WorkOrderDetailPage() {
               </>
             )}
           </aside>
+          ))}
 
+          {registerLayoutBlock("meta", (
           <aside className="rounded-lg border border-border bg-white p-4 space-y-2">
             <h2 className="font-semibold">Meta</h2>
             {detailRow("Created At", formatDateTime(item.created_at))}
@@ -3267,7 +3331,10 @@ export default function WorkOrderDetailPage() {
             {detailRow("Status Updated At", formatDateTime(item.status_updated_at))}
             {detailRow("Status", item.status_name ?? "-")}
           </aside>
+          ))}
         </div>
+
+        {renderWorkOrderLayout()}
       </div>
 
       {canAdminDeleteJob && (

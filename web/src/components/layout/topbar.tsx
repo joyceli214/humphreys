@@ -4,6 +4,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth/auth-context";
 import { Menu } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const { user, logout } = useAuth();
@@ -24,6 +25,9 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem asChild>
+            <Link to="/work-order-layout">Work Order Layout</Link>
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => logout()}>Logout</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

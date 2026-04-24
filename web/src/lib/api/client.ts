@@ -12,6 +12,7 @@ import type {
   WorkOrderDetail,
   WorkOrderListItem
 } from "@/lib/api/generated/types";
+import type { WorkOrderLayout } from "@/lib/work-order-layout";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -23,9 +24,15 @@ export class APIClient {
   private refreshRequestInFlight: Promise<AuthResponse> | null = null;
   private recentRefresh: { ts: number; data: AuthResponse } | null = null;
   private lookupCache = new Map<string, { ts: number; data: LookupOption[] }>();
+  private workOrderLayoutPreference: WorkOrderLayout | null | undefined = undefined;
+  private workOrderLayoutPreferenceInFlight: Promise<{ value: WorkOrderLayout | null }> | null = null;
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
+    if (token === null) {
+      this.workOrderLayoutPreference = undefined;
+      this.workOrderLayoutPreferenceInFlight = null;
+    }
   }
 
   setCSRFToken(token: string | null) {
@@ -137,6 +144,35 @@ export class APIClient {
 
   logout() {
     return this.request<void>("/auth/logout", { method: "POST" });
+  }
+
+  getWorkOrderLayoutPreference() {
+    if (this.workOrderLayoutPreference !== undefined) {
+      return Promise.resolve({ value: this.workOrderLayoutPreference });
+    }
+    if (this.workOrderLayoutPreferenceInFlight) {
+      return this.workOrderLayoutPreferenceInFlight;
+    }
+
+    this.workOrderLayoutPreferenceInFlight = this.request<{ value: WorkOrderLayout | null }>("/user-preferences/work_order_layout")
+      .then((res) => {
+        this.workOrderLayoutPreference = res.value;
+        return res;
+      })
+      .finally(() => {
+        this.workOrderLayoutPreferenceInFlight = null;
+      });
+    return this.workOrderLayoutPreferenceInFlight;
+  }
+
+  saveWorkOrderLayoutPreference(layout: WorkOrderLayout) {
+    return this.request<{ value: WorkOrderLayout }>("/user-preferences/work_order_layout", {
+      method: "PATCH",
+      body: JSON.stringify({ value: layout })
+    }).then((res) => {
+      this.workOrderLayoutPreference = res.value;
+      return res;
+    });
   }
 
   listUsers(params: URLSearchParams) {

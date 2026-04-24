@@ -18,6 +18,7 @@ import (
 	"humphreys/api/internal/modules/catalog"
 	"humphreys/api/internal/modules/roles"
 	"humphreys/api/internal/modules/uploads"
+	"humphreys/api/internal/modules/userpreferences"
 	"humphreys/api/internal/modules/users"
 	"humphreys/api/internal/modules/workorders"
 
@@ -60,6 +61,7 @@ func main() {
 	catalogHandler := catalog.New(pool)
 	workOrdersHandler := workorders.New(pool)
 	uploadsHandler := uploads.New(cfg)
+	userPreferencesHandler := userpreferences.New(pool)
 	workOrdersHandler.SetUploadsHandler(uploadsHandler)
 
 	r := gin.New()
@@ -80,6 +82,7 @@ func main() {
 	catalog.RegisterRoutes(authed, catalogHandler)
 	workorders.RegisterRoutes(authed, workOrdersHandler)
 	uploads.RegisterRoutes(authed, uploadsHandler)
+	userpreferences.RegisterRoutes(authed, userPreferencesHandler)
 
 	srv := &http.Server{Addr: cfg.ServerAddr, Handler: r}
 	go func() {
