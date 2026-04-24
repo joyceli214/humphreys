@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ChevronDown, Mail } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -112,6 +113,96 @@ function statusClass(status: string | null) {
 function fullName(firstName: string | null, lastName: string | null) {
   const name = `${firstName ?? ""} ${lastName ?? ""}`.trim();
   return name || "-";
+}
+
+type CustomerEmailTemplate = "job_started" | "job_completed";
+
+function emailCustomerName(item: WorkOrderDetail) {
+  const name = fullName(item.customer.first_name, item.customer.last_name);
+  return name === "-" ? "there" : name;
+}
+
+function emailEquipmentName(item: WorkOrderDetail) {
+  const parts = [item.brand_names.join(" "), item.item_name, item.model_number].map((part) => part?.trim()).filter(Boolean);
+  return parts.join(" ") || "your item";
+}
+
+function stripMarkdownForEmail(value: string | null) {
+  if (!value) return "";
+  return value
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_`>#-]/g, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function emailJobDetails(item: WorkOrderDetail) {
+  const details = [
+    `Job ID: ${item.reference_id}`,
+    `Item: ${emailEquipmentName(item)}`,
+    `Status: ${item.status_name ?? "-"}`,
+    `Serial: ${item.serial_number ?? "-"}`,
+    `Problem: ${stripMarkdownForEmail(item.problem_description) || "-"}`
+  ];
+
+  const workDone = stripMarkdownForEmail(item.work_done);
+  if (workDone) {
+    details.push(`Work done: ${workDone}`);
+  }
+
+  const totalPayable = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
+  if (item.parts_total !== null || item.delivery_total !== null || item.labour_total !== null) {
+    details.push(`Estimated total before deposit: ${formatCurrency(totalPayable * 1.13)}`);
+  }
+
+  if (item.deposit > 0) {
+    details.push(`Deposit: ${formatCurrency(item.deposit)}`);
+  }
+
+  return details.join("\n");
+}
+
+function buildCustomerEmail(item: WorkOrderDetail, template: CustomerEmailTemplate) {
+  const customerName = emailCustomerName(item);
+  const equipmentName = emailEquipmentName(item);
+
+  if (template === "job_completed") {
+    return {
+      subject: `Job #${item.reference_id} completed - ${equipmentName}`,
+      body: [
+        `Hi ${customerName},`,
+        "",
+        `Your repair job for ${equipmentName} is complete.`,
+        "",
+        "Job details:",
+        emailJobDetails(item),
+        "",
+        "Please contact us if you have any questions or would like to arrange pickup or delivery.",
+        "",
+        "Thank you,",
+        "Humphreys Electronics"
+      ].join("\n")
+    };
+  }
+
+  return {
+    subject: `Job #${item.reference_id} started - ${equipmentName}`,
+    body: [
+      `Hi ${customerName},`,
+      "",
+      `We have started work on your ${equipmentName}.`,
+      "",
+      "Job details:",
+      emailJobDetails(item),
+      "",
+      "We will contact you if we need approval for parts or additional work.",
+      "",
+      "Thank you,",
+      "Humphreys Electronics"
+    ].join("\n")
+  };
 }
 
 function detailRow(label: string, value: string) {
@@ -1694,6 +1785,21 @@ export default function WorkOrderDetailPage() {
     }
   };
 
+  const openCustomerEmail = (template: CustomerEmailTemplate) => {
+    const email = item.customer.email?.trim() ?? "";
+    if (!email) {
+      alerts.error("Customer email missing", "Add an email address to the customer before sending.");
+      return;
+    }
+    if (!emailValid(email)) {
+      alerts.error("Customer email invalid", "Fix the customer email address before sending.");
+      return;
+    }
+
+    const message = buildCustomerEmail(item, template);
+    window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
+  };
+
   const saveWorkNotes = async () => {
     setSavingSection("work_notes");
     setSectionError("");
@@ -2288,6 +2394,21 @@ export default function WorkOrderDetailPage() {
             >
               {creatingWarranty ? "Creating Warranty..." : "Create Warranty"}
             </Button>
+          )}
+          {canViewSensitive && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline">
+                  <Mail className="mr-2 h-4 w-4" />
+                  Email Customer
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => openCustomerEmail("job_started")}>Job Started Email</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => openCustomerEmail("job_completed")}>Job Completed Email</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</Button>}
           {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</Button>}
