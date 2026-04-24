@@ -10,6 +10,7 @@ import UsersPage from "@/pages/users-page";
 import RolesPage from "@/pages/roles-page";
 import AdminDashboardPage from "@/pages/admin-dashboard-page";
 import DropdownManagementPage from "@/pages/dropdown-management-page";
+import EmailTemplatesPage from "@/pages/email-templates-page";
 import WorkOrderLayoutPage from "@/pages/work-order-layout-page";
 
 function HomeRedirect() {
@@ -84,6 +85,14 @@ export default function App() {
         element={
           <ProtectedShell>
             <DropdownManagementPage />
+          </ProtectedShell>
+        }
+      />
+      <Route
+        path="/email-templates"
+        element={
+          <ProtectedShell>
+            <EmailTemplatesPage />
           </ProtectedShell>
         }
       />

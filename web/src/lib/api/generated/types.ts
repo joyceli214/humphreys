@@ -33,6 +33,16 @@ export interface AuthResponse {
   user: User;
 }
 
+export type EmailTemplateKey = "job_started" | "job_completed";
+
+export interface EmailTemplate {
+  key: EmailTemplateKey;
+  label: string;
+  subject_template: string;
+  body_template: string;
+  updated_at: string;
+}
+
 export interface WorkOrderListItem {
   reference_id: number;
   created_at: string | null;

@@ -3,7 +3,7 @@
 import { type CSSProperties, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
-import type { LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
+import type { EmailTemplate, LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,8 @@ import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
-import { markdownToPlainText, normalizeMarkdownInput } from "@/lib/markdown";
+import { normalizeMarkdownInput } from "@/lib/markdown";
+import { DEFAULT_EMAIL_TEMPLATES, renderEmailTemplate, type CustomerEmailTemplateKey } from "@/lib/email-templates";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -116,7 +117,7 @@ function fullName(firstName: string | null, lastName: string | null) {
   return name || "-";
 }
 
-type CustomerEmailTemplate = "job_started" | "job_completed";
+type CustomerEmailTemplate = CustomerEmailTemplateKey;
 
 type CustomerEmailDraft = {
   template: CustomerEmailTemplate;
@@ -125,89 +126,13 @@ type CustomerEmailDraft = {
   body: string;
 };
 
-function emailCustomerName(item: WorkOrderDetail) {
-  const name = fullName(item.customer.first_name, item.customer.last_name);
-  return name === "-" ? "there" : name;
-}
-
-function emailEquipmentName(item: WorkOrderDetail) {
-  const parts = [item.brand_names.join(" "), item.item_name, item.model_number].map((part) => part?.trim()).filter(Boolean);
-  return parts.join(" ") || "your item";
-}
-
-function stripMarkdownForEmail(value: string | null) {
-  const text = markdownToPlainText(value);
-  return text === "-" ? "" : text;
-}
-
-function emailJobDetails(item: WorkOrderDetail) {
-  const details = [
-    `Job ID: ${item.reference_id}`,
-    `Item: ${emailEquipmentName(item)}`,
-    `Status: ${item.status_name ?? "-"}`,
-    `Serial: ${item.serial_number ?? "-"}`,
-    `Problem: ${stripMarkdownForEmail(item.problem_description) || "-"}`
-  ];
-
-  const workDone = stripMarkdownForEmail(item.work_done);
-  if (workDone) {
-    details.push(`Work done: ${workDone}`);
-  }
-
-  const subtotal = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
-  if (item.parts_total !== null || item.delivery_total !== null || item.labour_total !== null) {
-    details.push(`Estimated total before deposit: ${formatCurrency(subtotal * 1.13)}`);
-  }
-
-  if (item.deposit > 0) {
-    details.push(`Deposit: ${formatCurrency(item.deposit)}`);
-  }
-
-  return details.join("\n");
-}
-
-function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailTemplate): CustomerEmailDraft {
-  const customerName = emailCustomerName(item);
-  const equipmentName = emailEquipmentName(item);
-
-  if (template === "job_completed") {
-    return {
-      template,
-      to: item.customer.email ?? "",
-      subject: `Job #${item.reference_id} completed - ${equipmentName}`,
-      body: [
-        `Hi ${customerName},`,
-        "",
-        `Your repair job for ${equipmentName} is complete.`,
-        "",
-        "Job details:",
-        emailJobDetails(item),
-        "",
-        "Please contact us if you have any questions or would like to arrange pickup or delivery.",
-        "",
-        "Thank you,",
-        "Humphreys Electronics"
-      ].join("\n")
-    };
-  }
-
+function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailTemplate, emailTemplate?: EmailTemplate): CustomerEmailDraft {
+  const rendered = renderEmailTemplate(emailTemplate ?? DEFAULT_EMAIL_TEMPLATES[template], item);
   return {
     template,
     to: item.customer.email ?? "",
-    subject: `Job #${item.reference_id} started - ${equipmentName}`,
-    body: [
-      `Hi ${customerName},`,
-      "",
-      `We have started work on your ${equipmentName}.`,
-      "",
-      "Job details:",
-      emailJobDetails(item),
-      "",
-      "We will contact you if we need approval for parts or additional work.",
-      "",
-      "Thank you,",
-      "Humphreys Electronics"
-    ].join("\n")
+    subject: rendered.subject,
+    body: rendered.body
   };
 }
 
@@ -1278,6 +1203,8 @@ export default function WorkOrderDetailPage() {
   const [savingRepairLog, setSavingRepairLog] = useState(false);
   const [savingPartsRequest, setSavingPartsRequest] = useState(false);
   const [sendingCustomerEmail, setSendingCustomerEmail] = useState<CustomerEmailTemplate | null>(null);
+  const [openingCustomerEmail, setOpeningCustomerEmail] = useState<CustomerEmailTemplate | null>(null);
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[] | null>(null);
   const [customerEmailDraft, setCustomerEmailDraft] = useState<CustomerEmailDraft | null>(null);
   const [customerEmailDialogOpen, setCustomerEmailDialogOpen] = useState(false);
   const [completingJob, setCompletingJob] = useState(false);
@@ -1814,9 +1741,25 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  const openCustomerEmailPreview = (template: CustomerEmailTemplate) => {
-    setCustomerEmailDraft(buildCustomerEmailDraft(item, template));
-    setCustomerEmailDialogOpen(true);
+  const loadEmailTemplates = async () => {
+    if (emailTemplates) return emailTemplates;
+    const res = await apiClient.listEmailTemplates();
+    setEmailTemplates(res.items);
+    return res.items;
+  };
+
+  const openCustomerEmailPreview = async (template: CustomerEmailTemplate) => {
+    setOpeningCustomerEmail(template);
+    try {
+      const templates = await loadEmailTemplates();
+      setCustomerEmailDraft(buildCustomerEmailDraft(item, template, templates.find((entry) => entry.key === template)));
+    } catch {
+      alerts.error("Failed to load email template", "Using the default template for this email.");
+      setCustomerEmailDraft(buildCustomerEmailDraft(item, template));
+    } finally {
+      setOpeningCustomerEmail(null);
+      setCustomerEmailDialogOpen(true);
+    }
   };
 
   const sendCustomerEmail = async () => {
@@ -2489,15 +2432,15 @@ export default function WorkOrderDetailPage() {
           {canViewSensitive && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" disabled={sendingCustomerEmail !== null}>
+                <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" disabled={sendingCustomerEmail !== null || openingCustomerEmail !== null}>
                   <Mail className="mr-2 h-4 w-4" />
-                  {sendingCustomerEmail ? "Sending..." : "Email Customer"}
+                  {sendingCustomerEmail ? "Sending..." : openingCustomerEmail ? "Loading..." : "Email Customer"}
                   <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => openCustomerEmailPreview("job_started")}>Job Started Email</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => openCustomerEmailPreview("job_completed")}>Job Completed Email</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void openCustomerEmailPreview("job_started")}>Job Started Email</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void openCustomerEmailPreview("job_completed")}>Job Completed Email</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}

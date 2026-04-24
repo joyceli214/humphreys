@@ -3,6 +3,8 @@ import type {
   CustomerLookupOption,
   DropdownManagementEntry,
   DashboardData,
+  EmailTemplate,
+  EmailTemplateKey,
   LookupOption,
   PartsPurchaseRequest,
   Permission,
@@ -296,7 +298,7 @@ export class APIClient {
 
   sendWorkOrderCustomerEmail(
     referenceID: number,
-    payload: { template: "job_started" | "job_completed"; to: string; subject: string; body: string }
+    payload: { template: EmailTemplateKey; to: string; subject: string; body: string }
   ) {
     return this.request<{ sent: boolean }>(`/work-orders/${referenceID}/customer-email`, {
       method: "POST",
@@ -532,6 +534,17 @@ export class APIClient {
 
   listDropdownManagement() {
     return this.request<{ items: DropdownManagementEntry[] }>("/catalog/dropdown-management");
+  }
+
+  listEmailTemplates() {
+    return this.request<{ items: EmailTemplate[] }>("/email-templates");
+  }
+
+  updateEmailTemplate(key: EmailTemplateKey, payload: { subject_template: string; body_template: string }) {
+    return this.request<EmailTemplate>(`/email-templates/${key}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
   }
 
   setDropdownFrozen(key: string, isFrozen: boolean) {

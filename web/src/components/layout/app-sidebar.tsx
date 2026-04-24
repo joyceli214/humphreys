@@ -6,6 +6,7 @@ import {
   ClipboardList,
   LayoutDashboard,
   ListChecks,
+  Mail,
   PackageCheck,
   ShieldCheck,
   Users
@@ -20,6 +21,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   "/dashboard": LayoutDashboard,
   "/work-orders": ClipboardList,
   "/dropdown-management": ListChecks,
+  "/email-templates": Mail,
   "/parts-purchase-requests": PackageCheck,
   "/users": Users,
   "/roles": ShieldCheck
