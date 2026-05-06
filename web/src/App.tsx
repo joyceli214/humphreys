@@ -4,6 +4,7 @@ import { firstReadableRoute } from "@/lib/auth/authorization";
 import { ProtectedShell } from "@/components/layout/protected-shell";
 import LoginPage from "@/pages/login-page";
 import WorkOrdersPage from "@/pages/work-orders-page";
+import WorkOrderCreatePage from "@/pages/work-order-create-page";
 import WorkOrderDetailPage from "@/pages/work-order-detail-page";
 import PartsPurchaseRequestsPage from "@/pages/parts-purchase-requests-page";
 import UsersPage from "@/pages/users-page";
@@ -37,6 +38,14 @@ export default function App() {
         element={
           <ProtectedShell>
             <WorkOrdersPage />
+          </ProtectedShell>
+        }
+      />
+      <Route
+        path="/work-orders/create"
+        element={
+          <ProtectedShell>
+            <WorkOrderCreatePage />
           </ProtectedShell>
         }
       />

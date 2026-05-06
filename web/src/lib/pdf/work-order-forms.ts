@@ -241,7 +241,7 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number, options?:
 
   lineField(doc, 14, y + 35, 40, "Home Phone", text(formatPhoneNumber(item.customer.home_phone)));
   lineField(doc, 60, y + 35, 40, "Work Phone / Cell", text(formatPhoneNumber(item.customer.work_phone)));
-  lineField(doc, 106, y + 35, 40, "Extension", text(item.customer.extension_text));
+  lineField(doc, 106, y + 35, 40, "Remark", text(item.customer.remark));
   lineField(doc, 152, y + 35, 40, "Other Remarks", text(item.other_remarks));
 
   doc.setFont("helvetica", "normal");

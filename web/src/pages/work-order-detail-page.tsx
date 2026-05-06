@@ -23,6 +23,8 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
+import { SingleSearchableDropdown } from "@/components/work-order-dropdowns/single-searchable-dropdown";
+import { MultiSearchableDropdown } from "@/components/work-order-dropdowns/multi-searchable-dropdown";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
 import { normalizeMarkdownInput } from "@/lib/markdown";
@@ -514,7 +516,8 @@ type CustomerForm = {
   email: string;
   home_phone: string;
   work_phone: string;
-  extension_text: string;
+  postal_code: string;
+  remark: string;
   address_line_1: string;
   address_line_2: string;
   city: string;
@@ -536,642 +539,6 @@ type PartsPurchaseRequestForm = {
   item_name: string;
   quantity: string;
 };
-
-function SingleSearchableDropdown({
-  label,
-  value,
-  valueLabel,
-  onChange,
-  loadOptions,
-  placeholder,
-  onAddNew,
-  onAddLocation,
-  onAddOther,
-  searchable = true,
-  allowClear = false
-}: {
-  label: string;
-  value: number | null;
-  valueLabel?: string;
-  onChange: (value: number | null) => void;
-  loadOptions: (query: string) => Promise<LookupOption[]>;
-  placeholder: string;
-  onAddNew?: (label: string) => Promise<LookupOption>;
-  onAddLocation?: (payload: { shelf: string; floor: number }) => Promise<LookupOption>;
-  onAddOther?: (label: string) => void;
-  searchable?: boolean;
-  allowClear?: boolean;
-}) {
-  const alerts = useAlerts();
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [options, setOptions] = useState<LookupOption[]>([]);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [adding, setAdding] = useState(false);
-  const [addingOther, setAddingOther] = useState(false);
-  const [newValue, setNewValue] = useState("");
-  const [otherValue, setOtherValue] = useState("");
-  const [newShelf, setNewShelf] = useState("");
-  const [newFloor, setNewFloor] = useState("0");
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    loadOptions(query).then((items) => {
-      if (!cancelled) setOptions(items);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadOptions, open, query]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (rootRef.current && target && !rootRef.current.contains(target)) {
-        setOpen(false);
-        setAdding(false);
-        setAddingOther(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || !searchable) return;
-    searchInputRef.current?.focus();
-  }, [open, searchable]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (options.length === 0) {
-      setHighlightedIndex(-1);
-      return;
-    }
-    setHighlightedIndex(0);
-  }, [open, options, query]);
-
-  const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (options.length === 0) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setHighlightedIndex((prev) => (prev + 1) % options.length);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setHighlightedIndex((prev) => (prev <= 0 ? options.length - 1 : prev - 1));
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const target = options[highlightedIndex] ?? options[0];
-      if (!target) return;
-      onChange(target.id);
-      setOpen(false);
-    }
-  };
-
-  const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (!open) {
-        setOpen(true);
-        setHighlightedIndex(0);
-      } else if (options.length > 0) {
-        setHighlightedIndex((prev) => (prev + 1) % options.length);
-      }
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (!open) {
-        setOpen(true);
-        setHighlightedIndex(Math.max(options.length - 1, 0));
-      } else if (options.length > 0) {
-        setHighlightedIndex((prev) => (prev <= 0 ? options.length - 1 : prev - 1));
-      }
-      return;
-    }
-    if (event.key === "Enter" && open) {
-      event.preventDefault();
-      const target = options[highlightedIndex] ?? options[0];
-      if (!target) return;
-      onChange(target.id);
-      setOpen(false);
-    }
-  };
-
-  const selected = options.find((item) => item.id === value);
-  const selectedLabel = selected?.label ?? valueLabel ?? "";
-
-  return (
-    <div ref={rootRef} className="space-y-1">
-      <label className="block text-sm text-muted-foreground">{label}</label>
-      <div className="relative">
-        <button
-          type="button"
-          className="flex h-10 w-full items-center rounded-md border border-input bg-white px-3 py-2 pr-10 text-sm"
-          onClick={() => setOpen((v) => !v)}
-          onKeyDown={onTriggerKeyDown}
-        >
-          <span className="truncate text-left">{selectedLabel || placeholder}</span>
-        </button>
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">▾</span>
-        {open && (
-          <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-white p-2 shadow-lg">
-            {searchable && (
-              <div className="relative">
-                <Input ref={searchInputRef} className="pr-8" placeholder="Search..." value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onSearchKeyDown} />
-                {query.length > 0 && (
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground hover:text-foreground"
-                    onClick={() => setQuery("")}
-                    aria-label={`Clear ${label} search`}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="mt-2 max-h-52 overflow-auto space-y-1">
-              {allowClear && (
-                <button
-                  type="button"
-                  className="w-full rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
-                  onClick={() => {
-                    onChange(null);
-                    setOpen(false);
-                  }}
-                >
-                  None
-                </button>
-              )}
-              {options.map((option, index) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={cn("w-full rounded px-2 py-1 text-left text-sm hover:bg-muted", highlightedIndex === index && "bg-muted")}
-                  onMouseEnter={() => setHighlightedIndex(index)}
-                  onClick={() => {
-                    onChange(option.id);
-                    setOpen(false);
-                  }}
-                >
-                  {option.label}
-                </button>
-              ))}
-              {!adding && !addingOther && onAddOther && (
-                <button
-                  type="button"
-                  className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
-                  onClick={() => {
-                    setAddingOther(true);
-                    setAdding(false);
-                  }}
-                >
-                  + Other...
-                </button>
-              )}
-              {!adding && !addingOther && (onAddNew || onAddLocation) && (
-                <button
-                  type="button"
-                  className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
-                  onClick={() => {
-                    setAdding(true);
-                    setAddingOther(false);
-                  }}
-                >
-                  + Add new...
-                </button>
-              )}
-              {adding && onAddLocation && (
-                <div className="p-0 space-y-2">
-                  <div className="grid grid-cols-[1fr_120px] gap-2">
-                    <Input placeholder="Shelf" value={newShelf} onChange={(e) => setNewShelf(e.target.value)} />
-                    <Input placeholder="Floor" type="number" min={0} value={newFloor} onChange={(e) => setNewFloor(e.target.value)} />
-                  </div>
-                  <p className="text-right text-xs text-muted-foreground">Input 0 for floor</p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setAdding(false);
-                        setNewShelf("");
-                        setNewFloor("0");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={async () => {
-                        const shelf = newShelf.trim();
-                        const floor = Number(newFloor.trim());
-                        if (!shelf) {
-                          alerts.error("Shelf required", "Enter a shelf value.");
-                          return;
-                        }
-                        if (!Number.isInteger(floor) || floor < 0) {
-                          alerts.error("Invalid floor", "Floor must be a whole number zero or greater.");
-                          return;
-                        }
-                        try {
-                          const created = await onAddLocation({ shelf, floor });
-                          onChange(created.id);
-                          setAdding(false);
-                          setNewShelf("");
-                          setNewFloor("0");
-                          setOpen(false);
-                          alerts.success(`${label} added`);
-                        } catch (err) {
-                          alerts.error(`Failed to add ${label.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
-                        }
-                      }}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {adding && onAddNew && !onAddLocation && (
-                <div className="p-0">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      autoFocus
-                      className="focus-visible:ring-0 focus-visible:ring-transparent"
-                      placeholder={`New ${label.toLowerCase()}`}
-                      value={newValue}
-                      onChange={(e) => setNewValue(e.target.value)}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setAdding(false);
-                        setNewValue("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={async () => {
-                        const value = newValue.trim();
-                        if (!value) return;
-                        try {
-                          const created = await onAddNew(value);
-                          setOptions((prev) => (prev.some((option) => option.id === created.id) ? prev : [created, ...prev]));
-                          onChange(created.id);
-                          setAdding(false);
-                          setNewValue("");
-                          setOpen(false);
-                          alerts.success(`${label} added`);
-                        } catch (err) {
-                          alerts.error(`Failed to add ${label.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
-                        }
-                      }}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                </div>
-              )}
-              {addingOther && onAddOther && (
-                <div className="p-0">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      autoFocus
-                      className="focus-visible:ring-0 focus-visible:ring-transparent"
-                      placeholder={`Other ${label.toLowerCase()}`}
-                      value={otherValue}
-                      onChange={(e) => setOtherValue(e.target.value)}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setAddingOther(false);
-                        setOtherValue("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => {
-                        const value = otherValue.trim();
-                        if (!value) return;
-                        onAddOther(value);
-                        setAddingOther(false);
-                        setOtherValue("");
-                        setOpen(false);
-                      }}
-                    >
-                      OK
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MultiSearchableDropdown({
-  label,
-  values,
-  valueLabels,
-  onChange,
-  loadOptions,
-  placeholder,
-  onAddNew,
-  searchable = true
-}: {
-  label: string;
-  values: number[];
-  valueLabels: string[];
-  onChange: (values: number[]) => void;
-  loadOptions: (query: string) => Promise<LookupOption[]>;
-  placeholder: string;
-  onAddNew?: (label: string) => Promise<LookupOption>;
-  searchable?: boolean;
-}) {
-  const alerts = useAlerts();
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [options, setOptions] = useState<LookupOption[]>([]);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [adding, setAdding] = useState(false);
-  const [newValue, setNewValue] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    loadOptions(query).then((items) => {
-      if (!cancelled) setOptions(items);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadOptions, open, query]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (rootRef.current && target && !rootRef.current.contains(target)) {
-        setOpen(false);
-        setAdding(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || !searchable) return;
-    searchInputRef.current?.focus();
-  }, [open, searchable]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (options.length === 0) {
-      setHighlightedIndex(-1);
-      return;
-    }
-    setHighlightedIndex(0);
-  }, [open, options, query]);
-
-  const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (options.length === 0) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setHighlightedIndex((prev) => (prev + 1) % options.length);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setHighlightedIndex((prev) => (prev <= 0 ? options.length - 1 : prev - 1));
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const target = options[highlightedIndex] ?? options[0];
-      if (!target) return;
-      if (!values.includes(target.id)) {
-        onChange([...values, target.id]);
-      }
-      setOpen(false);
-    }
-  };
-
-  const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (!open) {
-        setOpen(true);
-        setHighlightedIndex(0);
-      } else if (options.length > 0) {
-        setHighlightedIndex((prev) => (prev + 1) % options.length);
-      }
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (!open) {
-        setOpen(true);
-        setHighlightedIndex(Math.max(options.length - 1, 0));
-      } else if (options.length > 0) {
-        setHighlightedIndex((prev) => (prev <= 0 ? options.length - 1 : prev - 1));
-      }
-      return;
-    }
-    if (event.key === "Enter" && open) {
-      event.preventDefault();
-      const target = options[highlightedIndex] ?? options[0];
-      if (!target) return;
-      if (!values.includes(target.id)) {
-        onChange([...values, target.id]);
-      }
-      setOpen(false);
-    }
-  };
-
-  const labelsByID = new Map(options.map((item) => [item.id, item.label]));
-  const selectedLabels = values
-    .map((id) => labelsByID.get(id))
-    .filter(Boolean) as string[];
-  const fallback = valueLabels.slice(0, 3).join(", ");
-  const buttonText = selectedLabels.length > 0 ? selectedLabels.join(", ") : fallback || placeholder;
-
-  return (
-    <div ref={rootRef} className="space-y-1">
-      <label className="block text-sm text-muted-foreground">{label}</label>
-      <div className="relative">
-        <button
-          type="button"
-          className="flex h-10 w-full items-center rounded-md border border-input bg-white px-3 py-2 pr-10 text-sm"
-          onClick={() => setOpen((v) => !v)}
-          onKeyDown={onTriggerKeyDown}
-        >
-          <span className="truncate text-left">{buttonText}</span>
-        </button>
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2">▾</span>
-        {open && (
-          <div className="absolute z-20 mt-1 w-full rounded-md border border-border bg-white p-2 shadow-lg">
-            {searchable && (
-              <div className="relative">
-                <Input ref={searchInputRef} className="pr-8" placeholder="Search..." value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={onSearchKeyDown} />
-                {query.length > 0 && (
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground hover:text-foreground"
-                    onClick={() => setQuery("")}
-                    aria-label={`Clear ${label} search`}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="mt-2 max-h-56 overflow-auto space-y-1">
-              {options.map((option, index) => {
-                const checked = values.includes(option.id);
-                return (
-                  <label
-                    key={option.id}
-                    className={cn("flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-muted", highlightedIndex === index && "bg-muted")}
-                    onMouseEnter={() => setHighlightedIndex(index)}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          onChange([...values, option.id]);
-                        } else {
-                          onChange(values.filter((v) => v !== option.id));
-                        }
-                      }}
-                    />
-                    <span>{option.label}</span>
-                  </label>
-                );
-              })}
-              {!adding && onAddNew && (
-                <button
-                  type="button"
-                  className="w-full rounded border border-dashed border-border px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
-                  onClick={() => setAdding(true)}
-                >
-                  + Add new...
-                </button>
-              )}
-              {adding && onAddNew && (
-                <div className="p-0">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      autoFocus
-                      className="focus-visible:ring-0 focus-visible:ring-transparent"
-                      placeholder={`New ${label.toLowerCase()}`}
-                      value={newValue}
-                      onChange={(e) => setNewValue(e.target.value)}
-                    />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setAdding(false);
-                        setNewValue("");
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={async () => {
-                        const value = newValue.trim();
-                        if (!value) return;
-                        try {
-                          const created = await onAddNew(value);
-                          if (!values.includes(created.id)) {
-                            onChange([...values, created.id]);
-                          }
-                          setAdding(false);
-                          setNewValue("");
-                          alerts.success(`${label} added`);
-                        } catch (err) {
-                          alerts.error(`Failed to add ${label.toLowerCase()}`, err instanceof Error ? err.message : "Request failed");
-                        }
-                      }}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SingleDropdown({
-  label,
-  value,
-  valueLabel,
-  onChange,
-  loadOptions,
-  placeholder,
-  onAddNew
-}: {
-  label: string;
-  value: number | null;
-  valueLabel?: string;
-  onChange: (value: number | null) => void;
-  loadOptions: () => Promise<LookupOption[]>;
-  placeholder: string;
-  onAddNew?: (label: string) => Promise<LookupOption>;
-}) {
-  return (
-    <SingleSearchableDropdown
-      label={label}
-      value={value}
-      valueLabel={valueLabel}
-      onChange={onChange}
-      loadOptions={async () => loadOptions()}
-      placeholder={placeholder}
-      onAddNew={onAddNew}
-      searchable={false}
-    />
-  );
-}
 
 export default function WorkOrderDetailPage() {
   const navigate = useNavigate();
@@ -1296,7 +663,8 @@ export default function WorkOrderDetailPage() {
     email: "",
     home_phone: "",
     work_phone: "",
-    extension_text: "",
+    postal_code: "",
+    remark: "",
     address_line_1: "",
     address_line_2: "",
     city: "",
@@ -1496,7 +864,8 @@ export default function WorkOrderDetailPage() {
       email: item.customer.email ?? "",
       home_phone: phoneDigits(item.customer.home_phone),
       work_phone: phoneDigits(item.customer.work_phone),
-      extension_text: item.customer.extension_text ?? "",
+      postal_code: item.customer.postal_code ?? "",
+      remark: item.customer.remark ?? "",
       address_line_1: item.customer.address_line_1 ?? "",
       address_line_2: item.customer.address_line_2 ?? "",
       city: item.customer.city ?? "",
@@ -1950,7 +1319,8 @@ export default function WorkOrderDetailPage() {
         email: blankToNull(email),
         home_phone: blankToNull(homePhone),
         work_phone: blankToNull(workPhone),
-        extension_text: blankToNull(customerForm.extension_text),
+        postal_code: blankToNull(customerForm.postal_code),
+        remark: blankToNull(customerForm.remark),
         address_line_1: blankToNull(customerForm.address_line_1),
         address_line_2: blankToNull(customerForm.address_line_2),
         city: blankToNull(customerForm.city),
@@ -2185,7 +1555,8 @@ export default function WorkOrderDetailPage() {
           email: item.customer.email ?? undefined,
           home_phone: phoneDigits(item.customer.home_phone).trim() || undefined,
           work_phone: phoneDigits(item.customer.work_phone).trim() || undefined,
-          extension_text: item.customer.extension_text?.trim() || undefined,
+          postal_code: item.customer.postal_code?.trim() || undefined,
+          remark: item.customer.remark?.trim() || undefined,
           address_line_1: item.customer.address_line_1?.trim() || undefined,
           address_line_2: item.customer.address_line_2?.trim() || undefined,
           city: item.customer.city?.trim() || undefined,
@@ -2240,7 +1611,7 @@ export default function WorkOrderDetailPage() {
 
       {editingSection === "equipment" ? (
         <div className="space-y-3">
-          <SingleDropdown
+          <SingleSearchableDropdown
             label="Status"
             value={equipmentForm.status_id}
             valueLabel={item.status_name ?? undefined}
@@ -2267,7 +1638,7 @@ export default function WorkOrderDetailPage() {
           />
           {canEdit ? (
             <>
-          <SingleDropdown
+          <SingleSearchableDropdown
             label="Job Type"
             value={equipmentForm.job_type_id}
             valueLabel={item.job_type_name ?? undefined}
@@ -2757,7 +2128,7 @@ export default function WorkOrderDetailPage() {
               {editingSection === "totals" ? (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
-                    <SingleDropdown
+                    <SingleSearchableDropdown
                       label="Deposit Payment Method"
                       value={workNotesForm.payment_method_ids[0] ?? null}
                       valueLabel={item.payment_method_names[0] ?? undefined}
@@ -2766,7 +2137,7 @@ export default function WorkOrderDetailPage() {
                       placeholder="Select deposit payment method"
                       onAddNew={isDropdownFrozen("payment_methods") ? undefined : (label) => apiClient.createPaymentMethod(label)}
                     />
-                    <SingleDropdown
+                    <SingleSearchableDropdown
                       label="Final Payment Method"
                       value={workNotesForm.payment_method_ids[1] ?? null}
                       valueLabel={item.payment_method_names[1] ?? undefined}
@@ -3220,10 +2591,6 @@ export default function WorkOrderDetailPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">Extension</label>
-                  <Input value={customerForm.extension_text} onChange={(e) => setCustomerForm((prev) => ({ ...prev, extension_text: e.target.value }))} />
-                </div>
-                <div>
                   <label className="mb-1 block text-sm text-muted-foreground">Address</label>
                   <Input value={customerForm.address_line_1} onChange={(e) => setCustomerForm((prev) => ({ ...prev, address_line_1: e.target.value }))} />
                 </div>
@@ -3233,6 +2600,10 @@ export default function WorkOrderDetailPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
+                    <label className="mb-1 block text-sm text-muted-foreground">Postal Code</label>
+                    <Input value={customerForm.postal_code} onChange={(e) => setCustomerForm((prev) => ({ ...prev, postal_code: e.target.value }))} />
+                  </div>
+                  <div>
                     <label className="mb-1 block text-sm text-muted-foreground">City</label>
                     <Input value={customerForm.city} onChange={(e) => setCustomerForm((prev) => ({ ...prev, city: e.target.value }))} />
                   </div>
@@ -3240,6 +2611,10 @@ export default function WorkOrderDetailPage() {
                     <label className="mb-1 block text-sm text-muted-foreground">Province</label>
                     <Input value={customerForm.province} onChange={(e) => setCustomerForm((prev) => ({ ...prev, province: e.target.value }))} />
                   </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm text-muted-foreground">Remark</label>
+                  <Input value={customerForm.remark} onChange={(e) => setCustomerForm((prev) => ({ ...prev, remark: e.target.value }))} />
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" onClick={saveCustomer} disabled={savingSection === "customer"}>{savingSection === "customer" ? "Saving..." : "Save"}</Button>
@@ -3254,7 +2629,8 @@ export default function WorkOrderDetailPage() {
                     {detailRow("Email", item.customer.email ?? "-")}
                     {detailRow("Home Phone", formatPhoneNumber(item.customer.home_phone) || "-")}
                     {detailRow("Work Phone", formatPhoneNumber(item.customer.work_phone) || "-")}
-                    {detailRow("Extension", item.customer.extension_text ?? "-")}
+                    {detailRow("Postal Code", item.customer.postal_code ?? "-")}
+                    {detailRow("Remark", item.customer.remark ?? "-")}
                     {detailRow("Address", item.customer.address_line_1 ?? "-")}
                     {detailRow("Address 2", item.customer.address_line_2 ?? "-")}
                     {detailRow("City", item.customer.city ?? "-")}

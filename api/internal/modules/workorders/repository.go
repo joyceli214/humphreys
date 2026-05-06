@@ -300,9 +300,10 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 			c.address_line_2,
 			c.city,
 			c.province,
+			c.postal_code,
 			c.home_phone,
 			c.work_phone,
-			c.extension_text,
+			c.remark,
 			wo.item_id,
 			i.item_name,
 			wo.brand_ids,
@@ -380,9 +381,10 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 		&detail.Customer.AddressLine2,
 		&detail.Customer.City,
 		&detail.Customer.Province,
+		&detail.Customer.PostalCode,
 		&detail.Customer.HomePhone,
 		&detail.Customer.WorkPhone,
-		&detail.Customer.Extension,
+		&detail.Customer.Remark,
 		&detail.ItemID,
 		&detail.ItemName,
 		&detail.BrandIDs,
@@ -515,7 +517,8 @@ func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]Cu
 			NULLIF(BTRIM(c.email), '') AS email,
 			NULLIF(BTRIM(c.home_phone), '') AS home_phone,
 			NULLIF(BTRIM(c.work_phone), '') AS work_phone,
-			NULLIF(BTRIM(c.extension_text), '') AS extension_text,
+			NULLIF(BTRIM(c.postal_code), '') AS postal_code,
+			NULLIF(BTRIM(c.remark), '') AS remark,
 			NULLIF(BTRIM(c.address_line_1), '') AS address_line_1,
 			NULLIF(BTRIM(c.address_line_2), '') AS address_line_2,
 			NULLIF(BTRIM(c.city), '') AS city,
@@ -539,7 +542,8 @@ func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]Cu
 		var email *string
 		var homePhone *string
 		var workPhone *string
-		var extension *string
+		var postalCode *string
+		var remark *string
 		var addressLine1 *string
 		var addressLine2 *string
 		var city *string
@@ -552,7 +556,8 @@ func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]Cu
 			&email,
 			&homePhone,
 			&workPhone,
-			&extension,
+			&postalCode,
+			&remark,
 			&addressLine1,
 			&addressLine2,
 			&city,
@@ -584,7 +589,8 @@ func (r *storeRepository) ListCustomers(ctx context.Context, query string) ([]Cu
 			Email:        email,
 			HomePhone:    homePhone,
 			WorkPhone:    workPhone,
-			Extension:    extension,
+			PostalCode:   postalCode,
+			Remark:       remark,
 			AddressLine1: addressLine1,
 			AddressLine2: addressLine2,
 			City:         city,
@@ -627,19 +633,21 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 					email = COALESCE($3::text, email),
 					home_phone = COALESCE($4::text, home_phone),
 					work_phone = COALESCE($5::text, work_phone),
-					extension_text = COALESCE($6::text, extension_text),
-					address_line_1 = COALESCE($7::text, address_line_1),
-					address_line_2 = COALESCE($8::text, address_line_2),
-					city = COALESCE($9::text, city),
-					province = COALESCE($10::text, province)
-				WHERE customer_id = $11
+					postal_code = COALESCE($6::text, postal_code),
+					remark = COALESCE($7::text, remark),
+					address_line_1 = COALESCE($8::text, address_line_1),
+					address_line_2 = COALESCE($9::text, address_line_2),
+					city = COALESCE($10::text, city),
+					province = COALESCE($11::text, province)
+				WHERE customer_id = $12
 			`,
 				nullableString(&firstName),
 				nullableString(&lastName),
 				nullableString(input.CustomerUpdates.Email),
 				nullableString(input.CustomerUpdates.HomePhone),
 				nullableString(input.CustomerUpdates.WorkPhone),
-				nullableString(input.CustomerUpdates.Extension),
+				nullableString(input.CustomerUpdates.PostalCode),
+				nullableString(input.CustomerUpdates.Remark),
 				nullableString(input.CustomerUpdates.AddressLine1),
 				nullableString(input.CustomerUpdates.AddressLine2),
 				nullableString(input.CustomerUpdates.City),
@@ -659,13 +667,14 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 				email,
 				home_phone,
 				work_phone,
-				extension_text,
+				postal_code,
+				remark,
 				address_line_1,
 				address_line_2,
 				city,
 				province
 			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING customer_id
 		`,
 			nullableString(&firstName),
@@ -673,7 +682,8 @@ func (r *storeRepository) CreateWorkOrder(ctx context.Context, input CreateWorkO
 			nullableString(input.NewCustomer.Email),
 			nullableString(input.NewCustomer.HomePhone),
 			nullableString(input.NewCustomer.WorkPhone),
-			nullableString(input.NewCustomer.Extension),
+			nullableString(input.NewCustomer.PostalCode),
+			nullableString(input.NewCustomer.Remark),
 			nullableString(input.NewCustomer.AddressLine1),
 			nullableString(input.NewCustomer.AddressLine2),
 			nullableString(input.NewCustomer.City),
@@ -1083,9 +1093,10 @@ func (r *storeRepository) UpdateCustomer(ctx context.Context, referenceID int, i
 			province = $7,
 			home_phone = $8,
 			work_phone = $9,
-			extension_text = $10
+			postal_code = $10,
+			remark = $11
 		FROM public.work_orders wo
-		WHERE wo.reference_id = $11
+		WHERE wo.reference_id = $12
 			AND wo.customer_id = c.customer_id
 	`,
 		nullableString(input.FirstName),
@@ -1097,7 +1108,8 @@ func (r *storeRepository) UpdateCustomer(ctx context.Context, referenceID int, i
 		nullableString(input.Province),
 		nullableString(input.HomePhone),
 		nullableString(input.WorkPhone),
-		nullableString(input.Extension),
+		nullableString(input.PostalCode),
+		nullableString(input.Remark),
 		referenceID,
 	)
 	if err != nil {

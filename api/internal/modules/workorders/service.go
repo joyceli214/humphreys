@@ -132,9 +132,10 @@ type CustomerUpdateInput struct {
 	AddressLine2 *string
 	City         *string
 	Province     *string
+	PostalCode   *string
 	HomePhone    *string
 	WorkPhone    *string
-	Extension    *string
+	Remark       *string
 }
 
 type CreateRepairLogInput struct {
@@ -177,7 +178,8 @@ type CustomerLookupOption struct {
 	Email        *string `json:"email"`
 	HomePhone    *string `json:"home_phone"`
 	WorkPhone    *string `json:"work_phone"`
-	Extension    *string `json:"extension_text"`
+	PostalCode   *string `json:"postal_code"`
+	Remark       *string `json:"remark"`
 	AddressLine1 *string `json:"address_line_1"`
 	AddressLine2 *string `json:"address_line_2"`
 	City         *string `json:"city"`
@@ -189,7 +191,8 @@ type CreateWorkOrderCustomerInput struct {
 	Email        *string
 	HomePhone    *string
 	WorkPhone    *string
-	Extension    *string
+	PostalCode   *string
+	Remark       *string
 	AddressLine1 *string
 	AddressLine2 *string
 	City         *string
@@ -346,7 +349,8 @@ func sanitizeCustomerInput(input *CreateWorkOrderCustomerInput, trimName bool) {
 	input.Email = trimStringPtr(input.Email)
 	input.HomePhone = trimStringPtr(input.HomePhone)
 	input.WorkPhone = trimStringPtr(input.WorkPhone)
-	input.Extension = trimStringPtr(input.Extension)
+	input.PostalCode = trimStringPtr(input.PostalCode)
+	input.Remark = trimStringPtr(input.Remark)
 	input.AddressLine1 = trimStringPtr(input.AddressLine1)
 	input.AddressLine2 = trimStringPtr(input.AddressLine2)
 	input.City = trimStringPtr(input.City)

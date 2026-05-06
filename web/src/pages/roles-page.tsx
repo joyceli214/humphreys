@@ -75,7 +75,10 @@ export default function RolesPage() {
 
   return (
     <section className="space-y-4">
-      <h1 className="text-2xl font-semibold">Role Management</h1>
+      <div>
+        <h1 className="text-2xl font-semibold">Role Management</h1>
+        <p className="text-sm text-muted-foreground">Manage roles and resource permissions.</p>
+      </div>
       {canCreateRoles && (
         <form onSubmit={createRole} className="rounded-lg border border-border bg-white p-4 grid grid-cols-1 md:grid-cols-4 gap-2">
           <Input placeholder="Role name" value={name} onChange={(e) => setName(e.target.value)} required />

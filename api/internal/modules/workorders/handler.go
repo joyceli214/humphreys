@@ -82,9 +82,10 @@ type updateCustomerRequest struct {
 	AddressLine2 *string `json:"address_line_2"`
 	City         *string `json:"city"`
 	Province     *string `json:"province"`
+	PostalCode   *string `json:"postal_code"`
 	HomePhone    *string `json:"home_phone"`
 	WorkPhone    *string `json:"work_phone"`
-	Extension    *string `json:"extension_text"`
+	Remark       *string `json:"remark"`
 }
 
 type sendCustomerEmailRequest struct {
@@ -99,7 +100,8 @@ type createWorkOrderCustomerRequest struct {
 	Email        *string `json:"email"`
 	HomePhone    *string `json:"home_phone"`
 	WorkPhone    *string `json:"work_phone"`
-	Extension    *string `json:"extension_text"`
+	PostalCode   *string `json:"postal_code"`
+	Remark       *string `json:"remark"`
 	AddressLine1 *string `json:"address_line_1"`
 	AddressLine2 *string `json:"address_line_2"`
 	City         *string `json:"city"`
@@ -111,7 +113,8 @@ type updateWorkOrderCustomerRequest struct {
 	Email        *string `json:"email"`
 	HomePhone    *string `json:"home_phone"`
 	WorkPhone    *string `json:"work_phone"`
-	Extension    *string `json:"extension_text"`
+	PostalCode   *string `json:"postal_code"`
+	Remark       *string `json:"remark"`
 	AddressLine1 *string `json:"address_line_1"`
 	AddressLine2 *string `json:"address_line_2"`
 	City         *string `json:"city"`
@@ -467,7 +470,8 @@ func (h *Handler) ListCustomers(c *gin.Context) {
 			items[i].Email = nil
 			items[i].HomePhone = nil
 			items[i].WorkPhone = nil
-			items[i].Extension = nil
+			items[i].PostalCode = nil
+			items[i].Remark = nil
 			items[i].AddressLine1 = nil
 			items[i].AddressLine2 = nil
 			items[i].City = nil
@@ -492,7 +496,8 @@ func (h *Handler) CreateWorkOrder(c *gin.Context) {
 			Email:        req.NewCustomer.Email,
 			HomePhone:    req.NewCustomer.HomePhone,
 			WorkPhone:    req.NewCustomer.WorkPhone,
-			Extension:    req.NewCustomer.Extension,
+			PostalCode:   req.NewCustomer.PostalCode,
+			Remark:       req.NewCustomer.Remark,
 			AddressLine1: req.NewCustomer.AddressLine1,
 			AddressLine2: req.NewCustomer.AddressLine2,
 			City:         req.NewCustomer.City,
@@ -505,7 +510,8 @@ func (h *Handler) CreateWorkOrder(c *gin.Context) {
 			Email:        req.CustomerUpdates.Email,
 			HomePhone:    req.CustomerUpdates.HomePhone,
 			WorkPhone:    req.CustomerUpdates.WorkPhone,
-			Extension:    req.CustomerUpdates.Extension,
+			PostalCode:   req.CustomerUpdates.PostalCode,
+			Remark:       req.CustomerUpdates.Remark,
 			AddressLine1: req.CustomerUpdates.AddressLine1,
 			AddressLine2: req.CustomerUpdates.AddressLine2,
 			City:         req.CustomerUpdates.City,
@@ -859,9 +865,10 @@ func (h *Handler) UpdateCustomer(c *gin.Context) {
 		AddressLine2: req.AddressLine2,
 		City:         req.City,
 		Province:     req.Province,
+		PostalCode:   req.PostalCode,
 		HomePhone:    req.HomePhone,
 		WorkPhone:    req.WorkPhone,
-		Extension:    req.Extension,
+		Remark:       req.Remark,
 	})
 	if errors.Is(err, ErrWorkOrderNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})

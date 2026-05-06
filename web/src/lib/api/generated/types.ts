@@ -71,9 +71,10 @@ export interface WorkOrderCustomer {
   address_line_2: string | null;
   city: string | null;
   province: string | null;
+  postal_code: string | null;
   home_phone: string | null;
   work_phone: string | null;
-  extension_text: string | null;
+  remark: string | null;
 }
 
 export interface WorkOrderLineItem {
@@ -180,7 +181,8 @@ export interface CustomerLookupOption {
   email?: string | null;
   home_phone?: string | null;
   work_phone?: string | null;
-  extension_text?: string | null;
+  postal_code?: string | null;
+  remark?: string | null;
   address_line_1?: string | null;
   address_line_2?: string | null;
   city?: string | null;

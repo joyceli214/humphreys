@@ -263,9 +263,6 @@ func buildWorkOrderAISummaryPrompt(item domain.WorkOrderDetail, repairLogs []dom
 	case workPhone != "":
 		phone = workPhone
 	}
-	if ext := strings.TrimSpace(orEmpty(item.Customer.Extension)); ext != "" {
-		phone = strings.TrimSpace(phone + " ext " + ext)
-	}
 	email := orUnknown(item.Customer.Email)
 	repairLogSummary := summarizeRepairLogs(repairLogs)
 	pendingActions := summarizeActionsRequired(item.StatusName, partsRequests)

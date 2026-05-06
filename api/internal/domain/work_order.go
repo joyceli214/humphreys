@@ -30,9 +30,10 @@ type WorkOrderCustomer struct {
 	AddressLine2 *string `json:"address_line_2"`
 	City         *string `json:"city"`
 	Province     *string `json:"province"`
+	PostalCode   *string `json:"postal_code"`
 	HomePhone    *string `json:"home_phone"`
 	WorkPhone    *string `json:"work_phone"`
-	Extension    *string `json:"extension_text"`
+	Remark       *string `json:"remark"`
 }
 
 type WorkOrderLineItem struct {

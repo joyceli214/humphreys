@@ -249,7 +249,8 @@ export class APIClient {
       email?: string;
       home_phone?: string;
       work_phone?: string;
-      extension_text?: string;
+      postal_code?: string;
+      remark?: string;
       address_line_1?: string;
       address_line_2?: string;
       city?: string;
@@ -260,7 +261,8 @@ export class APIClient {
       email?: string;
       home_phone?: string;
       work_phone?: string;
-      extension_text?: string;
+      postal_code?: string;
+      remark?: string;
       address_line_1?: string;
       address_line_2?: string;
       city?: string;
@@ -398,7 +400,8 @@ export class APIClient {
       email: string | null;
       home_phone: string | null;
       work_phone: string | null;
-      extension_text: string | null;
+      postal_code: string | null;
+      remark: string | null;
       address_line_1: string | null;
       address_line_2: string | null;
       city: string | null;

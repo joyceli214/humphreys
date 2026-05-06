@@ -170,8 +170,8 @@ export default function AdminDashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Overview</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Logistics and performance overview.</p>
+          <h1 className="text-2xl font-semibold">Overview</h1>
+          <p className="text-sm text-muted-foreground">Logistics and performance overview.</p>
         </div>
         <select
           value={dateRange}
@@ -187,7 +187,7 @@ export default function AdminDashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <section className="rounded-md border border-border bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-border bg-white p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Lookup</p>
           <form
             className="space-y-2"
@@ -219,22 +219,22 @@ export default function AdminDashboardPage() {
           </form>
         </section>
 
-        <section className="rounded-md border border-border bg-white p-5 shadow-sm">
+        <section className="rounded-lg border border-border bg-white p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ready for Pickup</p>
           <p className="text-2xl font-bold text-foreground">{dashboard.ready_total}</p>
           <p className="mt-1 text-xs text-muted-foreground">Awaiting customer</p>
         </section>
 
-        <section className="flex flex-col justify-between rounded-md border border-primary bg-primary p-5 text-primary-foreground shadow-sm">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-primary-foreground/80">Operations</p>
+        <section className="flex flex-col justify-between rounded-lg border border-border bg-white p-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Operations</p>
           <div>
-            <p className="text-lg font-bold">New Order</p>
+            <p className="text-lg font-semibold text-foreground">New Order</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm" className="bg-white text-primary hover:bg-white/90">
-                <Link to="/work-orders?create=new_job">Create New Job</Link>
+              <Button asChild size="sm">
+                <Link to="/work-orders/create?mode=new_job">Create New Job</Link>
               </Button>
-              <Button asChild size="sm" className="bg-white text-primary hover:bg-white/90">
-                <Link to="/work-orders?create=stock">Create Stock</Link>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/work-orders/create?mode=stock">Create Stock</Link>
               </Button>
             </div>
           </div>
@@ -243,7 +243,7 @@ export default function AdminDashboardPage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          <section className="rounded-md border border-border bg-white p-5 shadow-sm">
+          <section className="rounded-lg border border-border bg-white p-4">
             <h2 className="mb-4 text-sm font-semibold text-foreground">Ready for Pickup Queue</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -305,7 +305,7 @@ export default function AdminDashboardPage() {
             )}
           </section>
 
-          <section className="rounded-md border border-border bg-white p-5 shadow-sm">
+          <section className="rounded-lg border border-border bg-white p-4">
             <h2 className="mb-4 text-sm font-semibold text-foreground">Overdue Pickups</h2>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
@@ -378,7 +378,7 @@ export default function AdminDashboardPage() {
         </div>
 
         <div className="space-y-6">
-          <section className="rounded-md border border-border bg-white p-5 shadow-sm">
+          <section className="rounded-lg border border-border bg-white p-4">
             <h2 className="mb-4 text-sm font-semibold text-foreground">Parts Review</h2>
             {!canReadPartsReview && <p className="text-sm text-muted-foreground">Missing permission to view parts requests.</p>}
             {canReadPartsReview && (
@@ -401,7 +401,7 @@ export default function AdminDashboardPage() {
             )}
           </section>
 
-          <section className="rounded-md border border-border bg-white p-5 shadow-sm">
+          <section className="rounded-lg border border-border bg-white p-4">
             <h2 className="mb-4 text-sm font-semibold text-foreground">Shop Activity</h2>
             {!canReadRepairLogs && <p className="text-sm text-muted-foreground">Missing permission to view repair logs.</p>}
             {canReadRepairLogs && (
