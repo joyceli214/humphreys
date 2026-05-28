@@ -1616,7 +1616,7 @@ export default function WorkOrderDetailPage() {
             value={equipmentForm.status_id}
             valueLabel={item.status_name ?? undefined}
             onChange={(value) => setEquipmentForm((prev) => ({ ...prev, status_id: value }))}
-            loadOptions={async () => (await apiClient.listWorkOrderStatuses("")).items}
+            loadOptions={async (q) => (await apiClient.listWorkOrderStatuses(q)).items}
             placeholder="Select status"
             onAddNew={canEdit && !isDropdownFrozen("work_order_statuses") ? (label) => apiClient.createWorkOrderStatus(label) : undefined}
           />
@@ -1643,7 +1643,7 @@ export default function WorkOrderDetailPage() {
             value={equipmentForm.job_type_id}
             valueLabel={item.job_type_name ?? undefined}
             onChange={(value) => setEquipmentForm((prev) => ({ ...prev, job_type_id: value }))}
-            loadOptions={async () => (await apiClient.listJobTypes("")).items}
+            loadOptions={async (q) => (await apiClient.listJobTypes(q)).items}
             placeholder="Select job type"
             onAddNew={isDropdownFrozen("job_types") ? undefined : (label) => apiClient.createJobType(label)}
           />
