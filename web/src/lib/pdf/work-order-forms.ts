@@ -247,6 +247,13 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number, options?:
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.4);
   const accessoryRowY = y + 43;
+  const accessoryValues = [
+    String(item.cord_qty ?? 0),
+    String(item.remote_control_qty ?? 0),
+    String(item.album_cd_cassette_qty ?? 0),
+    String(item.dvd_vhs_qty ?? 0),
+    String(item.cable_qty ?? 0)
+  ];
   const accessoryColumns = [
     { label: "Cord", width: 22, labelOffset: 14 },
     { label: "Remote Control", width: 42, labelOffset: 15 },
@@ -255,8 +262,9 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number, options?:
     { label: "Cables", width: 36, labelOffset: 15 }
   ];
   let colX = 14;
-  accessoryColumns.forEach((col) => {
+  accessoryColumns.forEach((col, index) => {
     doc.rect(colX, accessoryRowY, 12, 5);
+    doc.text(accessoryValues[index] ?? "0", colX + 6, accessoryRowY + 3.9, { align: "center" });
     doc.text(fitText(doc, col.label, col.width - col.labelOffset), colX + col.labelOffset, accessoryRowY + 4);
     colX += col.width;
   });
