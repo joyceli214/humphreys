@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { WorkOrderListItem } from "@/lib/api/generated/types";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -488,9 +488,9 @@ export default function WorkOrdersPage() {
                 <Th>Status</Th>
                 <Th>Job Type</Th>
                 <Th>Item</Th>
+                <Th>Model #</Th>
                 <Th>Location</Th>
                 <Th>Created</Th>
-                <Th className="w-[120px]">Action</Th>
               </tr>
             </thead>
             <tbody>
@@ -504,53 +504,58 @@ export default function WorkOrdersPage() {
                   <Td colSpan={8}>No work orders found.</Td>
                 </tr>
               )}
-              {items.map((item) => (
-                <tr key={item.reference_id}>
-                  <Td>{item.reference_id}</Td>
-                  <Td>
-                    <div className="space-y-1">
-                      <p>{item.customer_name ?? "-"}</p>
-                      {canViewSensitive && item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
-                    </div>
-                  </Td>
-                  <Td>
-                    <Badge className={statusClass(item.status)}>{item.status}</Badge>
-                  </Td>
-                  <Td>{item.job_type}</Td>
-                  <Td>
-                    <div className="space-y-1">
-                      <p>{item.item_name ?? "-"}</p>
-                      {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
-                    </div>
-                  </Td>
-                  <Td>
-                    {canUpdateWorkOrders ? (
-                      <SingleSearchableDropdown
-                        className="min-w-[170px]"
-                        value={item.location_id}
-                        valueLabel={formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}
-                        disabled={updatingLocationByReferenceID[item.reference_id] === true}
-                        onChange={(nextLocationID) => {
-                          void updateLocationFromList(item, nextLocationID);
-                        }}
-                        loadOptions={async (q) => (await apiClient.listLocations(q)).items}
-                        placeholder="-"
-                        onAddLocation={isDropdownFrozen("locations") ? undefined : (payload) => apiClient.createLocation(payload)}
-                        allowClear
-                        clearLabel="None"
-                      />
-                    ) : (
-                      formatLocationValue(item.location_id, item.location_shelf, item.location_floor)
-                    )}
-                  </Td>
-                  <Td>{formatDateTime(item.created_at)}</Td>
-                  <Td>
-                    <Button variant="outline" size="sm" asChild>
-                      <Link to={`/work-orders/${item.reference_id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`}>View</Link>
-                    </Button>
-                  </Td>
-                </tr>
-              ))}
+              {items.map((item) => {
+                const detailPath = `/work-orders/${item.reference_id}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+                return (
+                  <tr
+                    key={item.reference_id}
+                    className="cursor-pointer transition-colors hover:bg-muted/50"
+                    onClick={() => navigate(detailPath)}
+                  >
+                    <Td>{item.reference_id}</Td>
+                    <Td>
+                      <div className="space-y-1">
+                        <p>{item.customer_name ?? "-"}</p>
+                        {canViewSensitive && item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
+                      </div>
+                    </Td>
+                    <Td>
+                      <Badge className={statusClass(item.status)}>{item.status}</Badge>
+                    </Td>
+                    <Td>{item.job_type}</Td>
+                    <Td>
+                      <div className="space-y-1">
+                        <p>{item.item_name ?? "-"}</p>
+                        {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
+                      </div>
+                    </Td>
+                    <Td>{item.model_number ?? "-"}</Td>
+                    <Td>
+                      <div onClick={(event) => event.stopPropagation()}>
+                        {canUpdateWorkOrders ? (
+                          <SingleSearchableDropdown
+                            className="min-w-[170px]"
+                            value={item.location_id}
+                            valueLabel={formatLocationValue(item.location_id, item.location_shelf, item.location_floor)}
+                            disabled={updatingLocationByReferenceID[item.reference_id] === true}
+                            onChange={(nextLocationID) => {
+                              void updateLocationFromList(item, nextLocationID);
+                            }}
+                            loadOptions={async (q) => (await apiClient.listLocations(q)).items}
+                            placeholder="-"
+                            onAddLocation={isDropdownFrozen("locations") ? undefined : (payload) => apiClient.createLocation(payload)}
+                            allowClear
+                            clearLabel="None"
+                          />
+                        ) : (
+                          formatLocationValue(item.location_id, item.location_shelf, item.location_floor)
+                        )}
+                      </div>
+                    </Td>
+                    <Td>{formatDateTime(item.created_at)}</Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         </div>
