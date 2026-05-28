@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Mail } from "lucide-react";
+import { ChevronDown, Copy, Mail } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -962,6 +962,20 @@ export default function WorkOrderDetailPage() {
       cleanupRemovedTempMarkdownImages(prev.work_done, normalizedValue);
       return { ...prev, work_done: normalizedValue };
     });
+  };
+
+  const copyProblemDescription = async () => {
+    const text = normalizeMarkdownInput(item.problem_description).trim();
+    if (!text) {
+      alerts.error("Nothing to copy", "Problem description is empty.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      alerts.success("Problem description copied");
+    } catch (err) {
+      alerts.error("Failed to copy", err instanceof Error ? err.message : "Clipboard is unavailable");
+    }
   };
 
   const handleRepairLogDetailsChange = (value: string) => {
@@ -2089,7 +2103,13 @@ export default function WorkOrderDetailPage() {
               <>
                 {detailRow("Technicians", item.worker_names.join(", ") || "-")}
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Problem Description</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm text-muted-foreground">Problem Description</p>
+                    <Button size="sm" variant="outline" onClick={() => void copyProblemDescription()}>
+                      <Copy className="mr-1 h-4 w-4" />
+                      Copy
+                    </Button>
+                  </div>
                   {markdownBlock(item.problem_description, openFullscreenImage)}
                 </div>
                 <div className="space-y-2">
