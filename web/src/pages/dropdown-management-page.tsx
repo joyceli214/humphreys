@@ -154,6 +154,30 @@ export default function DropdownManagementPage() {
     }
   };
 
+  const setWorkOrderStatusGroup = async (optionID: number, statusGroup: "to_do" | "in_progress" | "completed") => {
+    const token = `group:work_order_statuses:${optionID}`;
+    setBusyKey(token);
+    try {
+      await apiClient.setWorkOrderStatusGroup(optionID, statusGroup);
+      setItems((prev) =>
+        prev.map((entry) =>
+          entry.key !== "work_order_statuses"
+            ? entry
+            : {
+                ...entry,
+                options: entry.options.map((option) =>
+                  option.id === optionID ? { ...option, status_group: statusGroup } : option
+                )
+              }
+        )
+      );
+    } catch (err) {
+      alerts.error("Failed to update status group", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const addOption = async () => {
     if (!selectedEntry) return;
     setAdding(true);
@@ -174,7 +198,19 @@ export default function DropdownManagementPage() {
           prev.map((entry) =>
             entry.key !== selectedEntry.key
               ? entry
-              : { ...entry, options: [...entry.options, { id: created.id, label: created.label, is_active: true, is_pinned: false }] }
+              : {
+                  ...entry,
+                  options: [
+                    ...entry.options,
+                    {
+                      id: created.id,
+                      label: created.label,
+                      is_active: true,
+                      is_pinned: false,
+                      status_group: entry.key === "work_order_statuses" ? "to_do" : undefined
+                    }
+                  ]
+                }
           )
         );
       } else {
@@ -330,6 +366,7 @@ export default function DropdownManagementPage() {
                 <thead>
                   <tr>
                     <Th>Option</Th>
+                    {selectedEntry.key === "work_order_statuses" && <Th className="w-[180px]">Group</Th>}
                     <Th className="w-[140px]">Status</Th>
                     <Th className="w-[280px]">Actions</Th>
                   </tr>
@@ -355,6 +392,7 @@ export default function DropdownManagementPage() {
                           />
                         )}
                       </Td>
+                      {selectedEntry.key === "work_order_statuses" && <Td />}
                       <Td />
                       <Td>
                         <div className="flex gap-2">
@@ -380,12 +418,28 @@ export default function DropdownManagementPage() {
                   )}
                   {filteredOptions.length === 0 && (
                     <tr>
-                      <Td colSpan={3}>No options match your filters.</Td>
+                      <Td colSpan={selectedEntry.key === "work_order_statuses" ? 4 : 3}>No options match your filters.</Td>
                     </tr>
                   )}
                   {filteredOptions.map((option) => (
                     <tr key={option.id}>
                       <Td>{option.label}</Td>
+                      {selectedEntry.key === "work_order_statuses" && (
+                        <Td>
+                          <select
+                            className="h-8 rounded-md border border-input bg-white px-2 text-sm"
+                            value={option.status_group ?? "to_do"}
+                            disabled={busyKey === `group:work_order_statuses:${option.id}`}
+                            onChange={(e) =>
+                              void setWorkOrderStatusGroup(option.id, e.target.value as "to_do" | "in_progress" | "completed")
+                            }
+                          >
+                            <option value="to_do">To-do</option>
+                            <option value="in_progress">In progress</option>
+                            <option value="completed">Completed</option>
+                          </select>
+                        </Td>
+                      )}
                       <Td>
                         <div className="flex items-center gap-2">
                           <Badge className={option.is_active ? "bg-emerald-100 text-emerald-800" : "bg-muted text-muted-foreground"}>

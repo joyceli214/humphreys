@@ -50,11 +50,10 @@ function formatDateTime(value: string | null) {
   }).format(date);
 }
 
-function statusClass(status: string) {
-  const normalized = status.toLowerCase();
-  if (normalized === "finished") return "bg-emerald-100 text-emerald-700";
-  if (normalized === "received") return "bg-amber-100 text-amber-700";
-  if (normalized === "picked up") return "bg-sky-100 text-sky-700";
+function statusClass(statusGroup: "to_do" | "in_progress" | "completed" | null | undefined) {
+  if (statusGroup === "completed") return "bg-emerald-100 text-emerald-700";
+  if (statusGroup === "in_progress") return "bg-amber-100 text-amber-700";
+  if (statusGroup === "to_do") return "bg-sky-100 text-sky-700";
   return "bg-muted text-muted-foreground";
 }
 
@@ -520,7 +519,7 @@ export default function WorkOrdersPage() {
                       </div>
                     </Td>
                     <Td>
-                      <Badge className={statusClass(item.status)}>{item.status}</Badge>
+                      <Badge className={statusClass(item.status_group)}>{item.status}</Badge>
                     </Td>
                     <Td>{item.job_type}</Td>
                     <Td>

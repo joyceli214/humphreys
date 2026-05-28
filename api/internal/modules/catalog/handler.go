@@ -35,6 +35,10 @@ type setDropdownOptionPinnedRequest struct {
 	IsPinned *bool `json:"is_pinned"`
 }
 
+type setWorkOrderStatusGroupRequest struct {
+	StatusGroup *string `json:"status_group"`
+}
+
 func New(db *pgxpool.Pool) *Handler {
 	return &Handler{
 		service: NewService(NewRepository(db)),
@@ -142,6 +146,33 @@ func (h *Handler) SetDropdownOptionPinned(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update dropdown option pin state"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) SetWorkOrderStatusGroup(c *gin.Context) {
+	optionID, err := strconv.ParseInt(c.Param("optionId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid dropdown option id"})
+		return
+	}
+	var req setWorkOrderStatusGroupRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.StatusGroup == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	err = h.service.SetWorkOrderStatusGroup(c.Request.Context(), optionID, *req.StatusGroup)
+	if errors.Is(err, ErrInvalidDropdownOptionID) || errors.Is(err, ErrInvalidWorkOrderStatusGroup) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownOptionNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order status group"})
 		return
 	}
 	c.Status(http.StatusNoContent)

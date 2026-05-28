@@ -19,6 +19,7 @@ var ErrUnknownDropdownKey = errors.New("unknown dropdown key")
 var ErrDropdownOptionNotFound = errors.New("dropdown option not found")
 var ErrInvalidDropdownOptionID = errors.New("dropdown option id must be greater than zero")
 var ErrDropdownFrozen = errors.New("dropdown is frozen")
+var ErrInvalidWorkOrderStatusGroup = errors.New("work order status group must be one of: to_do, in_progress, completed")
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
@@ -52,6 +53,17 @@ func (s *Service) SetDropdownOptionPinned(ctx context.Context, dropdownKey strin
 		return ErrInvalidDropdownOptionID
 	}
 	return s.repo.SetDropdownOptionPinned(ctx, dropdownKey, optionID, pinned)
+}
+
+func (s *Service) SetWorkOrderStatusGroup(ctx context.Context, optionID int64, group string) error {
+	if optionID <= 0 {
+		return ErrInvalidDropdownOptionID
+	}
+	normalized := strings.TrimSpace(strings.ToLower(group))
+	if normalized != "to_do" && normalized != "in_progress" && normalized != "completed" {
+		return ErrInvalidWorkOrderStatusGroup
+	}
+	return s.repo.SetWorkOrderStatusGroup(ctx, optionID, normalized)
 }
 
 func (s *Service) ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error) {

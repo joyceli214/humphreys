@@ -7,6 +7,7 @@ type WorkOrderListItem struct {
 	CreatedAt     *time.Time `json:"created_at"`
 	UpdatedAt     *time.Time `json:"updated_at"`
 	Status        string     `json:"status"`
+	StatusGroup   *string    `json:"status_group"`
 	JobType       string     `json:"job_type"`
 	LocationID    *int64     `json:"location_id"`
 	LocationCode  *string    `json:"location_code"`
@@ -53,6 +54,7 @@ type WorkOrderDetail struct {
 	StatusID           *int64              `json:"status_id"`
 	StatusKey          *string             `json:"status_key"`
 	StatusName         *string             `json:"status_name"`
+	StatusGroup        *string             `json:"status_group"`
 	StatusUpdatedAt    *time.Time          `json:"status_updated_at"`
 	JobTypeID          *int64              `json:"job_type_id"`
 	JobTypeKey         *string             `json:"job_type_key"`

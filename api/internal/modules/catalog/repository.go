@@ -13,15 +13,17 @@ import (
 )
 
 type LookupOption struct {
-	ID    int64  `json:"id"`
-	Label string `json:"label"`
+	ID          int64   `json:"id"`
+	Label       string  `json:"label"`
+	StatusGroup *string `json:"status_group,omitempty"`
 }
 
 type ManagedLookupOption struct {
-	ID       int64  `json:"id"`
-	Label    string `json:"label"`
-	IsActive bool   `json:"is_active"`
-	IsPinned bool   `json:"is_pinned"`
+	ID          int64   `json:"id"`
+	Label       string  `json:"label"`
+	IsActive    bool    `json:"is_active"`
+	IsPinned    bool    `json:"is_pinned"`
+	StatusGroup *string `json:"status_group,omitempty"`
 }
 
 type DropdownManagementEntry struct {
@@ -119,6 +121,7 @@ type Repository interface {
 	SetDropdownFrozen(ctx context.Context, dropdownKey string, frozen bool) error
 	SetDropdownOptionActive(ctx context.Context, dropdownKey string, optionID int64, active bool) error
 	SetDropdownOptionPinned(ctx context.Context, dropdownKey string, optionID int64, pinned bool) error
+	SetWorkOrderStatusGroup(ctx context.Context, optionID int64, group string) error
 	IsDropdownFrozen(ctx context.Context, dropdownKey string) (bool, error)
 	ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error)
 	ListJobTypes(ctx context.Context, query string) ([]LookupOption, error)
@@ -188,7 +191,28 @@ func (r *storeRepository) ListPermissions(ctx context.Context) ([]domain.Permiss
 }
 
 func (r *storeRepository) ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error) {
-	return r.listLookup(ctx, `SELECT status_id, display_name FROM public.work_order_statuses WHERE is_active = true`, "display_name", query)
+	sql := `SELECT status_id::bigint, display_name, status_group FROM public.work_order_statuses WHERE is_active = true`
+	args := []any{}
+	trimmedQuery := strings.TrimSpace(query)
+	if trimmedQuery != "" {
+		sql += ` AND display_name ILIKE $1`
+		args = append(args, "%"+trimmedQuery+"%")
+	}
+	sql += ` ORDER BY is_pinned DESC, display_name`
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]LookupOption, 0)
+	for rows.Next() {
+		var option LookupOption
+		if err := rows.Scan(&option.ID, &option.Label, &option.StatusGroup); err != nil {
+			return nil, err
+		}
+		out = append(out, option)
+	}
+	return out, rows.Err()
 }
 
 func (r *storeRepository) ListJobTypes(ctx context.Context, query string) ([]LookupOption, error) {
@@ -280,8 +304,8 @@ func (r *storeRepository) CreateWorkOrderStatus(ctx context.Context, label strin
 
 	var option LookupOption
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO public.work_order_statuses(status_key, display_name, is_active)
-		VALUES($1, $2, true)
+		INSERT INTO public.work_order_statuses(status_key, display_name, status_group, is_active)
+		VALUES($1, $2, 'to_do', true)
 		RETURNING status_id::bigint, display_name
 	`, key, value).Scan(&option.ID, &option.Label)
 	return option, err
@@ -400,11 +424,15 @@ func (r *storeRepository) ListDropdownManagement(ctx context.Context) ([]Dropdow
 			return nil, err
 		}
 
+		extraCols := ""
+		if spec.Key == DropdownKeyWorkOrderStatuses {
+			extraCols = ", status_group"
+		}
 		rows, err := r.db.Query(ctx, fmt.Sprintf(`
-			SELECT %s::bigint, %s, is_active, is_pinned
+			SELECT %s::bigint, %s, is_active, is_pinned%s
 			FROM public.%s
 			ORDER BY is_pinned DESC, %s ASC, %s ASC
-		`, spec.IDColumn, spec.LabelSQL, spec.Table, spec.LabelSQL, spec.IDColumn))
+		`, spec.IDColumn, spec.LabelSQL, extraCols, spec.Table, spec.LabelSQL, spec.IDColumn))
 		if err != nil {
 			return nil, err
 		}
@@ -412,7 +440,12 @@ func (r *storeRepository) ListDropdownManagement(ctx context.Context) ([]Dropdow
 		options := make([]ManagedLookupOption, 0)
 		for rows.Next() {
 			var option ManagedLookupOption
-			if err := rows.Scan(&option.ID, &option.Label, &option.IsActive, &option.IsPinned); err != nil {
+			if spec.Key == DropdownKeyWorkOrderStatuses {
+				if err := rows.Scan(&option.ID, &option.Label, &option.IsActive, &option.IsPinned, &option.StatusGroup); err != nil {
+					rows.Close()
+					return nil, err
+				}
+			} else if err := rows.Scan(&option.ID, &option.Label, &option.IsActive, &option.IsPinned); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -483,6 +516,21 @@ func (r *storeRepository) SetDropdownOptionPinned(ctx context.Context, dropdownK
 		WHERE %s = $2
 	`, spec.Table, spec.IDColumn)
 	cmd, err := r.db.Exec(ctx, sql, pinned, optionID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrDropdownOptionNotFound
+	}
+	return nil
+}
+
+func (r *storeRepository) SetWorkOrderStatusGroup(ctx context.Context, optionID int64, group string) error {
+	cmd, err := r.db.Exec(ctx, `
+		UPDATE public.work_order_statuses
+		SET status_group = $1
+		WHERE status_id = $2
+	`, group, optionID)
 	if err != nil {
 		return err
 	}

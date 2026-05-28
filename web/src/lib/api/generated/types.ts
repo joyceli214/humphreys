@@ -48,6 +48,7 @@ export interface WorkOrderListItem {
   created_at: string | null;
   updated_at: string | null;
   status: string;
+  status_group: "to_do" | "in_progress" | "completed" | null;
   job_type: string;
   location_id: number | null;
   location_code: string | null;
@@ -94,6 +95,7 @@ export interface WorkOrderDetail {
   status_id: number | null;
   status_key: string | null;
   status_name: string | null;
+  status_group: "to_do" | "in_progress" | "completed" | null;
   status_updated_at: string | null;
   job_type_id: number | null;
   job_type_key: string | null;
@@ -158,6 +160,7 @@ export interface PartsPurchaseRequest {
 export interface LookupOption {
   id: number;
   label: string;
+  status_group?: "to_do" | "in_progress" | "completed" | null;
 }
 
 export interface ManagedLookupOption {
@@ -165,6 +168,7 @@ export interface ManagedLookupOption {
   label: string;
   is_active: boolean;
   is_pinned: boolean;
+  status_group?: "to_do" | "in_progress" | "completed" | null;
 }
 
 export interface DropdownManagementEntry {

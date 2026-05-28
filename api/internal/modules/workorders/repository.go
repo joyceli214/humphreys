@@ -192,6 +192,7 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, filt
 			wo.created_at,
 			wo.updated_at,
 			COALESCE(st.display_name, 'Unknown') AS status_name,
+			st.status_group,
 			COALESCE(jt.display_name, 'Unknown') AS job_type_name,
 			wo.location_id,
 			loc.location_code,
@@ -235,6 +236,7 @@ func (r *storeRepository) ListWorkOrders(ctx context.Context, query string, filt
 			&item.CreatedAt,
 			&item.UpdatedAt,
 			&item.Status,
+			&item.StatusGroup,
 			&item.JobType,
 			&item.LocationID,
 			&item.LocationCode,
@@ -284,6 +286,7 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 			wo.status_id,
 			st.status_key,
 			st.display_name,
+			st.status_group,
 			wo.status_updated_at,
 			wo.job_type_id,
 			jt.job_type_key,
@@ -365,6 +368,7 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 		&detail.StatusID,
 		&detail.StatusKey,
 		&detail.StatusName,
+		&detail.StatusGroup,
 		&detail.StatusUpdatedAt,
 		&detail.JobTypeID,
 		&detail.JobTypeKey,
@@ -856,6 +860,19 @@ func (r *storeRepository) UpdateEquipment(ctx context.Context, referenceID int, 
 		UPDATE public.work_orders
 		SET
 			status_id = $1,
+			status_updated_at = CASE
+				WHEN (
+					SELECT COALESCE(s.status_group, 'to_do')
+					FROM public.work_order_statuses s
+					WHERE s.status_id = status_id
+				) IS DISTINCT FROM (
+					SELECT COALESCE(s.status_group, 'to_do')
+					FROM public.work_order_statuses s
+					WHERE s.status_id = $1
+				)
+				THEN now()
+				ELSE status_updated_at
+			END,
 			job_type_id = $2,
 			location_id = $3,
 			item_id = $4,
@@ -901,7 +918,15 @@ func (r *storeRepository) UpdateStatus(ctx context.Context, referenceID int, sta
 		SET
 			status_id = $1,
 			status_updated_at = CASE
-				WHEN status_id IS DISTINCT FROM $1 THEN now()
+				WHEN (
+					SELECT COALESCE(s.status_group, 'to_do')
+					FROM public.work_order_statuses s
+					WHERE s.status_id = status_id
+				) IS DISTINCT FROM (
+					SELECT COALESCE(s.status_group, 'to_do')
+					FROM public.work_order_statuses s
+					WHERE s.status_id = $1
+				) THEN now()
 				ELSE status_updated_at
 			END,
 			updated_at = now()
@@ -1384,11 +1409,11 @@ func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQ
 		  AND COALESCE(jt.display_name, '') NOT ILIKE '%stock%'
 	`
 
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.display_name, '') ILIKE '%finished%'`, input.RangeStart).Scan(&out.ReadyTotal); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.status_group, 'to_do') = 'completed'`, input.RangeStart).Scan(&out.ReadyTotal); err != nil {
 		return domain.DashboardData{}, err
 	}
 
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.display_name, '') ILIKE '%finished%' AND wo.status_updated_at IS NOT NULL AND (now() - wo.status_updated_at) > interval '14 days'`, input.RangeStart).Scan(&out.OverdueTotal); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) `+baseFilter+` AND COALESCE(st.status_group, 'to_do') = 'completed' AND wo.status_updated_at IS NOT NULL AND (now() - wo.status_updated_at) > interval '14 days'`, input.RangeStart).Scan(&out.OverdueTotal); err != nil {
 		return domain.DashboardData{}, err
 	}
 
@@ -1400,7 +1425,7 @@ func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQ
 			COALESCE(st.display_name, 'Unknown') AS status_name,
 			COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) AS status_updated_at
 		`+baseFilter+`
-		  AND COALESCE(st.display_name, '') ILIKE '%finished%'
+		  AND COALESCE(st.status_group, 'to_do') = 'completed'
 		ORDER BY COALESCE(wo.status_updated_at, wo.updated_at, wo.created_at) DESC, wo.reference_id DESC
 		LIMIT $2 OFFSET $3
 	`, input.RangeStart, readyPageSize, readyOffset)
@@ -1427,7 +1452,7 @@ func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQ
 			FLOOR(EXTRACT(EPOCH FROM (now() - wo.status_updated_at)) / 86400)::int AS late_days,
 			wo.status_updated_at AS status_updated_at
 		`+baseFilter+`
-		  AND COALESCE(st.display_name, '') ILIKE '%finished%'
+		  AND COALESCE(st.status_group, 'to_do') = 'completed'
 		  AND wo.status_updated_at IS NOT NULL
 		  AND (now() - wo.status_updated_at) > interval '14 days'
 		ORDER BY wo.status_updated_at DESC, wo.reference_id DESC

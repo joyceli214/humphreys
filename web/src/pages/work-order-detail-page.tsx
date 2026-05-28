@@ -106,11 +106,10 @@ function formatLocationValue(locationID: number | null, locationShelf: string | 
   return `${shelf}-${floor}`;
 }
 
-function statusClass(status: string | null) {
-  const normalized = (status ?? "").toLowerCase();
-  if (normalized === "finished") return "bg-emerald-100 text-emerald-700";
-  if (normalized === "received") return "bg-amber-100 text-amber-700";
-  if (normalized === "picked up") return "bg-sky-100 text-sky-700";
+function statusClass(statusGroup: "to_do" | "in_progress" | "completed" | null | undefined) {
+  if (statusGroup === "completed") return "bg-emerald-100 text-emerald-700";
+  if (statusGroup === "in_progress") return "bg-amber-100 text-amber-700";
+  if (statusGroup === "to_do") return "bg-sky-100 text-sky-700";
   return "bg-muted text-muted-foreground";
 }
 
@@ -1089,20 +1088,21 @@ export default function WorkOrderDetailPage() {
     setSectionError("");
     try {
       const statuses = await apiClient.listWorkOrderStatuses("");
-      const finishedStatus =
+      const completedStatus =
+        statuses.items.find((status) => status.status_group === "completed") ??
         statuses.items.find((status) => status.label.trim().toLowerCase() === "finished") ??
         statuses.items.find((status) => status.label.trim().toLowerCase().includes("finish"));
-      if (!finishedStatus) {
-        alerts.error("Cannot complete job", "Finished status is not configured");
+      if (!completedStatus) {
+        alerts.error("Cannot complete job", "No status is configured in the completed group");
         return;
       }
 
       const updated = await apiClient.updateWorkOrderStatus(parsedReferenceId, {
-        status_id: finishedStatus.id
+        status_id: completedStatus.id
       });
       setItem(updated);
       setEquipmentForm((prev) => ({ ...prev, status_id: updated.status_id }));
-      alerts.success("Job marked as finished");
+      alerts.success("Job marked as completed");
     } catch (err) {
       alerts.error("Failed to complete job", err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -1789,7 +1789,7 @@ export default function WorkOrderDetailPage() {
           <p className="text-sm text-muted-foreground">Created {formatDateTime(item.created_at)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className={statusClass(item.status_name)}>{item.status_name ?? "Unknown"}</Badge>
+          <Badge className={statusClass(item.status_group)}>{item.status_name ?? "Unknown"}</Badge>
           {canAdminDeleteJob && (
             <Button
               className="h-auto whitespace-normal py-2 text-center leading-tight"
@@ -2232,8 +2232,7 @@ export default function WorkOrderDetailPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {loadingExtras && <span className="text-xs text-muted-foreground">Loading...</span>}
                   {canUpdateStatus &&
-                    item.status_key !== "finished" &&
-                    item.status_name?.trim().toLowerCase() !== "finished" && (
+                    item.status_group !== "completed" && (
                     <Button size="sm" variant="outline" onClick={completeJob} disabled={completingJob}>
                       {completingJob ? "Completing..." : "Complete Job"}
                     </Button>
