@@ -298,6 +298,12 @@ export class APIClient {
     });
   }
 
+  generateAIWorkDoneFromRepairLogs(referenceID: number) {
+    return this.request<{ work_done: string; model: string; generated_at: string }>(`/work-orders/${referenceID}/ai-work-done`, {
+      method: "POST"
+    });
+  }
+
   sendWorkOrderCustomerEmail(
     referenceID: number,
     payload: { template: EmailTemplateKey; to: string; subject: string; body: string }

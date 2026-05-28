@@ -597,6 +597,9 @@ export default function WorkOrderDetailPage() {
   const [aiSummaryLoading, setAISummaryLoading] = useState(false);
   const [aiSummaryError, setAISummaryError] = useState("");
   const [aiSummaryLoadedReference, setAISummaryLoadedReference] = useState<number | null>(null);
+  const [aiWorkDoneLoading, setAIWorkDoneLoading] = useState(false);
+  const [aiWorkDoneError, setAIWorkDoneError] = useState("");
+  const [workDoneEditorVersion, setWorkDoneEditorVersion] = useState(0);
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<LookupOption[]>([]);
   const [partsItemPresetOptions, setPartsItemPresetOptions] = useState<LookupOption[]>([]);
   const [noPaymentMethodID, setNoPaymentMethodID] = useState<number | null>(null);
@@ -723,6 +726,28 @@ export default function WorkOrderDetailPage() {
       setAISummaryLoading(false);
     }
   }, [canViewSensitive, parsedReferenceId]);
+
+  const generateWorkDoneFromRepairLogs = useCallback(async () => {
+    if (!canViewSensitive || !Number.isInteger(parsedReferenceId) || parsedReferenceId <= 0) return;
+    setAIWorkDoneLoading(true);
+    setAIWorkDoneError("");
+    try {
+      const res = await apiClient.generateAIWorkDoneFromRepairLogs(parsedReferenceId);
+      const generated = normalizeMarkdownInput(res.work_done);
+      setWorkNotesForm((prev) => {
+        cleanupRemovedTempMarkdownImages(prev.work_done, generated);
+        return { ...prev, work_done: generated };
+      });
+      setWorkDoneEditorVersion((prev) => prev + 1);
+      alerts.success("Work done generated from repair logs");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Request failed";
+      setAIWorkDoneError(message);
+      alerts.error("Failed to generate work done", message);
+    } finally {
+      setAIWorkDoneLoading(false);
+    }
+  }, [alerts, canViewSensitive, parsedReferenceId]);
 
   const loadExtras = async (reference: number) => {
     setLoadingExtras(true);
@@ -2084,9 +2109,23 @@ export default function WorkOrderDetailPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">Work Done</label>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label className="block text-sm text-muted-foreground">Work Done</label>
+                    {canViewSensitive && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void generateWorkDoneFromRepairLogs()}
+                        disabled={aiWorkDoneLoading}
+                      >
+                        {aiWorkDoneLoading ? "Generating..." : "AI from Repair Logs"}
+                      </Button>
+                    )}
+                  </div>
+                  {aiWorkDoneError && <p className="mb-2 text-xs text-destructive">{aiWorkDoneError}</p>}
                   <div className="rounded-md border border-input bg-white p-2">
                     <MDXEditor
+                      key={`work-done-editor-${workDoneEditorVersion}`}
                       markdown={workNotesForm.work_done}
                       contentEditableClassName={workNotesEditorContentClassName}
                       onChange={handleWorkDoneChange}

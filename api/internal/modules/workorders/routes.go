@@ -45,6 +45,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		h.GenerateAISummary,
 	)
 	group.POST(
+		"/:reference_id/ai-work-done",
+		middleware.RequirePermission(permRead),
+		middleware.RequirePermission(permSensitiveRead),
+		h.GenerateAIWorkDoneFromRepairLogs,
+	)
+	group.POST(
 		"/:reference_id/customer-email",
 		middleware.RequirePermission(permRead),
 		middleware.RequirePermission(permSensitiveRead),

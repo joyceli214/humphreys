@@ -142,6 +142,45 @@ func (h *Handler) GenerateAISummary(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GenerateAIWorkDoneFromRepairLogs(c *gin.Context) {
+	referenceID, err := strconv.Atoi(c.Param("reference_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
+		return
+	}
+	if strings.TrimSpace(h.openRouterAPIKey) == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "OPENROUTER_API_KEY is not configured"})
+		return
+	}
+
+	_, err = h.service.GetWorkOrderDetail(c.Request.Context(), referenceID)
+	if errors.Is(err, ErrWorkOrderNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch work order"})
+		return
+	}
+	repairLogs, err := h.service.ListRepairLogs(c.Request.Context(), referenceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch repair logs"})
+		return
+	}
+
+	workDone, err := h.generateOpenRouterSummaryOnce(c, buildWorkDoneFromRepairLogsPrompt(repairLogs))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"work_done":    workDone,
+		"model":        h.openRouterModel,
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, prompt string) (string, error) {
 	payload := openRouterChatRequest{
 		Model: h.openRouterModel,
@@ -208,6 +247,29 @@ func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, prompt string) (
 		return "", fmt.Errorf("provider returned an empty summary (finish_reason=%s)", decoded.Choices[0].FinishReason)
 	}
 	return text, nil
+}
+
+func buildWorkDoneFromRepairLogsPrompt(repairLogs []domain.RepairLog) string {
+	logSummary := summarizeRepairLogs(repairLogs)
+	return fmt.Sprintf(`Write only the customer-facing "Work Done" content based strictly on repair logs.
+Output rules:
+- Return plain paragraph text only.
+- No headings, no labels, no bullet points, no numbered lists.
+- Do not include customer info, equipment info, pricing, status, or any unrelated fields.
+- Do not invent facts.
+- Rewrite internal/technical note phrasing into clear customer-facing service language.
+- Never use phrases like "owner reported", "customer reported", "no further details", "unspecified item", or similar uncertainty/disclaimer wording.
+- Focus on what was checked, diagnosed, repaired, adjusted, cleaned, replaced, tested, or confirmed.
+- Use passive voice throughout.
+- Do not mention any person, technician, owner, customer, or staff member.
+- Describe outcomes as completed actions (for example: "was inspected", "was repaired", "was tested", "was confirmed").
+- Start immediately with the completed work. No introductory lead-in phrases.
+- Never start with or include phrases like "The repair logs indicate that", "It was noted that", "It was reported that", or similar preambles.
+- If there are no repair logs, return exactly: No repair work has been logged yet.
+
+Repair logs summary:
+%s
+`, logSummary)
 }
 
 func extractMessageText(content any) string {
