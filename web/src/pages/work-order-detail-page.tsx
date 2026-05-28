@@ -574,6 +574,10 @@ export default function WorkOrderDetailPage() {
   const [customerEmailDraft, setCustomerEmailDraft] = useState<CustomerEmailDraft | null>(null);
   const [customerEmailDialogOpen, setCustomerEmailDialogOpen] = useState(false);
   const [completingJob, setCompletingJob] = useState(false);
+  const [pickupStatusDialogOpen, setPickupStatusDialogOpen] = useState(false);
+  const [pickupOtherStatusID, setPickupOtherStatusID] = useState<number | null>(null);
+  const [pickupOtherStatusLabel, setPickupOtherStatusLabel] = useState<string>("");
+  const [creatingPickupForm, setCreatingPickupForm] = useState(false);
   const [repairLogModalOpen, setRepairLogModalOpen] = useState(false);
   const [partsRequestModalOpen, setPartsRequestModalOpen] = useState(false);
   const [repairLogDeleteTarget, setRepairLogDeleteTarget] = useState<RepairLog | null>(null);
@@ -1108,6 +1112,80 @@ export default function WorkOrderDetailPage() {
     } finally {
       setCompletingJob(false);
     }
+  };
+
+  const findPickedUpStatus = async () => {
+    const statuses = await apiClient.listWorkOrderStatuses("");
+    return (
+      statuses.items.find((status) => {
+        const normalized = status.label.trim().toLowerCase();
+        return normalized === "picked up" || normalized.includes("picked up");
+      }) ??
+      statuses.items.find((status) => status.status_group === "completed") ??
+      statuses.items.find((status) => status.label.trim().toLowerCase() === "finished") ??
+      statuses.items.find((status) => status.label.trim().toLowerCase().includes("finish")) ??
+      null
+    );
+  };
+
+  const updateStatusAndSync = async (statusID: number) => {
+    const updated = await apiClient.updateWorkOrderStatus(parsedReferenceId, {
+      status_id: statusID
+    });
+    setItem(updated);
+    setEquipmentForm((prev) => ({ ...prev, status_id: updated.status_id }));
+    return updated;
+  };
+
+  const openCreatePickupFlow = async () => {
+    if (!canUpdateStatus) {
+      generatePickupFormPdf(item);
+      return;
+    }
+    setPickupOtherStatusID(null);
+    setPickupOtherStatusLabel("");
+    try {
+      const statuses = await apiClient.listWorkOrderStatuses("");
+      const pickedUpStatus = statuses.items.find((status) => {
+        const normalized = status.label.trim().toLowerCase();
+        return normalized === "picked up" || normalized.includes("picked up");
+      });
+      if (pickedUpStatus) {
+        setPickupOtherStatusID(pickedUpStatus.id);
+        setPickupOtherStatusLabel(pickedUpStatus.label);
+      }
+    } catch {
+      // Best effort only; user can still choose manually.
+    }
+    setPickupStatusDialogOpen(true);
+  };
+
+  const createPickupFormWithStatusUpdate = async () => {
+    setCreatingPickupForm(true);
+    try {
+      let nextStatusID = pickupOtherStatusID;
+      if (!nextStatusID) {
+        const pickedUpStatus = await findPickedUpStatus();
+        nextStatusID = pickedUpStatus?.id ?? null;
+      }
+      if (!nextStatusID) {
+        alerts.error("Status required", "Choose a status first.");
+        return;
+      }
+      const updated = await updateStatusAndSync(nextStatusID);
+      generatePickupFormPdf(updated);
+      alerts.success("Status updated and pickup form created");
+      setPickupStatusDialogOpen(false);
+    } catch (err) {
+      alerts.error("Failed to create pickup form", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setCreatingPickupForm(false);
+    }
+  };
+
+  const createPickupFormWithoutStatusUpdate = () => {
+    generatePickupFormPdf(item);
+    setPickupStatusDialogOpen(false);
   };
 
   const loadEmailTemplates = async () => {
@@ -1825,7 +1903,7 @@ export default function WorkOrderDetailPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void openCreatePickupFlow()}>Create Pick Up Form</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -1896,6 +1974,44 @@ export default function WorkOrderDetailPage() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {canViewSensitive && canUpdateStatus && (
+        <Dialog
+          open={pickupStatusDialogOpen}
+          onOpenChange={(open) => {
+            if (creatingPickupForm) return;
+            setPickupStatusDialogOpen(open);
+          }}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogTitle className="text-lg font-semibold">Mark Job Status?</DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              Would you like to update the job status before creating the pickup form?
+            </DialogDescription>
+            <div className="mt-3 space-y-3">
+              <SingleSearchableDropdown
+                label="Status"
+                value={pickupOtherStatusID}
+                valueLabel={pickupOtherStatusLabel || undefined}
+                onChange={(value) => {
+                  setPickupOtherStatusID(value);
+                  setPickupOtherStatusLabel("");
+                }}
+                loadOptions={async (q) => (await apiClient.listWorkOrderStatuses(q)).items}
+                placeholder="Choose status"
+              />
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" onClick={createPickupFormWithoutStatusUpdate} disabled={creatingPickupForm}>
+                  Create Without Updating
+                </Button>
+                <Button onClick={() => void createPickupFormWithStatusUpdate()} disabled={creatingPickupForm}>
+                  Update Status & Create
+                </Button>
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
       )}
