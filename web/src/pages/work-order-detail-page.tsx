@@ -1815,8 +1815,20 @@ export default function WorkOrderDetailPage() {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</Button>}
-          {canViewSensitive && <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline" onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</Button>}
+          {canViewSensitive && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline">
+                  Create PDF
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => generateDropOffFormPdf(item)}>Create Drop Off Form</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => generatePickupFormPdf(item)}>Create Pick Up Form</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Button variant="outline" asChild>
             <Link to={backToWorkOrders}>Back</Link>
           </Button>
