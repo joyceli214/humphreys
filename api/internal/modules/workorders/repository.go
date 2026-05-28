@@ -857,14 +857,14 @@ func (r *storeRepository) UpdateEquipment(ctx context.Context, referenceID int, 
 	}
 
 	cmd, err := r.db.Exec(ctx, `
-		UPDATE public.work_orders
+		UPDATE public.work_orders wo
 		SET
 			status_id = $1,
 			status_updated_at = CASE
 				WHEN (
 					SELECT COALESCE(s.status_group, 'to_do')
 					FROM public.work_order_statuses s
-					WHERE s.status_id = status_id
+					WHERE s.status_id = wo.status_id
 				) IS DISTINCT FROM (
 					SELECT COALESCE(s.status_group, 'to_do')
 					FROM public.work_order_statuses s
@@ -914,14 +914,14 @@ func (r *storeRepository) UpdateEquipment(ctx context.Context, referenceID int, 
 
 func (r *storeRepository) UpdateStatus(ctx context.Context, referenceID int, statusID *int64) error {
 	cmd, err := r.db.Exec(ctx, `
-		UPDATE public.work_orders
+		UPDATE public.work_orders wo
 		SET
 			status_id = $1,
 			status_updated_at = CASE
 				WHEN (
 					SELECT COALESCE(s.status_group, 'to_do')
 					FROM public.work_order_statuses s
-					WHERE s.status_id = status_id
+					WHERE s.status_id = wo.status_id
 				) IS DISTINCT FROM (
 					SELECT COALESCE(s.status_group, 'to_do')
 					FROM public.work_order_statuses s
