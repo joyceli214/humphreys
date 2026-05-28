@@ -164,6 +164,7 @@ export interface ManagedLookupOption {
   id: number;
   label: string;
   is_active: boolean;
+  is_pinned: boolean;
 }
 
 export interface DropdownManagementEntry {

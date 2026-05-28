@@ -31,6 +31,10 @@ type setDropdownOptionActiveRequest struct {
 	IsActive *bool `json:"is_active"`
 }
 
+type setDropdownOptionPinnedRequest struct {
+	IsPinned *bool `json:"is_pinned"`
+}
+
 func New(db *pgxpool.Pool) *Handler {
 	return &Handler{
 		service: NewService(NewRepository(db)),
@@ -109,6 +113,35 @@ func (h *Handler) SetDropdownOptionActive(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update dropdown option status"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) SetDropdownOptionPinned(c *gin.Context) {
+	optionID, err := strconv.ParseInt(c.Param("optionId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid dropdown option id"})
+		return
+	}
+
+	var req setDropdownOptionPinnedRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.IsPinned == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	err = h.service.SetDropdownOptionPinned(c.Request.Context(), c.Param("key"), optionID, *req.IsPinned)
+	if errors.Is(err, ErrUnknownDropdownKey) || errors.Is(err, ErrInvalidDropdownOptionID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownOptionNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update dropdown option pin state"})
 		return
 	}
 	c.Status(http.StatusNoContent)

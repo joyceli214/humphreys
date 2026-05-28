@@ -569,6 +569,18 @@ export class APIClient {
     });
   }
 
+  setDropdownOptionPinned(key: string, optionID: number, isPinned: boolean) {
+    const path = this.catalogPathByDropdownKey(key);
+    return this.request<void>(`/catalog/dropdown-management/${encodeURIComponent(key)}/options/${optionID}/pinned`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_pinned: isPinned })
+    }).then(() => {
+      if (path) {
+        this.invalidateLookupCache(path);
+      }
+    });
+  }
+
   createWorkOrderStatus(label: string) {
     return this.createLookup("/catalog/work-order-statuses", label);
   }

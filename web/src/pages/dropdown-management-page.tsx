@@ -63,12 +63,17 @@ export default function DropdownManagementPage() {
   const filteredOptions = useMemo(() => {
     if (!selectedEntry) return [];
     const normalizedSearch = search.trim().toLowerCase();
-    return selectedEntry.options.filter((option) => {
-      if (statusFilter === "active" && !option.is_active) return false;
-      if (statusFilter === "inactive" && option.is_active) return false;
-      if (normalizedSearch && !option.label.toLowerCase().includes(normalizedSearch)) return false;
-      return true;
-    });
+    return selectedEntry.options
+      .filter((option) => {
+        if (statusFilter === "active" && !option.is_active) return false;
+        if (statusFilter === "inactive" && option.is_active) return false;
+        if (normalizedSearch && !option.label.toLowerCase().includes(normalizedSearch)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+        return a.label.localeCompare(b.label);
+      });
   }, [search, selectedEntry, statusFilter]);
 
   useEffect(() => {
@@ -125,6 +130,30 @@ export default function DropdownManagementPage() {
     }
   };
 
+  const setOptionPinned = async (key: string, optionID: number, isPinned: boolean) => {
+    const token = `pin:${key}:${optionID}`;
+    setBusyKey(token);
+    try {
+      await apiClient.setDropdownOptionPinned(key, optionID, isPinned);
+      setItems((prev) =>
+        prev.map((entry) =>
+          entry.key !== key
+            ? entry
+            : {
+                ...entry,
+                options: entry.options.map((option) =>
+                  option.id === optionID ? { ...option, is_pinned: isPinned } : option
+                )
+              }
+        )
+      );
+    } catch (err) {
+      alerts.error("Failed to update option pin state", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const addOption = async () => {
     if (!selectedEntry) return;
     setAdding(true);
@@ -145,7 +174,7 @@ export default function DropdownManagementPage() {
           prev.map((entry) =>
             entry.key !== selectedEntry.key
               ? entry
-              : { ...entry, options: [...entry.options, { id: created.id, label: created.label, is_active: true }] }
+              : { ...entry, options: [...entry.options, { id: created.id, label: created.label, is_active: true, is_pinned: false }] }
           )
         );
       } else {
@@ -178,7 +207,7 @@ export default function DropdownManagementPage() {
           prev.map((entry) =>
             entry.key !== selectedEntry.key
               ? entry
-              : { ...entry, options: [...entry.options, { id: created.id, label: created.label, is_active: true }] }
+              : { ...entry, options: [...entry.options, { id: created.id, label: created.label, is_active: true, is_pinned: false }] }
           )
         );
       }
@@ -302,7 +331,7 @@ export default function DropdownManagementPage() {
                   <tr>
                     <Th>Option</Th>
                     <Th className="w-[140px]">Status</Th>
-                    <Th className="w-[220px]">Action</Th>
+                    <Th className="w-[280px]">Actions</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -358,19 +387,32 @@ export default function DropdownManagementPage() {
                     <tr key={option.id}>
                       <Td>{option.label}</Td>
                       <Td>
-                        <Badge className={option.is_active ? "bg-emerald-100 text-emerald-800" : "bg-muted text-muted-foreground"}>
-                          {option.is_active ? "Active" : "Inactive"}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge className={option.is_active ? "bg-emerald-100 text-emerald-800" : "bg-muted text-muted-foreground"}>
+                            {option.is_active ? "Active" : "Inactive"}
+                          </Badge>
+                          {option.is_pinned && <Badge className="bg-sky-100 text-sky-800">Pinned</Badge>}
+                        </div>
                       </Td>
                       <Td>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busyKey === `option:${selectedEntry.key}:${option.id}`}
-                          onClick={() => void setOptionActive(selectedEntry.key, option.id, !option.is_active)}
-                        >
-                          {option.is_active ? "Deactivate" : "Activate"}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busyKey === `option:${selectedEntry.key}:${option.id}`}
+                            onClick={() => void setOptionActive(selectedEntry.key, option.id, !option.is_active)}
+                          >
+                            {option.is_active ? "Deactivate" : "Activate"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busyKey === `pin:${selectedEntry.key}:${option.id}`}
+                            onClick={() => void setOptionPinned(selectedEntry.key, option.id, !option.is_pinned)}
+                          >
+                            {option.is_pinned ? "Unpin" : "Pin to top"}
+                          </Button>
+                        </div>
                       </Td>
                     </tr>
                   ))}

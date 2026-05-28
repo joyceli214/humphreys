@@ -21,6 +21,7 @@ type ManagedLookupOption struct {
 	ID       int64  `json:"id"`
 	Label    string `json:"label"`
 	IsActive bool   `json:"is_active"`
+	IsPinned bool   `json:"is_pinned"`
 }
 
 type DropdownManagementEntry struct {
@@ -117,6 +118,7 @@ type Repository interface {
 	ListDropdownManagement(ctx context.Context) ([]DropdownManagementEntry, error)
 	SetDropdownFrozen(ctx context.Context, dropdownKey string, frozen bool) error
 	SetDropdownOptionActive(ctx context.Context, dropdownKey string, optionID int64, active bool) error
+	SetDropdownOptionPinned(ctx context.Context, dropdownKey string, optionID int64, pinned bool) error
 	IsDropdownFrozen(ctx context.Context, dropdownKey string) (bool, error)
 	ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error)
 	ListJobTypes(ctx context.Context, query string) ([]LookupOption, error)
@@ -240,7 +242,7 @@ func (r *storeRepository) ListLocations(ctx context.Context, query string) ([]Lo
 			)
 		`
 	}
-	sql += ` ORDER BY floor ASC, shelf ASC, location_id ASC`
+	sql += ` ORDER BY is_pinned DESC, floor ASC, shelf ASC, location_id ASC`
 
 	rows, err := r.db.Query(ctx, sql, args...)
 	if err != nil {
@@ -399,9 +401,9 @@ func (r *storeRepository) ListDropdownManagement(ctx context.Context) ([]Dropdow
 		}
 
 		rows, err := r.db.Query(ctx, fmt.Sprintf(`
-			SELECT %s::bigint, %s, is_active
+			SELECT %s::bigint, %s, is_active, is_pinned
 			FROM public.%s
-			ORDER BY %s ASC, %s ASC
+			ORDER BY is_pinned DESC, %s ASC, %s ASC
 		`, spec.IDColumn, spec.LabelSQL, spec.Table, spec.LabelSQL, spec.IDColumn))
 		if err != nil {
 			return nil, err
@@ -410,7 +412,7 @@ func (r *storeRepository) ListDropdownManagement(ctx context.Context) ([]Dropdow
 		options := make([]ManagedLookupOption, 0)
 		for rows.Next() {
 			var option ManagedLookupOption
-			if err := rows.Scan(&option.ID, &option.Label, &option.IsActive); err != nil {
+			if err := rows.Scan(&option.ID, &option.Label, &option.IsActive, &option.IsPinned); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -460,6 +462,27 @@ func (r *storeRepository) SetDropdownOptionActive(ctx context.Context, dropdownK
 		WHERE %s = $2
 	`, spec.Table, spec.IDColumn)
 	cmd, err := r.db.Exec(ctx, sql, active, optionID)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrDropdownOptionNotFound
+	}
+	return nil
+}
+
+func (r *storeRepository) SetDropdownOptionPinned(ctx context.Context, dropdownKey string, optionID int64, pinned bool) error {
+	spec, ok := getDropdownSpec(dropdownKey)
+	if !ok {
+		return ErrUnknownDropdownKey
+	}
+
+	sql := fmt.Sprintf(`
+		UPDATE public.%s
+		SET is_pinned = $1
+		WHERE %s = $2
+	`, spec.Table, spec.IDColumn)
+	cmd, err := r.db.Exec(ctx, sql, pinned, optionID)
 	if err != nil {
 		return err
 	}
@@ -551,15 +574,15 @@ func parseLocationSearch(raw string) (string, int32, bool) {
 }
 
 func (r *storeRepository) listLookup(ctx context.Context, baseSQL, labelCol, query string) ([]LookupOption, error) {
-	sql := fmt.Sprintf("%s ORDER BY %s", baseSQL, labelCol)
+	sql := fmt.Sprintf("%s ORDER BY is_pinned DESC, %s", baseSQL, labelCol)
 	args := []any{}
 	trimmedQuery := strings.TrimSpace(query)
 	if trimmedQuery != "" {
 		normalizedBase := strings.Join(strings.Fields(strings.ToLower(baseSQL)), " ")
 		if strings.Contains(normalizedBase, " where ") {
-			sql = fmt.Sprintf("%s AND %s ILIKE $1 ORDER BY %s", baseSQL, labelCol, labelCol)
+			sql = fmt.Sprintf("%s AND %s ILIKE $1 ORDER BY is_pinned DESC, %s", baseSQL, labelCol, labelCol)
 		} else {
-			sql = fmt.Sprintf("%s WHERE %s ILIKE $1 ORDER BY %s", baseSQL, labelCol, labelCol)
+			sql = fmt.Sprintf("%s WHERE %s ILIKE $1 ORDER BY is_pinned DESC, %s", baseSQL, labelCol, labelCol)
 		}
 		args = append(args, "%"+trimmedQuery+"%")
 	}

@@ -47,6 +47,13 @@ func (s *Service) SetDropdownOptionActive(ctx context.Context, dropdownKey strin
 	return s.repo.SetDropdownOptionActive(ctx, dropdownKey, optionID, active)
 }
 
+func (s *Service) SetDropdownOptionPinned(ctx context.Context, dropdownKey string, optionID int64, pinned bool) error {
+	if optionID <= 0 {
+		return ErrInvalidDropdownOptionID
+	}
+	return s.repo.SetDropdownOptionPinned(ctx, dropdownKey, optionID, pinned)
+}
+
 func (s *Service) ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error) {
 	return s.repo.ListWorkOrderStatuses(ctx, query)
 }
