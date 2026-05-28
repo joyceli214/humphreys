@@ -367,15 +367,10 @@ func (s *Service) UpdateStatus(ctx context.Context, referenceID int, input Statu
 func (s *Service) UpdateWorkNotes(ctx context.Context, referenceID int, input WorkNotesUpdateInput) (domain.WorkOrderDetail, error) {
 	// Keep payment methods ordered as [deposit, final], capped at 2 entries.
 	normalizedPaymentMethodIDs := make([]int32, 0, 2)
-	seenPaymentMethodID := make(map[int32]struct{})
 	for _, id := range input.PaymentMethodIDs {
 		if id <= 0 {
 			continue
 		}
-		if _, exists := seenPaymentMethodID[id]; exists {
-			continue
-		}
-		seenPaymentMethodID[id] = struct{}{}
 		normalizedPaymentMethodIDs = append(normalizedPaymentMethodIDs, id)
 		if len(normalizedPaymentMethodIDs) == 2 {
 			break
