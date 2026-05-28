@@ -587,7 +587,7 @@ export class APIClient {
     });
   }
 
-  setWorkOrderStatusGroup(optionID: number, statusGroup: "to_do" | "in_progress" | "completed") {
+  setWorkOrderStatusGroup(optionID: number, statusGroup: "to_do" | "in_progress" | "staged" | "completed") {
     return this.request<void>(`/catalog/dropdown-management/work_order_statuses/options/${optionID}/group`, {
       method: "PATCH",
       body: JSON.stringify({ status_group: statusGroup })

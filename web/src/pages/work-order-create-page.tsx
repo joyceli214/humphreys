@@ -76,8 +76,9 @@ function formatDateTime(value: string | null) {
   }).format(date);
 }
 
-function statusClass(statusGroup: "to_do" | "in_progress" | "completed" | null | undefined) {
+function statusClass(statusGroup: "to_do" | "in_progress" | "staged" | "completed" | null | undefined) {
   if (statusGroup === "completed") return "bg-emerald-100 text-emerald-700";
+  if (statusGroup === "staged") return "bg-indigo-100 text-indigo-700";
   if (statusGroup === "in_progress") return "bg-amber-100 text-amber-700";
   if (statusGroup === "to_do") return "bg-sky-100 text-sky-700";
   return "bg-muted text-muted-foreground";

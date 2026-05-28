@@ -154,7 +154,7 @@ export default function DropdownManagementPage() {
     }
   };
 
-  const setWorkOrderStatusGroup = async (optionID: number, statusGroup: "to_do" | "in_progress" | "completed") => {
+  const setWorkOrderStatusGroup = async (optionID: number, statusGroup: "to_do" | "in_progress" | "staged" | "completed") => {
     const token = `group:work_order_statuses:${optionID}`;
     setBusyKey(token);
     try {
@@ -431,11 +431,12 @@ export default function DropdownManagementPage() {
                             value={option.status_group ?? "to_do"}
                             disabled={busyKey === `group:work_order_statuses:${option.id}`}
                             onChange={(e) =>
-                              void setWorkOrderStatusGroup(option.id, e.target.value as "to_do" | "in_progress" | "completed")
+                              void setWorkOrderStatusGroup(option.id, e.target.value as "to_do" | "in_progress" | "staged" | "completed")
                             }
                           >
                             <option value="to_do">To-do</option>
                             <option value="in_progress">In progress</option>
+                            <option value="staged">Staged</option>
                             <option value="completed">Completed</option>
                           </select>
                         </Td>

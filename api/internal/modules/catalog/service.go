@@ -19,7 +19,7 @@ var ErrUnknownDropdownKey = errors.New("unknown dropdown key")
 var ErrDropdownOptionNotFound = errors.New("dropdown option not found")
 var ErrInvalidDropdownOptionID = errors.New("dropdown option id must be greater than zero")
 var ErrDropdownFrozen = errors.New("dropdown is frozen")
-var ErrInvalidWorkOrderStatusGroup = errors.New("work order status group must be one of: to_do, in_progress, completed")
+var ErrInvalidWorkOrderStatusGroup = errors.New("work order status group must be one of: to_do, in_progress, staged, completed")
 
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
@@ -60,7 +60,7 @@ func (s *Service) SetWorkOrderStatusGroup(ctx context.Context, optionID int64, g
 		return ErrInvalidDropdownOptionID
 	}
 	normalized := strings.TrimSpace(strings.ToLower(group))
-	if normalized != "to_do" && normalized != "in_progress" && normalized != "completed" {
+	if normalized != "to_do" && normalized != "in_progress" && normalized != "staged" && normalized != "completed" {
 		return ErrInvalidWorkOrderStatusGroup
 	}
 	return s.repo.SetWorkOrderStatusGroup(ctx, optionID, normalized)
