@@ -214,7 +214,7 @@ function drawHeader(doc: jsPDF, title: string) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   doc.text("16610 Bayview Ave., Unit #7, Newmarket ON   Ph: (416) 923-3777", 14, 19);
-  doc.text("humphreys.repair@rogers.com/www.humphreysrepaircentre.com", 14, 23.5);
+  doc.text("info@humphreysrepaircentre.com/www.humphreysrepaircentre.com", 14, 23.5);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
