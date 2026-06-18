@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type ComponentProps } from "react";
-import { MDXEditor } from "@mdxeditor/editor";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { MDXEditor, type MDXEditorMethods } from "@mdxeditor/editor";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -27,6 +27,8 @@ function prependMarkdown(generated: string, existing: string) {
 }
 
 export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditableClassName, plugins, className }: AIMarkdownEditorProps) {
+  const editorRef = useRef<MDXEditorMethods | null>(null);
+  const currentMarkdownRef = useRef(markdown);
   const [editorVersion, setEditorVersion] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [preview, setPreview] = useState("");
@@ -36,6 +38,17 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
 
   const canGenerate = Boolean(onGenerate);
   const trimmedPrompt = prompt.trim();
+
+  useEffect(() => {
+    if (markdown === currentMarkdownRef.current) return;
+    currentMarkdownRef.current = markdown;
+    editorRef.current?.setMarkdown(markdown);
+  }, [markdown]);
+
+  const handleChange = (value: string) => {
+    currentMarkdownRef.current = value;
+    onChange(value);
+  };
 
   const generate = async (previousOutput = "") => {
     if (!onGenerate || !trimmedPrompt) return;
@@ -55,7 +68,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
 
   const accept = () => {
     if (!preview.trim()) return;
-    onChange(prependMarkdown(preview, markdown));
+    handleChange(prependMarkdown(preview, markdown));
     setEditorVersion((value) => value + 1);
     setOpen(false);
     setPrompt("");
@@ -86,10 +99,11 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
           </Button>
         )}
         <MDXEditor
+          ref={editorRef}
           key={`markdown-editor-${editorVersion}`}
           markdown={markdown}
           contentEditableClassName={contentEditableClassName}
-          onChange={onChange}
+          onChange={handleChange}
           plugins={plugins}
         />
       </div>

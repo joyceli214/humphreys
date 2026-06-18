@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"humphreys/api/internal/domain"
+	"humphreys/api/internal/mailer"
 	"humphreys/api/internal/middleware"
 	"humphreys/api/internal/modules/aisettings"
 	"humphreys/api/internal/modules/uploads"
@@ -23,7 +24,7 @@ type Handler struct {
 	service        *Service
 	uploads        *uploads.Handler
 	aiSettings     *aisettings.Service
-	emailClient    *graphEmailClient
+	emailClient    *mailer.GraphClient
 	httpClient     *http.Client
 	aiSummaryCache *ttlcache.Cache[string, aiSummaryCacheItem]
 }
@@ -187,7 +188,7 @@ func New(db *pgxpool.Pool) *Handler {
 
 	return &Handler{
 		service:        NewService(NewRepository(db)),
-		emailClient:    newGraphEmailClientFromEnv(httpClient),
+		emailClient:    mailer.NewGraphClientFromEnv(httpClient),
 		aiSettings:     aisettings.NewService(aisettings.NewRepository(db)),
 		httpClient:     httpClient,
 		aiSummaryCache: aiCache,
@@ -201,7 +202,7 @@ func NewWithService(service *Service) *Handler {
 
 	return &Handler{
 		service:        service,
-		emailClient:    newGraphEmailClientFromEnv(httpClient),
+		emailClient:    mailer.NewGraphClientFromEnv(httpClient),
 		httpClient:     httpClient,
 		aiSummaryCache: aiCache,
 	}
@@ -437,7 +438,7 @@ func (h *Handler) SendCustomerEmail(c *gin.Context) {
 	}
 
 	if err := h.emailClient.Send(c.Request.Context(), msg); err != nil {
-		if errors.Is(err, ErrEmailNotConfigured) {
+		if errors.Is(err, mailer.ErrNotConfigured) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "email sending is not configured"})
 			return
 		}

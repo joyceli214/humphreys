@@ -574,6 +574,13 @@ export class APIClient {
     });
   }
 
+  sendTestEmailTemplate(payload: { to: string; subject_template: string; body_template: string }) {
+    return this.request<{ sent: boolean }>("/email-templates/test", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   getAISettings() {
     return this.request<AISettings>("/ai-settings");
   }

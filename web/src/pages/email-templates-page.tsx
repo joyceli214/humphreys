@@ -6,19 +6,63 @@ import type { EmailTemplate, EmailTemplateKey } from "@/lib/api/generated/types"
 import { DEFAULT_EMAIL_TEMPLATES, EMAIL_TEMPLATE_VARIABLES, type EmailTemplateVariable } from "@/lib/email-templates";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { useAuth } from "@/lib/auth/auth-context";
+import { AIMarkdownEditor } from "@/components/ai-markdown-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  BoldItalicUnderlineToggles,
+  CreateLink,
+  ListsToggle,
+  UndoRedo,
+  linkDialogPlugin,
+  linkPlugin,
+  listsPlugin,
+  markdownShortcutPlugin,
+  toolbarPlugin
+} from "@mdxeditor/editor";
+import "@mdxeditor/editor/style.css";
+
+const emailBodyEditorPlugins = [
+  listsPlugin(),
+  linkPlugin(),
+  linkDialogPlugin(),
+  markdownShortcutPlugin(),
+  toolbarPlugin({
+    toolbarContents: () => (
+      <>
+        <UndoRedo />
+        <BoldItalicUnderlineToggles />
+        <ListsToggle />
+        <CreateLink />
+      </>
+    )
+  })
+];
+
+const emailBodyEditorContentClassName =
+  "min-h-[420px] px-3 py-2 text-sm leading-6 " +
+  "[&_p]:mb-2 [&_p:last-child]:mb-0 " +
+  "[&_strong]:font-semibold [&_em]:italic [&_u]:underline " +
+  "[&_a]:text-primary [&_a]:underline " +
+  "[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-6 [&_ol]:pl-6 " +
+  "[&_li]:my-1";
 
 export default function EmailTemplatesPage() {
   const alerts = useAlerts();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canManage = hasPermission("work_orders:update");
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [selectedKey, setSelectedKey] = useState<EmailTemplateKey>("job_started");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [testRecipient, setTestRecipient] = useState("");
+  const testRecipientPrefilled = useRef(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testDialogOpen, setTestDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!canManage) {
@@ -38,6 +82,13 @@ export default function EmailTemplatesPage() {
       }
     })();
   }, [alerts, canManage]);
+
+  useEffect(() => {
+    if (!testRecipientPrefilled.current && user?.email) {
+      testRecipientPrefilled.current = true;
+      setTestRecipient(user.email);
+    }
+  }, [user?.email]);
 
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.key === selectedKey) ?? null,
@@ -87,6 +138,39 @@ export default function EmailTemplatesPage() {
     setBody(fallback.body_template);
   };
 
+  const sendTestEmail = async () => {
+    const to = testRecipient.trim();
+    const nextSubject = subject.trim();
+    const nextBody = body.trim();
+    if (!to) {
+      alerts.error("Recipient required", "Enter an email address for the test email.");
+      return;
+    }
+    if (!nextSubject) {
+      alerts.error("Subject required", "Enter a subject template.");
+      return;
+    }
+    if (!nextBody) {
+      alerts.error("Message required", "Enter an email body template.");
+      return;
+    }
+
+    setSendingTest(true);
+    try {
+      await apiClient.sendTestEmailTemplate({
+        to,
+        subject_template: nextSubject,
+        body_template: nextBody
+      });
+      alerts.success("Test email sent", `Sent to ${to}`);
+      setTestDialogOpen(false);
+    } catch (err) {
+      alerts.error("Failed to send test email", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setSendingTest(false);
+    }
+  };
+
   if (!canManage) {
     return <p className="text-sm text-muted-foreground">You do not have permission to manage email templates.</p>;
   }
@@ -125,9 +209,12 @@ export default function EmailTemplatesPage() {
             <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h2 className="font-semibold">{selectedTemplate?.label ?? DEFAULT_EMAIL_TEMPLATES[selectedKey].label}</h2>
-                <p className="text-sm text-muted-foreground">Type @ to search and insert work order fields.</p>
+                <p className="text-sm text-muted-foreground">Use the field buttons to insert work order values.</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setTestDialogOpen(true)} disabled={saving}>
+                  Send Test Email
+                </Button>
                 <Button type="button" variant="outline" size="sm" onClick={resetToDefault} disabled={saving}>
                   Reset Default
                 </Button>
@@ -149,20 +236,75 @@ export default function EmailTemplatesPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm text-muted-foreground">Message</label>
-                <TemplateFieldEditor
-                  value={body}
+                <AIMarkdownEditor
+                  key={selectedKey}
+                  markdown={body}
                   onChange={setBody}
-                  variables={EMAIL_TEMPLATE_VARIABLES}
-                  minHeightClassName="min-h-[420px]"
+                  plugins={emailBodyEditorPlugins}
+                  contentEditableClassName={emailBodyEditorContentClassName}
                 />
+                <TemplateVariablePicker variables={EMAIL_TEMPLATE_VARIABLES} onSelect={(variable) => setBody((value) => appendTemplateVariable(value, variable))} />
               </div>
             </div>
           </article>
 
         </div>
       )}
+
+      <Dialog open={testDialogOpen} onOpenChange={(open) => !sendingTest && setTestDialogOpen(open)}>
+        <DialogContent>
+          <DialogTitle className="text-lg font-semibold">Send Test Email</DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            Send the current subject and message using sample work order values.
+          </DialogDescription>
+          <form
+            className="mt-4 space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void sendTestEmail();
+            }}
+          >
+            <div>
+              <label className="mb-1 block text-sm text-muted-foreground">To</label>
+              <Input
+                type="email"
+                value={testRecipient}
+                onChange={(event) => setTestRecipient(event.target.value)}
+                placeholder="recipient@example.com"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setTestDialogOpen(false)} disabled={sendingTest}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={sendingTest}>
+                {sendingTest ? "Sending..." : "Send Test Email"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </section>
   );
+}
+
+function TemplateVariablePicker({ variables, onSelect }: { variables: EmailTemplateVariable[]; onSelect: (variable: EmailTemplateVariable) => void }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {variables.map((variable) => (
+        <Button key={variable.token} type="button" variant="outline" size="sm" onClick={() => onSelect(variable)}>
+          {variable.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function appendTemplateVariable(value: string, variable: EmailTemplateVariable) {
+  const trimmedEnd = value.trimEnd();
+  const prefix = trimmedEnd ? `${trimmedEnd} ` : "";
+  return `${prefix}${variable.token}`;
 }
 
 type TemplateFieldEditorProps = {
@@ -341,7 +483,7 @@ function TemplateFieldEditor({
 function renderTemplateEditorValue(editor: HTMLDivElement, value: string, variables: EmailTemplateVariable[]) {
   editor.replaceChildren();
   const variableByKey = new Map(variables.map((variable) => [templateVariableKey(variable.token), variable]));
-  const pattern = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+  const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
 
@@ -349,7 +491,7 @@ function renderTemplateEditorValue(editor: HTMLDivElement, value: string, variab
     if (match.index > cursor) {
       editor.appendChild(document.createTextNode(value.slice(cursor, match.index)));
     }
-    const key = match[1];
+    const key = normalizeTemplateVariableKey(match[1]);
     editor.appendChild(createVariablePill(variableByKey.get(key) ?? { token: `{{${key}}}`, label: key }));
     cursor = match.index + match[0].length;
   }
@@ -465,5 +607,9 @@ function insertPlainText(text: string) {
 }
 
 function templateVariableKey(token: string) {
-  return token.replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "");
+  return normalizeTemplateVariableKey(token.replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, ""));
+}
+
+function normalizeTemplateVariableKey(value: string) {
+  return value.trim().replace(/\\/g, "");
 }

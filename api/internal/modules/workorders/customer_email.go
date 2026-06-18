@@ -1,21 +1,15 @@
 package workorders
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/mail"
-	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"humphreys/api/internal/domain"
+	"humphreys/api/internal/mailer"
 )
 
 const (
@@ -23,126 +17,7 @@ const (
 	customerEmailJobCompleted = "job_completed"
 )
 
-var ErrEmailNotConfigured = errors.New("customer email sending is not configured")
-
-type graphEmailClient struct {
-	tenantID     string
-	clientID     string
-	clientSecret string
-	senderEmail  string
-	httpClient   *http.Client
-}
-
-type customerEmailMessage struct {
-	To      string
-	Subject string
-	Body    string
-}
-
-func newGraphEmailClientFromEnv(httpClient *http.Client) *graphEmailClient {
-	return &graphEmailClient{
-		tenantID:     strings.TrimSpace(os.Getenv("MICROSOFT_TENANT_ID")),
-		clientID:     strings.TrimSpace(os.Getenv("MICROSOFT_CLIENT_ID")),
-		clientSecret: strings.TrimSpace(os.Getenv("MICROSOFT_CLIENT_SECRET")),
-		senderEmail:  strings.TrimSpace(os.Getenv("MICROSOFT_SENDER_EMAIL")),
-		httpClient:   httpClient,
-	}
-}
-
-func (c *graphEmailClient) configured() bool {
-	return c != nil && c.tenantID != "" && c.clientID != "" && c.clientSecret != "" && c.senderEmail != ""
-}
-
-func (c *graphEmailClient) Send(ctx context.Context, msg customerEmailMessage) error {
-	if !c.configured() {
-		return ErrEmailNotConfigured
-	}
-
-	token, err := c.accessToken(ctx)
-	if err != nil {
-		return err
-	}
-
-	payload := map[string]any{
-		"message": map[string]any{
-			"subject": msg.Subject,
-			"body": map[string]string{
-				"contentType": "Text",
-				"content":     msg.Body,
-			},
-			"toRecipients": []map[string]any{
-				{
-					"emailAddress": map[string]string{
-						"address": msg.To,
-					},
-				},
-			},
-		},
-		"saveToSentItems": true,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/sendMail", url.PathEscape(c.senderEmail))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode == http.StatusAccepted {
-		return nil
-	}
-
-	responseBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
-	return fmt.Errorf("microsoft graph sendMail failed: %s: %s", res.Status, strings.TrimSpace(string(responseBody)))
-}
-
-func (c *graphEmailClient) accessToken(ctx context.Context) (string, error) {
-	form := url.Values{}
-	form.Set("client_id", c.clientID)
-	form.Set("client_secret", c.clientSecret)
-	form.Set("scope", "https://graph.microsoft.com/.default")
-	form.Set("grant_type", "client_credentials")
-
-	endpoint := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", url.PathEscape(c.tenantID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-
-	var tokenResponse struct {
-		AccessToken string `json:"access_token"`
-		Error       string `json:"error"`
-		Description string `json:"error_description"`
-	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&tokenResponse); err != nil {
-		return "", err
-	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return "", fmt.Errorf("microsoft token request failed: %s: %s", tokenResponse.Error, tokenResponse.Description)
-	}
-	if tokenResponse.AccessToken == "" {
-		return "", errors.New("microsoft token response did not include an access token")
-	}
-	return tokenResponse.AccessToken, nil
-}
+type customerEmailMessage = mailer.Message
 
 func buildCustomerEmailMessage(item domain.WorkOrderDetail, template string) (customerEmailMessage, error) {
 	email := strings.TrimSpace(stringValue(item.Customer.Email))

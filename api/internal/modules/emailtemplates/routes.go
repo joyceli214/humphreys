@@ -14,5 +14,6 @@ const (
 func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	group := authed.Group("/email-templates")
 	group.GET("", middleware.RequirePermission(permWorkOrdersRead), h.List)
+	group.POST("/test", middleware.RequirePermission(permWorkOrdersUpdate), h.SendTest)
 	group.PATCH("/:key", middleware.RequirePermission(permWorkOrdersUpdate), h.Update)
 }

@@ -35,6 +35,7 @@ export const DEFAULT_EMAIL_TEMPLATES: Record<CustomerEmailTemplateKey, Pick<Emai
       "Work done: {{work_done}}",
       "Estimated total before deposit: {{total_before_deposit}}",
       "Deposit: {{deposit}}",
+      "Total payable: {{total_payable}}",
       "",
       "We will contact you if we need approval for parts or additional work.",
       "",
@@ -60,6 +61,7 @@ export const DEFAULT_EMAIL_TEMPLATES: Record<CustomerEmailTemplateKey, Pick<Emai
       "Work done: {{work_done}}",
       "Estimated total before deposit: {{total_before_deposit}}",
       "Deposit: {{deposit}}",
+      "Total payable: {{total_payable}}",
       "",
       "Please contact us if you have any questions or would like to arrange pickup or delivery.",
       "",
@@ -92,6 +94,7 @@ export const EMAIL_TEMPLATE_VARIABLES: EmailTemplateVariable[] = [
   { token: "{{labour_total}}", label: "Labour Total" },
   { token: "{{total_before_deposit}}", label: "Total Before Deposit" },
   { token: "{{deposit}}", label: "Deposit" },
+  { token: "{{total_payable}}", label: "Total Payable" },
   { token: "{{payment_method_names}}", label: "Payment Methods" },
   { token: "{{worker_names}}", label: "Workers" }
 ];
@@ -107,10 +110,14 @@ export function renderEmailTemplate(
 }
 
 function renderTemplateString(template: string, item: WorkOrderDetail) {
-  return template.replace(templateTokenPattern, (_match, key: string) => resolveTemplateValue(item, key));
+  return template.replace(templateTokenPattern, (_match, key: string) => resolveTemplateValue(item, normalizeTemplateTokenKey(key)));
 }
 
-const templateTokenPattern = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+const templateTokenPattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
+
+function normalizeTemplateTokenKey(value: string) {
+  return value.trim().replace(/\\/g, "");
+}
 
 function resolveTemplateValue(item: WorkOrderDetail, key: string) {
   const derived = derivedTemplateValues(item);
@@ -120,15 +127,19 @@ function resolveTemplateValue(item: WorkOrderDetail, key: string) {
 
 function derivedTemplateValues(item: WorkOrderDetail): Record<string, string> {
   const subtotal = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
+  const hasTotal = item.parts_total !== null || item.delivery_total !== null || item.labour_total !== null;
+  const totalBeforeDeposit = subtotal * 1.13;
+  const totalPayable = Math.max(0, totalBeforeDeposit - item.deposit);
   return {
     customer_name: emailCustomerName(item),
     equipment_name: emailEquipmentName(item),
     job_details: emailJobDetails(item),
-    total_before_deposit: item.parts_total !== null || item.delivery_total !== null || item.labour_total !== null ? formatCurrency(subtotal * 1.13) : "",
+    total_before_deposit: hasTotal ? formatCurrency(totalBeforeDeposit) : "",
     parts_total: item.parts_total !== null ? formatCurrency(item.parts_total) : "",
     delivery_total: item.delivery_total !== null ? formatCurrency(item.delivery_total) : "",
     labour_total: item.labour_total !== null ? formatCurrency(item.labour_total) : "",
-    deposit: item.deposit > 0 ? formatCurrency(item.deposit) : ""
+    deposit: item.deposit > 0 ? formatCurrency(item.deposit) : "",
+    total_payable: hasTotal ? formatCurrency(totalPayable) : ""
   };
 }
 
