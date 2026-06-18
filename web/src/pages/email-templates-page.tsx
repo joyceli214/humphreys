@@ -6,16 +6,17 @@ import type { EmailTemplate, EmailTemplateKey } from "@/lib/api/generated/types"
 import { DEFAULT_EMAIL_TEMPLATES, EMAIL_TEMPLATE_VARIABLES, type EmailTemplateVariable } from "@/lib/email-templates";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { useAuth } from "@/lib/auth/auth-context";
-import { AIMarkdownEditor } from "@/components/ai-markdown-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { MDXEditor, type DirectiveDescriptor, type MDXEditorMethods } from "@mdxeditor/editor";
 import {
   BoldItalicUnderlineToggles,
   CreateLink,
   ListsToggle,
   UndoRedo,
+  directivesPlugin,
   linkDialogPlugin,
   linkPlugin,
   listsPlugin,
@@ -24,7 +25,25 @@ import {
 } from "@mdxeditor/editor";
 import "@mdxeditor/editor/style.css";
 
+const emailVariableDirectiveDescriptor: DirectiveDescriptor = {
+  name: "woVar",
+  type: "textDirective",
+  attributes: ["key"],
+  hasChildren: false,
+  testNode: (node) => node.type === "textDirective" && node.name === "woVar",
+  Editor: ({ mdastNode }) => {
+    const key = normalizeTemplateVariableKey(String(mdastNode.attributes?.key ?? ""));
+    const variable = EMAIL_TEMPLATE_VARIABLES.find((entry) => templateVariableKey(entry.token) === key);
+    return (
+      <span className="mx-0.5 inline-flex select-none items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
+        {variable?.label ?? key}
+      </span>
+    );
+  }
+};
+
 const emailBodyEditorPlugins = [
+  directivesPlugin({ directiveDescriptors: [emailVariableDirectiveDescriptor] }),
   listsPlugin(),
   linkPlugin(),
   linkDialogPlugin(),
@@ -209,7 +228,7 @@ export default function EmailTemplatesPage() {
             <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h2 className="font-semibold">{selectedTemplate?.label ?? DEFAULT_EMAIL_TEMPLATES[selectedKey].label}</h2>
-                <p className="text-sm text-muted-foreground">Use the field buttons to insert work order values.</p>
+                <p className="text-sm text-muted-foreground">Type @ to search and insert work order fields.</p>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={() => setTestDialogOpen(true)} disabled={saving}>
@@ -236,14 +255,12 @@ export default function EmailTemplatesPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm text-muted-foreground">Message</label>
-                <AIMarkdownEditor
+                <MarkdownTemplateFieldEditor
                   key={selectedKey}
-                  markdown={body}
+                  value={body}
                   onChange={setBody}
-                  plugins={emailBodyEditorPlugins}
-                  contentEditableClassName={emailBodyEditorContentClassName}
+                  variables={EMAIL_TEMPLATE_VARIABLES}
                 />
-                <TemplateVariablePicker variables={EMAIL_TEMPLATE_VARIABLES} onSelect={(variable) => setBody((value) => appendTemplateVariable(value, variable))} />
               </div>
             </div>
           </article>
@@ -289,24 +306,6 @@ export default function EmailTemplatesPage() {
   );
 }
 
-function TemplateVariablePicker({ variables, onSelect }: { variables: EmailTemplateVariable[]; onSelect: (variable: EmailTemplateVariable) => void }) {
-  return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {variables.map((variable) => (
-        <Button key={variable.token} type="button" variant="outline" size="sm" onClick={() => onSelect(variable)}>
-          {variable.label}
-        </Button>
-      ))}
-    </div>
-  );
-}
-
-function appendTemplateVariable(value: string, variable: EmailTemplateVariable) {
-  const trimmedEnd = value.trimEnd();
-  const prefix = trimmedEnd ? `${trimmedEnd} ` : "";
-  return `${prefix}${variable.token}`;
-}
-
 type TemplateFieldEditorProps = {
   value: string;
   onChange: (value: string) => void;
@@ -321,6 +320,120 @@ type TriggerState = {
   end: number;
   query: string;
 };
+
+function MarkdownTemplateFieldEditor({ value, onChange, variables }: { value: string; onChange: (value: string) => void; variables: EmailTemplateVariable[] }) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<MDXEditorMethods | null>(null);
+  const currentMarkdownRef = useRef(value);
+  const [trigger, setTrigger] = useState<TriggerState | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ left: number; top: number } | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const editorMarkdown = useMemo(() => templateTokensToDirectives(value, variables), [value, variables]);
+
+  const filteredVariables = useMemo(() => {
+    if (!trigger) return [];
+    const query = trigger.query.trim().toLowerCase();
+    const matches = variables.filter((variable) => {
+      const key = templateVariableKey(variable.token).toLowerCase();
+      return !query || variable.label.toLowerCase().includes(query) || key.includes(query);
+    });
+    return query ? matches.slice(0, 8) : matches;
+  }, [trigger, variables]);
+
+  useEffect(() => {
+    if (value === currentMarkdownRef.current) return;
+    currentMarkdownRef.current = value;
+    editorRef.current?.setMarkdown(templateTokensToDirectives(value, variables));
+    setTrigger(null);
+  }, [value, variables]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [trigger?.query]);
+
+  const syncTrigger = () => {
+    window.setTimeout(() => {
+      const editor = wrapperRef.current?.querySelector<HTMLElement>("[contenteditable='true']");
+      if (!editor) return;
+      const nextTrigger = findTemplateTrigger(editor);
+      setTrigger(nextTrigger);
+      setDropdownPosition(nextTrigger ? getTriggerDropdownPosition(wrapperRef.current, nextTrigger) : null);
+    }, 0);
+  };
+
+  const handleChange = (markdown: string) => {
+    const templateMarkdown = directiveMarkdownToTemplateTokens(markdown);
+    currentMarkdownRef.current = templateMarkdown;
+    onChange(templateMarkdown);
+    syncTrigger();
+  };
+
+  const insertVariable = (variable: EmailTemplateVariable) => {
+    const editor = wrapperRef.current?.querySelector<HTMLElement>("[contenteditable='true']");
+    if (!editor || !trigger) return;
+
+    const range = document.createRange();
+    range.setStart(trigger.node, trigger.start);
+    range.setEnd(trigger.node, trigger.end);
+    range.deleteContents();
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    editorRef.current?.insertMarkdown(templateVariableDirective(variable));
+    const nextValue = directiveMarkdownToTemplateTokens(editorRef.current?.getMarkdown() ?? "");
+    currentMarkdownRef.current = nextValue;
+    onChange(nextValue);
+    setTrigger(null);
+    editorRef.current?.focus();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!trigger || filteredVariables.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((index) => (index + 1) % filteredVariables.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((index) => (index - 1 + filteredVariables.length) % filteredVariables.length);
+      return;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      insertVariable(filteredVariables[activeIndex]);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setTrigger(null);
+    }
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef} onKeyDown={handleKeyDown} onKeyUp={syncTrigger} onMouseUp={syncTrigger}>
+      <div className="rounded-md border border-input bg-white p-2">
+        <MDXEditor
+          ref={editorRef}
+          markdown={editorMarkdown}
+          onChange={handleChange}
+          plugins={emailBodyEditorPlugins}
+          contentEditableClassName={emailBodyEditorContentClassName}
+        />
+      </div>
+      {trigger && dropdownPosition && filteredVariables.length > 0 && (
+        <TemplateVariableDropdown
+          variables={filteredVariables}
+          activeIndex={activeIndex}
+          position={dropdownPosition}
+          onSelect={insertVariable}
+        />
+      )}
+    </div>
+  );
+}
 
 function TemplateFieldEditor({
   value,
@@ -454,28 +567,49 @@ function TemplateFieldEditor({
         onBlur={() => window.setTimeout(() => setTrigger(null), 120)}
       />
       {trigger && dropdownPosition && filteredVariables.length > 0 && (
-        <div
-          className="absolute z-20 mt-1 max-h-72 w-72 max-w-[calc(100%-1rem)] overflow-y-auto rounded-md border border-border bg-white p-1 shadow-lg"
-          style={{ left: dropdownPosition.left, top: dropdownPosition.top }}
-        >
-          {filteredVariables.map((variable, index) => (
-            <button
-              key={variable.token}
-              type="button"
-              className={`flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left text-sm ${
-                index === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-muted"
-              }`}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                insertVariable(variable);
-              }}
-            >
-              <span>{variable.label}</span>
-              <span className="text-xs text-muted-foreground">@{templateVariableKey(variable.token)}</span>
-            </button>
-          ))}
-        </div>
+        <TemplateVariableDropdown
+          variables={filteredVariables}
+          activeIndex={activeIndex}
+          position={dropdownPosition}
+          onSelect={insertVariable}
+        />
       )}
+    </div>
+  );
+}
+
+function TemplateVariableDropdown({
+  variables,
+  activeIndex,
+  position,
+  onSelect
+}: {
+  variables: EmailTemplateVariable[];
+  activeIndex: number;
+  position: { left: number; top: number };
+  onSelect: (variable: EmailTemplateVariable) => void;
+}) {
+  return (
+    <div
+      className="absolute z-20 mt-1 max-h-72 w-72 max-w-[calc(100%-1rem)] overflow-y-auto rounded-md border border-border bg-white p-1 shadow-lg"
+      style={{ left: position.left, top: position.top }}
+    >
+      {variables.map((variable, index) => (
+        <button
+          key={variable.token}
+          type="button"
+          className={`flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left text-sm ${
+            index === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+          }`}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            onSelect(variable);
+          }}
+        >
+          <span>{variable.label}</span>
+          <span className="text-xs text-muted-foreground">@{templateVariableKey(variable.token)}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -604,6 +738,31 @@ function insertPlainText(text: string) {
   range.collapse(true);
   selection.removeAllRanges();
   selection.addRange(range);
+}
+
+function templateTokensToDirectives(markdown: string, variables: EmailTemplateVariable[]) {
+  const variableByKey = new Map(variables.map((variable) => [templateVariableKey(variable.token), variable]));
+  return markdown.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawKey: string) => {
+    const key = normalizeTemplateVariableKey(rawKey);
+    return templateVariableDirective(variableByKey.get(key) ?? { token: `{{${key}}}`, label: key });
+  });
+}
+
+function directiveMarkdownToTemplateTokens(markdown: string) {
+  return markdown
+    .replace(/:woVar\[[^\]]*\]\{key="([^"]+)"\}/g, (_match, key: string) => `{{${normalizeTemplateVariableKey(key)}}}`)
+    .replace(/:woVar\[[^\]]*\]\{key='([^']+)'\}/g, (_match, key: string) => `{{${normalizeTemplateVariableKey(key)}}}`)
+    .replace(/:woVar\{key="([^"]+)"\}/g, (_match, key: string) => `{{${normalizeTemplateVariableKey(key)}}}`)
+    .replace(/:woVar\{key='([^']+)'\}/g, (_match, key: string) => `{{${normalizeTemplateVariableKey(key)}}}`);
+}
+
+function templateVariableDirective(variable: EmailTemplateVariable) {
+  const key = templateVariableKey(variable.token);
+  return `:woVar[${escapeDirectiveLabel(variable.label)}]{key="${key}"}`;
+}
+
+function escapeDirectiveLabel(label: string) {
+  return label.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
 }
 
 function templateVariableKey(token: string) {

@@ -761,7 +761,7 @@ export default function WorkOrderDetailPage() {
       return current.id;
     }
     if (frozenDropdowns["payment_methods"] === true) {
-      throw new Error("Payment methods dropdown is frozen. Add a 'No Payment' option from Dropdown Management first.");
+      throw new Error("Payment methods dropdown is frozen. Add a 'No Payment' option from Dropdown first.");
     }
     const created = await apiClient.createPaymentMethod("No Payment");
     setPaymentMethodOptions((prev) => (prev.some((method) => method.id === created.id) ? prev : [...prev, created]));

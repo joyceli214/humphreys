@@ -21,6 +21,22 @@ func TestMarkdownToEmailHTMLPreservesMailtoLinks(t *testing.T) {
 	}
 }
 
+func TestMarkdownToEmailHTMLPreservesBracketedMailtoLinks(t *testing.T) {
+	html := markdownToEmailHTML("Email [service@example.com](<mailto:service@example.com>)")
+
+	if !strings.Contains(html, `<a href="mailto:service@example.com">service@example.com</a>`) {
+		t.Fatalf("expected bracketed mailto link anchor, got %s", html)
+	}
+}
+
+func TestMarkdownToEmailHTMLPreservesEscapedMailtoLinks(t *testing.T) {
+	html := markdownToEmailHTML(`Email [service@example.com](mailto\:service@example.com)`)
+
+	if !strings.Contains(html, `<a href="mailto:service@example.com">service@example.com</a>`) {
+		t.Fatalf("expected escaped mailto link anchor, got %s", html)
+	}
+}
+
 func TestMarkdownToEmailHTMLPreservesLinksWithUnderscores(t *testing.T) {
 	html := markdownToEmailHTML("Open [portal](https://example.com/customer_lookup?id=123)")
 

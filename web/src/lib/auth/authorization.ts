@@ -8,7 +8,7 @@ export type NavEntry = {
 export const NAV_ENTRIES: NavEntry[] = [
   { href: "/dashboard", label: "Dashboard", readPermission: "work_orders:read" },
   { href: "/work-orders", label: "Work Orders", readPermission: "work_orders:read" },
-  { href: "/dropdown-management", label: "Dropdown Management", readPermission: "work_orders:update", group: "administration" },
+  { href: "/dropdown-management", label: "Dropdown", readPermission: "work_orders:update", group: "config" },
   { href: "/email-templates", label: "Email Templates", readPermission: "work_orders:update", group: "config" },
   { href: "/ai-settings", label: "AI Settings", readPermission: "work_orders:update", group: "config" },
   { href: "/parts-purchase-requests", label: "Parts Requests", readPermission: "work_orders_sensitive:read" },

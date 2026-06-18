@@ -285,7 +285,7 @@ export default function DropdownManagementPage() {
   return (
     <section className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold">Dropdown Management</h1>
+        <h1 className="text-2xl font-semibold">Dropdown</h1>
         <p className="text-sm text-muted-foreground">Freeze dropdowns and activate/deactivate options.</p>
       </div>
 

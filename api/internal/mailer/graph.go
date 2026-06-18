@@ -204,7 +204,7 @@ func formatInlineEmailMarkdown(value string) string {
 		if len(parts) != 3 {
 			return match
 		}
-		href := strings.TrimSpace(parts[2])
+		href := normalizeMarkdownLinkHref(parts[2])
 		if !isSafeEmailHref(href) {
 			return parts[1]
 		}
@@ -238,6 +238,14 @@ func isSafeEmailHref(value string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeMarkdownLinkHref(value string) string {
+	href := strings.TrimSpace(value)
+	if strings.HasPrefix(href, "<") && strings.HasSuffix(href, ">") {
+		href = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(href, "<"), ">"))
+	}
+	return strings.ReplaceAll(href, `\`, "")
 }
 
 func normalizeEmailMarkdownInput(value string) string {
