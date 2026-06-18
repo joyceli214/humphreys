@@ -305,6 +305,23 @@ export class APIClient {
     });
   }
 
+  generateAIMarkdown(payload: { field: "problem_description" | "work_done" | "repair_log"; prompt: string; current_markdown: string }) {
+    return this.request<{ markdown: string; model: string; generated_at: string }>("/work-orders/ai-markdown", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  generateWorkOrderAIMarkdown(
+    referenceID: number,
+    payload: { field: "problem_description" | "work_done" | "repair_log"; prompt: string; current_markdown: string }
+  ) {
+    return this.request<{ markdown: string; model: string; generated_at: string }>(`/work-orders/${referenceID}/ai-markdown`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   sendWorkOrderCustomerEmail(
     referenceID: number,
     payload: { template: EmailTemplateKey; to: string; subject: string; body: string }

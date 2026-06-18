@@ -37,6 +37,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	group.POST("", middleware.RequirePermission(permCreate), h.CreateWorkOrder)
 	group.DELETE("/:reference_id", middleware.RequirePermission(permCreate), h.DeleteWorkOrder)
 	group.GET("", middleware.RequirePermission(permRead), h.ListWorkOrders)
+	group.POST(
+		"/ai-markdown",
+		middleware.RequirePermission(permCreate),
+		middleware.RequirePermission(permSensitiveRead),
+		h.GenerateAIMarkdownWithoutWorkOrder,
+	)
 	group.GET("/:reference_id", middleware.RequirePermission(permRead), h.GetWorkOrder)
 	group.POST(
 		"/:reference_id/ai-summary",
@@ -49,6 +55,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		middleware.RequirePermission(permRead),
 		middleware.RequirePermission(permSensitiveRead),
 		h.GenerateAIWorkDoneFromRepairLogs,
+	)
+	group.POST(
+		"/:reference_id/ai-markdown",
+		middleware.RequirePermission(permRead),
+		middleware.RequirePermission(permSensitiveRead),
+		h.GenerateAIMarkdown,
 	)
 	group.POST(
 		"/:reference_id/customer-email",

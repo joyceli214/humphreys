@@ -51,6 +51,12 @@ type openRouterChatResponse struct {
 	} `json:"error"`
 }
 
+type generateAIMarkdownRequest struct {
+	Field           string `json:"field" binding:"required"`
+	Prompt          string `json:"prompt" binding:"required"`
+	CurrentMarkdown string `json:"current_markdown"`
+}
+
 func getOpenRouterModel() string {
 	value := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	if value == "" {
@@ -190,6 +196,90 @@ func (h *Handler) GenerateAIWorkDoneFromRepairLogs(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GenerateAIMarkdownWithoutWorkOrder(c *gin.Context) {
+	h.generateAIMarkdown(c, nil)
+}
+
+func (h *Handler) GenerateAIMarkdown(c *gin.Context) {
+	referenceID, err := strconv.Atoi(c.Param("reference_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
+		return
+	}
+	h.generateAIMarkdown(c, &referenceID)
+}
+
+func (h *Handler) generateAIMarkdown(c *gin.Context, referenceID *int) {
+	var req generateAIMarkdownRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	field := strings.TrimSpace(req.Field)
+	if !isAIMarkdownField(field) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid field"})
+		return
+	}
+	if strings.TrimSpace(req.Prompt) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "prompt is required"})
+		return
+	}
+
+	settings, err := h.getAISettings(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load AI settings"})
+		return
+	}
+	if strings.TrimSpace(settings.OpenRouterAPIKey) == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "OPENROUTER_API_KEY is not configured"})
+		return
+	}
+
+	var item *domain.WorkOrderDetail
+	var repairLogs []domain.RepairLog
+	var partsRequests []domain.PartsPurchaseRequest
+	if referenceID != nil {
+		detail, err := h.service.GetWorkOrderDetail(c.Request.Context(), *referenceID)
+		if errors.Is(err, ErrWorkOrderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch work order"})
+			return
+		}
+		item = &detail
+		repairLogs, err = h.service.ListRepairLogs(c.Request.Context(), *referenceID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch repair logs"})
+			return
+		}
+		partsRequests, err = h.service.ListPartsPurchaseRequests(c.Request.Context(), *referenceID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch parts purchase requests"})
+			return
+		}
+	}
+
+	generated, err := h.generateOpenRouterTextOnce(
+		c,
+		settings,
+		aiMarkdownSystemPrompt(field),
+		buildAIMarkdownPrompt(field, strings.TrimSpace(req.Prompt), req.CurrentMarkdown, item, repairLogs, partsRequests),
+		700,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"markdown":     generated,
+		"model":        settings.OpenRouterModel,
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 func (h *Handler) getAISettings(c *gin.Context) (aisettings.Settings, error) {
 	if h.aiSettings != nil {
 		return h.aiSettings.Get(c.Request.Context())
@@ -205,12 +295,16 @@ func (h *Handler) getAISettings(c *gin.Context) (aisettings.Settings, error) {
 }
 
 func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, settings aisettings.Settings, prompt string) (string, error) {
+	return h.generateOpenRouterTextOnce(c, settings, aisettings.DefaultSystemPrompt, prompt, 320)
+}
+
+func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int) (string, error) {
 	payload := openRouterChatRequest{
 		Model: settings.OpenRouterModel,
 		Messages: []openRouterMessage{
 			{
 				Role:    "system",
-				Content: aisettings.DefaultSystemPrompt,
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
@@ -218,7 +312,7 @@ func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, settings aisetti
 			},
 		},
 		Temperature: 0.2,
-		MaxTokens:   320,
+		MaxTokens:   maxTokens,
 	}
 
 	body, err := json.Marshal(payload)
@@ -270,6 +364,84 @@ func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, settings aisetti
 		return "", fmt.Errorf("provider returned an empty summary (finish_reason=%s)", decoded.Choices[0].FinishReason)
 	}
 	return text, nil
+}
+
+func isAIMarkdownField(field string) bool {
+	switch field {
+	case "problem_description", "work_done", "repair_log":
+		return true
+	default:
+		return false
+	}
+}
+
+func aiMarkdownSystemPrompt(field string) string {
+	if field == "repair_log" {
+		return "You help technicians write internal repair log entries. Write concise, factual markdown. Preserve technical details, parts, measurements, symptoms, and tests. Do not invent facts. Return only the markdown content to insert."
+	}
+	return "You help write work order markdown. Write concise, factual, useful text based on the user's instruction and available work order context. Do not invent facts. Return only the markdown content to insert."
+}
+
+func buildAIMarkdownPrompt(field string, userPrompt string, currentMarkdown string, item *domain.WorkOrderDetail, repairLogs []domain.RepairLog, partsRequests []domain.PartsPurchaseRequest) string {
+	var b strings.Builder
+	b.WriteString("Field: ")
+	b.WriteString(field)
+	b.WriteString("\n\nUser request:\n")
+	b.WriteString(userPrompt)
+	b.WriteString("\n\nCurrent markdown in this field:\n")
+	if strings.TrimSpace(currentMarkdown) == "" {
+		b.WriteString("None")
+	} else {
+		b.WriteString(strings.TrimSpace(currentMarkdown))
+	}
+
+	if item != nil {
+		b.WriteString("\n\nWork order context:\n")
+		b.WriteString(buildAIMarkdownWorkOrderContext(*item, repairLogs, partsRequests))
+	}
+
+	b.WriteString("\n\nOutput requirements:\n")
+	b.WriteString("- Return only the new markdown text to insert above the existing content.\n")
+	b.WriteString("- Do not repeat the current markdown unless the user explicitly asks to rewrite it.\n")
+	b.WriteString("- Do not include explanations, labels, or commentary outside the generated content.\n")
+	if field == "work_done" {
+		b.WriteString("- Prefer customer-facing completed-work language.\n")
+	}
+	if field == "repair_log" {
+		b.WriteString("- Prefer technician-facing repair log language with concrete actions taken and observations.\n")
+	}
+	return b.String()
+}
+
+func buildAIMarkdownWorkOrderContext(item domain.WorkOrderDetail, repairLogs []domain.RepairLog, partsRequests []domain.PartsPurchaseRequest) string {
+	customerName := strings.TrimSpace(strings.Join([]string{orEmpty(item.Customer.FirstName), orEmpty(item.Customer.LastName)}, " "))
+	data := fmt.Sprintf(`- Reference ID: %d
+- Status: %s
+- Customer Name: %s
+- Equipment Type: %s
+- Equipment Brand: %s
+- Model: %s
+- Serial: %s
+- Problem Description: %s
+- Work Done: %s
+- Technicians: %s
+- Repair Logs Summary: %s
+- Parts Purchase Requests: %s
+`,
+		item.ReferenceID,
+		orUnknown(item.StatusName),
+		orUnknownString(customerName),
+		orUnknown(item.ItemName),
+		orUnknown(joinOrEmpty(item.BrandNames)),
+		orUnknown(item.ModelNumber),
+		orUnknown(item.SerialNumber),
+		orUnknown(item.ProblemDescription),
+		orUnknown(item.WorkDone),
+		orUnknown(joinOrEmpty(item.WorkerNames)),
+		summarizeRepairLogs(repairLogs),
+		summarizePartsRequests(partsRequests),
+	)
+	return data
 }
 
 func buildWorkDoneFromRepairLogsPrompt(template string, repairLogs []domain.RepairLog) string {

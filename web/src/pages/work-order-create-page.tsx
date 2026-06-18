@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
+import { AIMarkdownEditor } from "@/components/ai-markdown-editor";
 import { CustomerSearchableDropdown } from "@/components/work-order-dropdowns/customer-searchable-dropdown";
 import { SingleSearchableDropdown } from "@/components/work-order-dropdowns/single-searchable-dropdown";
 import { MultiSearchableDropdown } from "@/components/work-order-dropdowns/multi-searchable-dropdown";
@@ -23,7 +24,6 @@ import {
   InsertImage,
   InsertThematicBreak,
   ListsToggle,
-  MDXEditor,
   UndoRedo,
   headingsPlugin,
   imagePlugin,
@@ -367,6 +367,14 @@ export default function WorkOrderCreatePage() {
   const setNewCustomerPostalCode = (value: string) => setCreateForm((prev) => ({ ...prev, newCustomerPostalCode: value }));
   const setNewCustomerRemark = (value: string) => setCreateForm((prev) => ({ ...prev, newCustomerRemark: value }));
   const setProblemDescription = (value: string) => setCreateForm((prev) => ({ ...prev, problemDescription: value }));
+  const generateProblemDescriptionMarkdown = async (prompt: string) => {
+    const res = await apiClient.generateAIMarkdown({
+      field: "problem_description",
+      prompt,
+      current_markdown: problemDescription
+    });
+    return res.markdown;
+  };
   const setRemoteControlQty = (value: string) => setCreateForm((prev) => ({ ...prev, remoteControlQty: value }));
   const setCableQty = (value: string) => setCreateForm((prev) => ({ ...prev, cableQty: value }));
   const setCordQty = (value: string) => setCreateForm((prev) => ({ ...prev, cordQty: value }));
@@ -1156,14 +1164,13 @@ export default function WorkOrderCreatePage() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm">Problem Description</label>
-                  <div className="rounded-md border border-input bg-white p-2">
-                    <MDXEditor
-                      markdown={problemDescription}
-                      contentEditableClassName={workNotesEditorContentClassName}
-                      onChange={setProblemDescription}
-                      plugins={workNotesEditorPlugins}
-                    />
-                  </div>
+                  <AIMarkdownEditor
+                    markdown={problemDescription}
+                    contentEditableClassName={workNotesEditorContentClassName}
+                    onChange={setProblemDescription}
+                    plugins={workNotesEditorPlugins}
+                    onGenerate={generateProblemDescriptionMarkdown}
+                  />
                 </div>
               </div>
 
