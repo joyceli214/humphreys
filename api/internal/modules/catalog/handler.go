@@ -39,6 +39,10 @@ type setWorkOrderStatusGroupRequest struct {
 	StatusGroup *string `json:"status_group"`
 }
 
+type setCompleteJobStatusRequest struct {
+	StatusID *int64 `json:"status_id"`
+}
+
 func New(db *pgxpool.Pool) *Handler {
 	return &Handler{
 		service: NewService(NewRepository(db)),
@@ -173,6 +177,38 @@ func (h *Handler) SetWorkOrderStatusGroup(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order status group"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) GetCompleteJobStatus(c *gin.Context) {
+	statusID, err := h.service.GetCompleteJobStatusID(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load complete job status setting"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status_id": statusID})
+}
+
+func (h *Handler) SetCompleteJobStatus(c *gin.Context) {
+	var req setCompleteJobStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.StatusID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	err := h.service.SetCompleteJobStatusID(c.Request.Context(), *req.StatusID)
+	if errors.Is(err, ErrInvalidDropdownOptionID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, ErrDropdownOptionNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update complete job status setting"})
 		return
 	}
 	c.Status(http.StatusNoContent)

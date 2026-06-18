@@ -178,6 +178,24 @@ export default function DropdownManagementPage() {
     }
   };
 
+  const setCompleteJobStatusTarget = async (statusID: number) => {
+    const token = "complete-job-status";
+    setBusyKey(token);
+    try {
+      await apiClient.setCompleteJobStatusTarget(statusID);
+      setItems((prev) =>
+        prev.map((entry) =>
+          entry.key === "work_order_statuses" ? { ...entry, complete_job_status_id: statusID } : entry
+        )
+      );
+      alerts.success("Complete Job target updated");
+    } catch (err) {
+      alerts.error("Failed to update Complete Job target", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const addOption = async () => {
     if (!selectedEntry) return;
     setAdding(true);
@@ -360,6 +378,34 @@ export default function DropdownManagementPage() {
                 <option value="all">All</option>
               </select>
             </div>
+
+            {selectedEntry.key === "work_order_statuses" && (
+              <div className="rounded-md border border-border bg-muted/30 p-3">
+                <label className="block">
+                  <span className="mb-1 block text-sm font-medium">When clicking Complete Job, set status to</span>
+                  <select
+                    className="h-10 w-full max-w-md rounded-md border border-input bg-white px-3 py-2 text-sm"
+                    value={selectedEntry.complete_job_status_id ?? ""}
+                    disabled={busyKey === "complete-job-status"}
+                    onChange={(event) => {
+                      const nextID = Number(event.target.value);
+                      if (Number.isFinite(nextID) && nextID > 0) void setCompleteJobStatusTarget(nextID);
+                    }}
+                  >
+                    <option value="">Choose a status...</option>
+                    {selectedEntry.options.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                        {!option.is_active ? " (inactive)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This controls the quick action on the work order repair logs section.
+                </p>
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <Table>

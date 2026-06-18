@@ -1131,6 +1131,17 @@ export default function WorkOrderDetailPage() {
     setCompletingJob(true);
     setSectionError("");
     try {
+      const target = await apiClient.getCompleteJobStatusTarget().catch(() => ({ status_id: null }));
+      if (target.status_id) {
+        const updated = await apiClient.updateWorkOrderStatus(parsedReferenceId, {
+          status_id: target.status_id
+        });
+        setItem(updated);
+        setEquipmentForm((prev) => ({ ...prev, status_id: updated.status_id }));
+        alerts.success("Job marked as completed");
+        return;
+      }
+
       const statuses = await apiClient.listWorkOrderStatuses("");
       const completedStatus =
         statuses.items.find((status) => status.status_group === "completed") ??

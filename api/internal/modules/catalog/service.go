@@ -66,6 +66,17 @@ func (s *Service) SetWorkOrderStatusGroup(ctx context.Context, optionID int64, g
 	return s.repo.SetWorkOrderStatusGroup(ctx, optionID, normalized)
 }
 
+func (s *Service) GetCompleteJobStatusID(ctx context.Context) (*int64, error) {
+	return s.repo.GetCompleteJobStatusID(ctx)
+}
+
+func (s *Service) SetCompleteJobStatusID(ctx context.Context, statusID int64) error {
+	if statusID <= 0 {
+		return ErrInvalidDropdownOptionID
+	}
+	return s.repo.SetCompleteJobStatusID(ctx, statusID)
+}
+
 func (s *Service) ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error) {
 	return s.repo.ListWorkOrderStatuses(ctx, query)
 }

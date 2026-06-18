@@ -184,6 +184,7 @@ export interface DropdownManagementEntry {
   label: string;
   is_frozen: boolean;
   options: ManagedLookupOption[];
+  complete_job_status_id?: number | null;
 }
 
 export interface CustomerLookupOption {

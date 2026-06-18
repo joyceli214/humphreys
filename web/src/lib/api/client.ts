@@ -613,6 +613,17 @@ export class APIClient {
     });
   }
 
+  getCompleteJobStatusTarget() {
+    return this.request<{ status_id: number | null }>("/catalog/work-order-statuses/complete-job-target");
+  }
+
+  setCompleteJobStatusTarget(statusID: number) {
+    return this.request<void>("/catalog/work-order-statuses/complete-job-target", {
+      method: "PATCH",
+      body: JSON.stringify({ status_id: statusID })
+    });
+  }
+
   createWorkOrderStatus(label: string) {
     return this.createLookup("/catalog/work-order-statuses", label);
   }

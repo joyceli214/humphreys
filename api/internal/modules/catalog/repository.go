@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
 	"humphreys/api/internal/domain"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -27,21 +29,23 @@ type ManagedLookupOption struct {
 }
 
 type DropdownManagementEntry struct {
-	Key      string                `json:"key"`
-	Label    string                `json:"label"`
-	IsFrozen bool                  `json:"is_frozen"`
-	Options  []ManagedLookupOption `json:"options"`
+	Key                 string                `json:"key"`
+	Label               string                `json:"label"`
+	IsFrozen            bool                  `json:"is_frozen"`
+	Options             []ManagedLookupOption `json:"options"`
+	CompleteJobStatusID *int64                `json:"complete_job_status_id,omitempty"`
 }
 
 const (
-	DropdownKeyWorkOrderStatuses = "work_order_statuses"
-	DropdownKeyJobTypes          = "job_types"
-	DropdownKeyItems             = "items"
-	DropdownKeyBrands            = "brands"
-	DropdownKeyWorkers           = "workers"
-	DropdownKeyPaymentMethods    = "payment_methods"
-	DropdownKeyLocations         = "locations"
-	DropdownKeyPartsItemPresets  = "parts_item_presets"
+	DropdownKeyWorkOrderStatuses  = "work_order_statuses"
+	DropdownKeyJobTypes           = "job_types"
+	DropdownKeyItems              = "items"
+	DropdownKeyBrands             = "brands"
+	DropdownKeyWorkers            = "workers"
+	DropdownKeyPaymentMethods     = "payment_methods"
+	DropdownKeyLocations          = "locations"
+	DropdownKeyPartsItemPresets   = "parts_item_presets"
+	AppSettingCompleteJobStatusID = "complete_job_status_id"
 )
 
 type dropdownSpec struct {
@@ -122,6 +126,8 @@ type Repository interface {
 	SetDropdownOptionActive(ctx context.Context, dropdownKey string, optionID int64, active bool) error
 	SetDropdownOptionPinned(ctx context.Context, dropdownKey string, optionID int64, pinned bool) error
 	SetWorkOrderStatusGroup(ctx context.Context, optionID int64, group string) error
+	GetCompleteJobStatusID(ctx context.Context) (*int64, error)
+	SetCompleteJobStatusID(ctx context.Context, statusID int64) error
 	IsDropdownFrozen(ctx context.Context, dropdownKey string) (bool, error)
 	ListWorkOrderStatuses(ctx context.Context, query string) ([]LookupOption, error)
 	ListJobTypes(ctx context.Context, query string) ([]LookupOption, error)
@@ -412,6 +418,11 @@ func (r *storeRepository) CreatePartsItemPreset(ctx context.Context, label strin
 }
 
 func (r *storeRepository) ListDropdownManagement(ctx context.Context) ([]DropdownManagementEntry, error) {
+	completeJobStatusID, err := r.GetCompleteJobStatusID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]DropdownManagementEntry, 0, len(managedDropdownSpecs))
 	for _, spec := range managedDropdownSpecs {
 		var isFrozen bool
@@ -457,14 +468,60 @@ func (r *storeRepository) ListDropdownManagement(ctx context.Context) ([]Dropdow
 		}
 		rows.Close()
 
-		out = append(out, DropdownManagementEntry{
+		entry := DropdownManagementEntry{
 			Key:      spec.Key,
 			Label:    spec.Label,
 			IsFrozen: isFrozen,
 			Options:  options,
-		})
+		}
+		if spec.Key == DropdownKeyWorkOrderStatuses {
+			entry.CompleteJobStatusID = completeJobStatusID
+		}
+		out = append(out, entry)
 	}
 	return out, nil
+}
+
+func (r *storeRepository) GetCompleteJobStatusID(ctx context.Context) (*int64, error) {
+	var statusID int64
+	err := r.db.QueryRow(ctx, `
+		SELECT setting_value::bigint
+		FROM public.app_settings
+		WHERE setting_key = $1
+	`, AppSettingCompleteJobStatusID).Scan(&statusID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &statusID, nil
+}
+
+func (r *storeRepository) SetCompleteJobStatusID(ctx context.Context, statusID int64) error {
+	var exists bool
+	if err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM public.work_order_statuses
+			WHERE status_id = $1
+		)
+	`, statusID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrDropdownOptionNotFound
+	}
+
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO public.app_settings(setting_key, setting_value, updated_at)
+		VALUES($1, $2::text, now())
+		ON CONFLICT (setting_key)
+		DO UPDATE SET
+			setting_value = EXCLUDED.setting_value,
+			updated_at = now()
+	`, AppSettingCompleteJobStatusID, statusID)
+	return err
 }
 
 func (r *storeRepository) SetDropdownFrozen(ctx context.Context, dropdownKey string, frozen bool) error {
