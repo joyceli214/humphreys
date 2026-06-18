@@ -43,6 +43,14 @@ export interface EmailTemplate {
   updated_at: string;
 }
 
+export interface AISettings {
+  has_openrouter_api_key: boolean;
+  openrouter_model: string;
+  work_order_summary_prompt: string;
+  work_done_prompt: string;
+  updated_at: string;
+}
+
 export interface WorkOrderListItem {
   reference_id: number;
   created_at: string | null;

@@ -13,12 +13,11 @@ import (
 	"time"
 
 	"humphreys/api/internal/domain"
+	"humphreys/api/internal/modules/aisettings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
 )
-
-const defaultOpenRouterModel = "google/gemma-3-27b-it:free"
 
 type aiSummaryCacheItem struct {
 	Summary     string
@@ -55,7 +54,7 @@ type openRouterChatResponse struct {
 func getOpenRouterModel() string {
 	value := strings.TrimSpace(os.Getenv("OPENROUTER_MODEL"))
 	if value == "" {
-		return defaultOpenRouterModel
+		return aisettings.DefaultOpenRouterModel
 	}
 	return value
 }
@@ -78,7 +77,12 @@ func (h *Handler) GenerateAISummary(c *gin.Context) {
 			return
 		}
 	}
-	if strings.TrimSpace(h.openRouterAPIKey) == "" {
+	settings, err := h.getAISettings(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load AI settings"})
+		return
+	}
+	if strings.TrimSpace(settings.OpenRouterAPIKey) == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "OPENROUTER_API_KEY is not configured"})
 		return
 	}
@@ -120,7 +124,7 @@ func (h *Handler) GenerateAISummary(c *gin.Context) {
 		return
 	}
 
-	summary, err := h.generateOpenRouterSummaryOnce(c, buildWorkOrderAISummaryPrompt(item, repairLogs, partsRequests))
+	summary, err := h.generateOpenRouterSummaryOnce(c, settings, buildWorkOrderAISummaryPrompt(settings.WorkOrderSummaryPrompt, item, repairLogs, partsRequests))
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
 		return
@@ -130,14 +134,14 @@ func (h *Handler) GenerateAISummary(c *gin.Context) {
 	if h.aiSummaryCache != nil {
 		h.aiSummaryCache.Set(cacheKey, aiSummaryCacheItem{
 			Summary:     summary,
-			Model:       h.openRouterModel,
+			Model:       settings.OpenRouterModel,
 			GeneratedAt: generatedAt,
 		}, ttlcache.DefaultTTL)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"summary":      summary,
-		"model":        h.openRouterModel,
+		"model":        settings.OpenRouterModel,
 		"generated_at": generatedAt,
 	})
 }
@@ -148,7 +152,12 @@ func (h *Handler) GenerateAIWorkDoneFromRepairLogs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
 		return
 	}
-	if strings.TrimSpace(h.openRouterAPIKey) == "" {
+	settings, err := h.getAISettings(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load AI settings"})
+		return
+	}
+	if strings.TrimSpace(settings.OpenRouterAPIKey) == "" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "OPENROUTER_API_KEY is not configured"})
 		return
 	}
@@ -168,7 +177,7 @@ func (h *Handler) GenerateAIWorkDoneFromRepairLogs(c *gin.Context) {
 		return
 	}
 
-	workDone, err := h.generateOpenRouterSummaryOnce(c, buildWorkDoneFromRepairLogsPrompt(repairLogs))
+	workDone, err := h.generateOpenRouterSummaryOnce(c, settings, buildWorkDoneFromRepairLogsPrompt(settings.WorkDonePrompt, repairLogs))
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
 		return
@@ -176,18 +185,32 @@ func (h *Handler) GenerateAIWorkDoneFromRepairLogs(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"work_done":    workDone,
-		"model":        h.openRouterModel,
+		"model":        settings.OpenRouterModel,
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
-func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, prompt string) (string, error) {
+func (h *Handler) getAISettings(c *gin.Context) (aisettings.Settings, error) {
+	if h.aiSettings != nil {
+		return h.aiSettings.Get(c.Request.Context())
+	}
+	key := strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY"))
+	return aisettings.Settings{
+		OpenRouterAPIKey:       key,
+		HasOpenRouterAPIKey:    key != "",
+		OpenRouterModel:        getOpenRouterModel(),
+		WorkOrderSummaryPrompt: aisettings.DefaultWorkOrderSummaryPrompt,
+		WorkDonePrompt:         aisettings.DefaultWorkDonePrompt,
+	}, nil
+}
+
+func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, settings aisettings.Settings, prompt string) (string, error) {
 	payload := openRouterChatRequest{
-		Model: h.openRouterModel,
+		Model: settings.OpenRouterModel,
 		Messages: []openRouterMessage{
 			{
 				Role:    "system",
-				Content: "You summarize technician work orders. Write short, factual natural language in paragraph form. Use 1-2 paragraphs only. Do not use bullet points, numbered lists, or headings.",
+				Content: aisettings.DefaultSystemPrompt,
 			},
 			{
 				Role:    "user",
@@ -208,7 +231,7 @@ func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, prompt string) (
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.openRouterAPIKey)
+	req.Header.Set("Authorization", "Bearer "+settings.OpenRouterAPIKey)
 	req.Header.Set("HTTP-Referer", "https://humphreys.local")
 	req.Header.Set("X-Title", "Humphreys Work Orders")
 
@@ -249,27 +272,9 @@ func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, prompt string) (
 	return text, nil
 }
 
-func buildWorkDoneFromRepairLogsPrompt(repairLogs []domain.RepairLog) string {
+func buildWorkDoneFromRepairLogsPrompt(template string, repairLogs []domain.RepairLog) string {
 	logSummary := summarizeRepairLogs(repairLogs)
-	return fmt.Sprintf(`Write only the customer-facing "Work Done" content based strictly on repair logs.
-Output rules:
-- Return plain paragraph text only.
-- No headings, no labels, no bullet points, no numbered lists.
-- Do not include customer info, equipment info, pricing, status, or any unrelated fields.
-- Do not invent facts.
-- Rewrite internal/technical note phrasing into clear customer-facing service language.
-- Never use phrases like "owner reported", "customer reported", "no further details", "unspecified item", or similar uncertainty/disclaimer wording.
-- Focus on what was checked, diagnosed, repaired, adjusted, cleaned, replaced, tested, or confirmed.
-- Use passive voice throughout.
-- Do not mention any person, technician, owner, customer, or staff member.
-- Describe outcomes as completed actions (for example: "was inspected", "was repaired", "was tested", "was confirmed").
-- Start immediately with the completed work. No introductory lead-in phrases.
-- Never start with or include phrases like "The repair logs indicate that", "It was noted that", "It was reported that", or similar preambles.
-- If there are no repair logs, return exactly: No repair work has been logged yet.
-
-Repair logs summary:
-%s
-`, logSummary)
+	return strings.ReplaceAll(template, "{{repair_logs_summary}}", logSummary)
 }
 
 func extractMessageText(content any) string {
@@ -309,7 +314,7 @@ func extractMessageText(content any) string {
 	return ""
 }
 
-func buildWorkOrderAISummaryPrompt(item domain.WorkOrderDetail, repairLogs []domain.RepairLog, partsRequests []domain.PartsPurchaseRequest) string {
+func buildWorkOrderAISummaryPrompt(template string, item domain.WorkOrderDetail, repairLogs []domain.RepairLog, partsRequests []domain.PartsPurchaseRequest) string {
 	customerName := strings.TrimSpace(strings.Join([]string{orEmpty(item.Customer.FirstName), orEmpty(item.Customer.LastName)}, " "))
 	if customerName == "" {
 		customerName = "-"
@@ -330,16 +335,7 @@ func buildWorkOrderAISummaryPrompt(item domain.WorkOrderDetail, repairLogs []dom
 	pendingActions := summarizeActionsRequired(item.StatusName, partsRequests)
 	partsRequestSummary := summarizePartsRequests(partsRequests)
 
-	return fmt.Sprintf(`Write a single natural-language technician summary in 60 words max.
-Output MUST be in paragraph form in natural language (1 short paragraph; maximum 2 paragraphs).
-Bold these information with **...**: customer name, phone, email, equipment brand/type/model, required actions.
-Do not use bullet points, numbered lists, markdown headings, or filler words.
-Must include: customer name, phone, email, equipment brand, equipment type, model (if present).
-Must include: repair logs summary with technician name(s) and key work done.
-Must include: actions required (e.g., pending parts approval, awaiting customer pickup), if any.
-Include only facts from provided data. If missing, say "Unknown".
-
-Work order data:
+	data := fmt.Sprintf(`Work order data:
 - Reference ID: %d
 - Status: %s
 - Customer Name: %s
@@ -384,6 +380,7 @@ Work order data:
 		partsRequestSummary,
 		pendingActions,
 	)
+	return strings.ReplaceAll(template, "{{work_order_data}}", data)
 }
 
 func summarizeRepairLogs(logs []domain.RepairLog) string {

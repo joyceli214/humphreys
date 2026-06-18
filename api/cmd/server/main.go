@@ -13,6 +13,7 @@ import (
 	"humphreys/api/internal/config"
 	"humphreys/api/internal/db"
 	"humphreys/api/internal/middleware"
+	"humphreys/api/internal/modules/aisettings"
 	"humphreys/api/internal/modules/auth"
 	authsecurity "humphreys/api/internal/modules/auth/security"
 	"humphreys/api/internal/modules/catalog"
@@ -60,6 +61,7 @@ func main() {
 	usersHandler := users.New(pool)
 	rolesHandler := roles.New(pool)
 	catalogHandler := catalog.New(pool)
+	aiSettingsHandler := aisettings.New(pool)
 	emailTemplatesHandler := emailtemplates.New(pool)
 	workOrdersHandler := workorders.New(pool)
 	uploadsHandler := uploads.New(cfg)
@@ -82,6 +84,7 @@ func main() {
 	users.RegisterRoutes(authed, usersHandler)
 	roles.RegisterRoutes(authed, rolesHandler)
 	catalog.RegisterRoutes(authed, catalogHandler)
+	aisettings.RegisterRoutes(authed, aiSettingsHandler)
 	emailtemplates.RegisterRoutes(authed, emailTemplatesHandler)
 	workorders.RegisterRoutes(authed, workOrdersHandler)
 	uploads.RegisterRoutes(authed, uploadsHandler)

@@ -1,5 +1,6 @@
 import type {
   AuthResponse,
+  AISettings,
   CustomerLookupOption,
   DropdownManagementEntry,
   DashboardData,
@@ -551,6 +552,22 @@ export class APIClient {
 
   updateEmailTemplate(key: EmailTemplateKey, payload: { subject_template: string; body_template: string }) {
     return this.request<EmailTemplate>(`/email-templates/${key}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  getAISettings() {
+    return this.request<AISettings>("/ai-settings");
+  }
+
+  updateAISettings(payload: {
+    openrouter_api_key?: string;
+    openrouter_model: string;
+    work_order_summary_prompt: string;
+    work_done_prompt: string;
+  }) {
+    return this.request<AISettings>("/ai-settings", {
       method: "PATCH",
       body: JSON.stringify(payload)
     });

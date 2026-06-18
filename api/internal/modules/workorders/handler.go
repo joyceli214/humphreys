@@ -5,13 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"net/mail"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"humphreys/api/internal/domain"
 	"humphreys/api/internal/middleware"
+	"humphreys/api/internal/modules/aisettings"
 	"humphreys/api/internal/modules/uploads"
 
 	"github.com/gin-gonic/gin"
@@ -20,13 +20,12 @@ import (
 )
 
 type Handler struct {
-	service          *Service
-	uploads          *uploads.Handler
-	emailClient      *graphEmailClient
-	openRouterAPIKey string
-	openRouterModel  string
-	httpClient       *http.Client
-	aiSummaryCache   *ttlcache.Cache[string, aiSummaryCacheItem]
+	service        *Service
+	uploads        *uploads.Handler
+	aiSettings     *aisettings.Service
+	emailClient    *graphEmailClient
+	httpClient     *http.Client
+	aiSummaryCache *ttlcache.Cache[string, aiSummaryCacheItem]
 }
 
 type updateEquipmentRequest struct {
@@ -187,12 +186,11 @@ func New(db *pgxpool.Pool) *Handler {
 	httpClient := &http.Client{Timeout: 25 * time.Second}
 
 	return &Handler{
-		service:          NewService(NewRepository(db)),
-		emailClient:      newGraphEmailClientFromEnv(httpClient),
-		openRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
-		openRouterModel:  getOpenRouterModel(),
-		httpClient:       httpClient,
-		aiSummaryCache:   aiCache,
+		service:        NewService(NewRepository(db)),
+		emailClient:    newGraphEmailClientFromEnv(httpClient),
+		aiSettings:     aisettings.NewService(aisettings.NewRepository(db)),
+		httpClient:     httpClient,
+		aiSummaryCache: aiCache,
 	}
 }
 
@@ -202,12 +200,10 @@ func NewWithService(service *Service) *Handler {
 	httpClient := &http.Client{Timeout: 25 * time.Second}
 
 	return &Handler{
-		service:          service,
-		emailClient:      newGraphEmailClientFromEnv(httpClient),
-		openRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
-		openRouterModel:  getOpenRouterModel(),
-		httpClient:       httpClient,
-		aiSummaryCache:   aiCache,
+		service:        service,
+		emailClient:    newGraphEmailClientFromEnv(httpClient),
+		httpClient:     httpClient,
+		aiSummaryCache: aiCache,
 	}
 }
 

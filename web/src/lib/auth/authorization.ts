@@ -2,17 +2,18 @@ export type NavEntry = {
   href: string;
   label: string;
   readPermission: string;
-  group?: "settings";
+  group?: "administration" | "config";
 };
 
 export const NAV_ENTRIES: NavEntry[] = [
   { href: "/dashboard", label: "Dashboard", readPermission: "work_orders:read" },
   { href: "/work-orders", label: "Work Orders", readPermission: "work_orders:read" },
-  { href: "/dropdown-management", label: "Dropdown Management", readPermission: "work_orders:update", group: "settings" },
-  { href: "/email-templates", label: "Email Templates", readPermission: "work_orders:update", group: "settings" },
+  { href: "/dropdown-management", label: "Dropdown Management", readPermission: "work_orders:update", group: "administration" },
+  { href: "/email-templates", label: "Email Templates", readPermission: "work_orders:update", group: "config" },
+  { href: "/ai-settings", label: "AI Settings", readPermission: "work_orders:update", group: "config" },
   { href: "/parts-purchase-requests", label: "Parts Requests", readPermission: "work_orders_sensitive:read" },
-  { href: "/users", label: "User Management", readPermission: "users:read", group: "settings" },
-  { href: "/roles", label: "Role Management", readPermission: "roles:read", group: "settings" }
+  { href: "/users", label: "User Management", readPermission: "users:read", group: "administration" },
+  { href: "/roles", label: "Role Management", readPermission: "roles:read", group: "administration" }
 ];
 
 export function firstReadableRoute(scope: string[]): string {
