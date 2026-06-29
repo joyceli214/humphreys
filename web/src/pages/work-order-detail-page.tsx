@@ -1862,6 +1862,57 @@ export default function WorkOrderDetailPage() {
     </article>
   );
 
+  const repairLogEditor = (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold">{editingRepairLogID !== null ? "Edit Repair Log" : "Add Repair Log"}</h3>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-sm text-muted-foreground">Repair Date</label>
+          <Input
+            type="date"
+            value={repairLogForm.repair_date}
+            onChange={(e) => setRepairLogForm((prev) => ({ ...prev, repair_date: e.target.value }))}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm text-muted-foreground">Hours Used</label>
+          <Input
+            type="text"
+            inputMode="decimal"
+            value={repairLogForm.hours_used}
+            onChange={(e) => setRepairLogForm((prev) => ({ ...prev, hours_used: e.target.value }))}
+          />
+        </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm text-muted-foreground">Details</label>
+          <AIMarkdownEditor
+            markdown={repairLogForm.details}
+            contentEditableClassName={workNotesEditorContentClassName}
+            onChange={handleRepairLogDetailsChange}
+            plugins={workNotesEditorPlugins}
+            onGenerate={(prompt) => generateMarkdown("repair_log", prompt, repairLogForm.details)}
+          />
+        </div>
+        <div className="flex gap-2 md:col-span-2">
+          <Button onClick={saveRepairLog} disabled={savingRepairLog}>
+            {savingRepairLog ? "Saving..." : editingRepairLogID !== null ? "Save Changes" : "Save Repair Log"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              cleanupAllTempMarkdownImages(repairLogForm.details);
+              setRepairLogModalOpen(false);
+              setEditingRepairLogID(null);
+            }}
+            disabled={savingRepairLog}
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
   const registeredLayoutBlocks: Partial<Record<WorkOrderLayoutBlockID, ReactNode>> = {};
   const registerLayoutBlock = (id: WorkOrderLayoutBlockID, node: ReactNode) => {
     registeredLayoutBlocks[id] = node;
@@ -2400,69 +2451,8 @@ export default function WorkOrderDetailPage() {
                 </div>
               </div>
 
-              {canCreateRepairLogs && (
-                <Dialog
-                  open={repairLogModalOpen}
-                  onOpenChange={(open) => {
-                    if (!open) {
-                      cleanupAllTempMarkdownImages(repairLogForm.details);
-                      setEditingRepairLogID(null);
-                    }
-                    setRepairLogModalOpen(open);
-                  }}
-                >
-                  <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto p-4 sm:p-6">
-                    <DialogTitle className="text-lg font-semibold">{editingRepairLogID !== null ? "Edit Repair Log" : "Add Repair Log"}</DialogTitle>
-                    <DialogDescription className="text-sm text-muted-foreground">
-                      Record time spent and repair details for this work order.
-                    </DialogDescription>
-                    <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <div>
-                        <label className="mb-1 block text-sm text-muted-foreground">Repair Date</label>
-                        <Input
-                          type="date"
-                          value={repairLogForm.repair_date}
-                          onChange={(e) => setRepairLogForm((prev) => ({ ...prev, repair_date: e.target.value }))}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-sm text-muted-foreground">Hours Used</label>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          value={repairLogForm.hours_used}
-                          onChange={(e) => setRepairLogForm((prev) => ({ ...prev, hours_used: e.target.value }))}
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="mb-1 block text-sm text-muted-foreground">Details</label>
-                        <AIMarkdownEditor
-                          markdown={repairLogForm.details}
-                          contentEditableClassName={workNotesEditorContentClassName}
-                          onChange={handleRepairLogDetailsChange}
-                          plugins={workNotesEditorPlugins}
-                          onGenerate={(prompt) => generateMarkdown("repair_log", prompt, repairLogForm.details)}
-                        />
-                      </div>
-                      <div className="md:col-span-2 flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() => {
-                            cleanupAllTempMarkdownImages(repairLogForm.details);
-                            setRepairLogModalOpen(false);
-                            setEditingRepairLogID(null);
-                          }}
-                          disabled={savingRepairLog}
-                        >
-                          Cancel
-                        </Button>
-                        <Button onClick={saveRepairLog} disabled={savingRepairLog}>
-                          {savingRepairLog ? "Saving..." : editingRepairLogID !== null ? "Save Changes" : "Save Repair Log"}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+              {canCreateRepairLogs && repairLogModalOpen && editingRepairLogID === null && (
+                <div className="border-t border-border pt-3">{repairLogEditor}</div>
               )}
 
               {canReadRepairLogs && (
@@ -2472,31 +2462,35 @@ export default function WorkOrderDetailPage() {
                   {repairLogs.map((log) => (
                     <div key={log.repair_log_id} className="relative">
                       <div className="absolute -left-[19px] top-5 h-4 w-4 rounded-full border-2 border-white bg-primary shadow" />
-                      <div className="rounded-lg p-2">
-                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-medium">{formatDateTime(log.repair_date)}</p>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Badge className="bg-slate-100 text-slate-700">{`${log.hours_used} hrs`}</Badge>
-                            <span>{log.created_by_name ?? log.created_by_user_id}</span>
-                            {(canUpdateRepairLogs || canDeleteRepairLogs) && (
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-lg font-bold text-slate-500 hover:bg-slate-100">⋮</Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  {canUpdateRepairLogs && (
-                                    <DropdownMenuItem onClick={() => openEditRepairLogModal(log)}>Edit</DropdownMenuItem>
-                                  )}
-                                  {canDeleteRepairLogs && (
-                                    <DropdownMenuItem onClick={() => setRepairLogDeleteTarget(log)}>Delete</DropdownMenuItem>
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            )}
+                      {repairLogModalOpen && editingRepairLogID === log.repair_log_id ? (
+                        <div className="rounded-lg border border-border p-3">{repairLogEditor}</div>
+                      ) : (
+                        <div className="rounded-lg p-2">
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-medium">{formatDateTime(log.repair_date)}</p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Badge className="bg-slate-100 text-slate-700">{`${log.hours_used} hrs`}</Badge>
+                              <span>{log.created_by_name ?? log.created_by_user_id}</span>
+                              {(canUpdateRepairLogs || canDeleteRepairLogs) && (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-lg font-bold text-slate-500 hover:bg-slate-100">⋮</Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    {canUpdateRepairLogs && (
+                                      <DropdownMenuItem onClick={() => openEditRepairLogModal(log)}>Edit</DropdownMenuItem>
+                                    )}
+                                    {canDeleteRepairLogs && (
+                                      <DropdownMenuItem onClick={() => setRepairLogDeleteTarget(log)}>Delete</DropdownMenuItem>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              )}
+                            </div>
                           </div>
+                          <div className="text-sm leading-6">{markdownPlain(log.details, openFullscreenImage)}</div>
                         </div>
-                        <div className="text-sm leading-6">{markdownPlain(log.details, openFullscreenImage)}</div>
-                      </div>
+                      )}
                     </div>
                   ))}
                 </div>
