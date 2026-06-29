@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
+import { createPortal } from "react-dom";
 import { MDXEditor, type MDXEditorMethods } from "@mdxeditor/editor";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -27,8 +28,10 @@ function prependMarkdown(generated: string, existing: string) {
 }
 
 export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditableClassName, plugins, className }: AIMarkdownEditorProps) {
+  const editorContainerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MDXEditorMethods | null>(null);
   const currentMarkdownRef = useRef(markdown);
+  const [toolbarElement, setToolbarElement] = useState<HTMLElement | null>(null);
   const [editorVersion, setEditorVersion] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [preview, setPreview] = useState("");
@@ -44,6 +47,10 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
     currentMarkdownRef.current = markdown;
     editorRef.current?.setMarkdown(markdown);
   }, [markdown]);
+
+  useLayoutEffect(() => {
+    setToolbarElement(editorContainerRef.current?.querySelector<HTMLElement>(".mdxeditor-toolbar") ?? null);
+  }, [editorVersion, plugins]);
 
   const handleChange = (value: string) => {
     currentMarkdownRef.current = value;
@@ -84,19 +91,20 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="relative rounded-md border border-input bg-white p-2 [&_.mdxeditor-toolbar]:pl-10">
-        {canGenerate && (
+      <div ref={editorContainerRef} className="rounded-md border border-input bg-white p-2">
+        {canGenerate && toolbarElement && createPortal(
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="absolute left-3 top-3 z-10 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+            className="order-first h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-foreground"
             onClick={() => setOpen((value) => !value)}
             aria-label="AI writing tool"
             title="AI writing tool"
           >
             <PenLine className="h-4 w-4" aria-hidden="true" />
-          </Button>
+          </Button>,
+          toolbarElement
         )}
         <MDXEditor
           ref={editorRef}
