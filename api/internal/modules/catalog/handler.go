@@ -185,6 +185,7 @@ func (h *Handler) SetWorkOrderStatusGroup(c *gin.Context) {
 func (h *Handler) GetCompleteJobStatus(c *gin.Context) {
 	statusID, err := h.service.GetCompleteJobStatusID(c.Request.Context())
 	if err != nil {
+		_ = c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load complete job status setting"})
 		return
 	}
@@ -208,6 +209,7 @@ func (h *Handler) SetCompleteJobStatus(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		_ = c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update complete job status setting"})
 		return
 	}

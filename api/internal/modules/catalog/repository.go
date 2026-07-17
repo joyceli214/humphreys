@@ -515,7 +515,7 @@ func (r *storeRepository) SetCompleteJobStatusID(ctx context.Context, statusID i
 
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO public.app_settings(setting_key, setting_value, updated_at)
-		VALUES($1, $2::text, now())
+		VALUES($1, $2::bigint::text, now())
 		ON CONFLICT (setting_key)
 		DO UPDATE SET
 			setting_value = EXCLUDED.setting_value,
