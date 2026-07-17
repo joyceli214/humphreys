@@ -375,7 +375,7 @@ export class APIClient {
       problem_description: string | null;
       worker_ids: number[];
       work_done: string | null;
-      payment_method_ids: number[];
+      payment_method_ids?: number[];
     }
   ) {
     return this.request<WorkOrderDetail>(`/work-orders/${referenceID}/work-notes`, {

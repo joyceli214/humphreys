@@ -107,7 +107,7 @@ type WorkNotesUpdateInput struct {
 	ProblemDescription *string
 	WorkerIDs          []int32
 	WorkDone           *string
-	PaymentMethodIDs   []int32
+	PaymentMethodIDs   *[]int32
 }
 
 type LineItemUpsertInput struct {
@@ -365,18 +365,20 @@ func (s *Service) UpdateStatus(ctx context.Context, referenceID int, input Statu
 }
 
 func (s *Service) UpdateWorkNotes(ctx context.Context, referenceID int, input WorkNotesUpdateInput) (domain.WorkOrderDetail, error) {
-	// Keep payment methods ordered as [deposit, final], capped at 2 entries.
-	normalizedPaymentMethodIDs := make([]int32, 0, 2)
-	for _, id := range input.PaymentMethodIDs {
-		if id <= 0 {
-			continue
+	if input.PaymentMethodIDs != nil {
+		// Keep payment methods ordered as [deposit, final], capped at 2 entries.
+		normalizedPaymentMethodIDs := make([]int32, 0, 2)
+		for _, id := range *input.PaymentMethodIDs {
+			if id <= 0 {
+				continue
+			}
+			normalizedPaymentMethodIDs = append(normalizedPaymentMethodIDs, id)
+			if len(normalizedPaymentMethodIDs) == 2 {
+				break
+			}
 		}
-		normalizedPaymentMethodIDs = append(normalizedPaymentMethodIDs, id)
-		if len(normalizedPaymentMethodIDs) == 2 {
-			break
-		}
+		input.PaymentMethodIDs = &normalizedPaymentMethodIDs
 	}
-	input.PaymentMethodIDs = normalizedPaymentMethodIDs
 
 	if err := s.repo.UpdateWorkNotes(ctx, referenceID, input); err != nil {
 		return domain.WorkOrderDetail{}, err

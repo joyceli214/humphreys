@@ -50,10 +50,10 @@ type updateStatusRequest struct {
 }
 
 type updateWorkNotesRequest struct {
-	ProblemDescription *string `json:"problem_description"`
-	WorkerIDs          []int32 `json:"worker_ids"`
-	WorkDone           *string `json:"work_done"`
-	PaymentMethodIDs   []int32 `json:"payment_method_ids"`
+	ProblemDescription *string  `json:"problem_description"`
+	WorkerIDs          []int32  `json:"worker_ids"`
+	WorkDone           *string  `json:"work_done"`
+	PaymentMethodIDs   *[]int32 `json:"payment_method_ids"`
 }
 
 type updateLineItemsRequest struct {

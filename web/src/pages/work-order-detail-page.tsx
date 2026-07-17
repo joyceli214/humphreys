@@ -1291,8 +1291,7 @@ export default function WorkOrderDetailPage() {
       const updated = await apiClient.updateWorkOrderWorkNotes(parsedReferenceId, {
         problem_description: blankToNull(workNotesForm.problem_description),
         worker_ids: workNotesForm.worker_ids,
-        work_done: blankToNull(workNotesForm.work_done),
-        payment_method_ids: workNotesForm.payment_method_ids
+        work_done: blankToNull(workNotesForm.work_done)
       });
       setItem(updated);
       setEditingSection(null);

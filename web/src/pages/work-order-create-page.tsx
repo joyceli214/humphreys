@@ -841,7 +841,7 @@ export default function WorkOrderCreatePage() {
           problem_description: problemDescription.trim(),
           worker_ids: [],
           work_done: null,
-          payment_method_ids: []
+          payment_method_ids: created.payment_method_ids
         });
       }
       alerts.success(`Work order #${created.reference_id} created`);

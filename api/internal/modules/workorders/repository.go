@@ -951,7 +951,7 @@ func (r *storeRepository) UpdateWorkNotes(ctx context.Context, referenceID int, 
 			problem_description = $1,
 			worker_ids = $2,
 			work_done = $3,
-			payment_method_ids = $4,
+			payment_method_ids = COALESCE($4::integer[]::bigint[], payment_method_ids),
 			updated_at = now()
 		WHERE reference_id = $5
 	`,
