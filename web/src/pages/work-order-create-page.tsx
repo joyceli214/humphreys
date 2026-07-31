@@ -643,12 +643,23 @@ export default function WorkOrderCreatePage() {
       return;
     }
     try {
-      const params = new URLSearchParams({ country: "Canada", state });
-      const res = await fetch(`https://countriesnow.space/api/v0.1/countries/state/cities/q?${params.toString()}`);
-      if (!res.ok) return;
-      const json = (await res.json()) as { error: boolean; data?: string[] };
-      const options = (json.data ?? [])
-        .map((city) => city.trim())
+      const cityParams = new URLSearchParams({ country: "Canada", state });
+      const municipalityParams = new URLSearchParams({
+        where: `PRNAME LIKE '${state.replace(/'/g, "''")}%'`,
+        outFields: "CSDNAME",
+        returnGeometry: "false",
+        f: "json"
+      });
+      const [cityRes, municipalityRes] = await Promise.all([
+        fetch(`https://countriesnow.space/api/v0.1/countries/state/cities/q?${cityParams.toString()}`),
+        fetch(`https://geo.statcan.gc.ca/geo_wa/rest/services/2024/lcsd000a24s_e/MapServer/0/query?${municipalityParams.toString()}`)
+      ]);
+      if (!cityRes.ok && !municipalityRes.ok) return;
+      const cities = cityRes.ok ? ((await cityRes.json()) as { data?: string[] }).data ?? [] : [];
+      const municipalities = municipalityRes.ok
+        ? ((await municipalityRes.json()) as { features?: Array<{ attributes: { CSDNAME?: string } }> }).features?.map((feature) => feature.attributes.CSDNAME ?? "") ?? []
+        : [];
+      const options = Array.from(new Set([...cities, ...municipalities].map((place) => place.trim())))
         .filter(Boolean)
         .sort((a, b) => a.localeCompare(b));
       setCityOptions(options);
@@ -1084,7 +1095,7 @@ export default function WorkOrderCreatePage() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-sm">City</label>
+                          <label className="text-sm">City / Municipality</label>
                           <SingleSearchableDropdown
                             value={selectedCityOptionId}
                             valueLabel={newCustomerCity}
@@ -1097,7 +1108,8 @@ export default function WorkOrderCreatePage() {
                               if (!needle) return cityLookupOptions;
                               return cityLookupOptions.filter((option) => option.label.toLowerCase().includes(needle));
                             }}
-                            placeholder={newCustomerProvince ? "Select city" : "Select province first"}
+                            onAddOther={setNewCustomerCity}
+                            placeholder={newCustomerProvince ? "Select city or municipality" : "Select province first"}
                             allowClear
                             clearLabel="None"
                             disabled={!newCustomerProvince}
