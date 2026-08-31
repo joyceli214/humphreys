@@ -44,13 +44,13 @@ export function ProtectedShell({ children }: { children: ReactNode }) {
             className="fixed inset-0 z-40 bg-black/40 md:hidden"
             onClick={() => setMobileMenuOpen(false)}
           />
-          <AppSidebar className="fixed left-0 top-0 z-50 h-full md:hidden" onNavigate={() => setMobileMenuOpen(false)} />
+          <AppSidebar className="safe-area-top fixed left-0 top-0 z-50 h-full md:hidden" onNavigate={() => setMobileMenuOpen(false)} />
         </>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onMenuToggle={() => setMobileMenuOpen(true)} />
-        <main className="min-w-0 overflow-x-hidden p-6">{children}</main>
+        <main className="safe-area-bottom min-w-0 overflow-x-hidden p-6">{children}</main>
       </div>
     </div>
   );

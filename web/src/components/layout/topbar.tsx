@@ -11,7 +11,7 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const greetingName = user?.full_name ?? "there";
 
   return (
-    <header className="h-16 border-b border-border bg-white px-6 flex items-center justify-between">
+    <header className="safe-area-top h-16 border-b border-border bg-white px-6 flex items-center justify-between">
       <div className="flex items-center gap-3">
         <Button type="button" variant="outline" size="sm" className="md:hidden" onClick={onMenuToggle} aria-label="Open menu">
           <Menu className="h-4 w-4" />
