@@ -17,6 +17,7 @@ import { MultiSearchableDropdown } from "@/components/work-order-dropdowns/multi
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
+import { canadianProvinces, municipalitiesForProvince } from "@/data/canadian-municipalities";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -300,8 +301,6 @@ export default function WorkOrderCreatePage() {
   const [itemOptions, setItemOptions] = useState<LookupOption[]>([]);
   const [brandOptions, setBrandOptions] = useState<LookupOption[]>([]);
   const [locationOptions, setLocationOptions] = useState<LookupOption[]>([]);
-  const [provinceOptions, setProvinceOptions] = useState<string[]>([]);
-  const [cityOptions, setCityOptions] = useState<string[]>([]);
   const [frozenDropdowns, setFrozenDropdowns] = useState<Record<string, boolean>>({});
   const [updatingLocationByReferenceID, setUpdatingLocationByReferenceID] = useState<Record<number, boolean>>({});
   const {
@@ -335,12 +334,12 @@ export default function WorkOrderCreatePage() {
     depositPaymentMethodId
   } = createForm;
   const provinceLookupOptions = useMemo(
-    () => provinceOptions.map((label, index) => ({ id: index + 1, label })),
-    [provinceOptions]
+    () => canadianProvinces.map((label, index) => ({ id: index + 1, label })),
+    []
   );
   const cityLookupOptions = useMemo(
-    () => cityOptions.map((label, index) => ({ id: index + 1, label })),
-    [cityOptions]
+    () => municipalitiesForProvince(newCustomerProvince).map((label, index) => ({ id: index + 1, label })),
+    [newCustomerProvince]
   );
   const selectedProvinceOptionId = useMemo(
     () => provinceLookupOptions.find((option) => option.label === newCustomerProvince)?.id ?? null,
@@ -616,62 +615,6 @@ export default function WorkOrderCreatePage() {
     resetCreateForm();
     navigate("/work-orders");
   };
-
-  const loadProvinceOptions = async () => {
-    try {
-      const res = await fetch("https://countriesnow.space/api/v0.1/countries/states");
-      if (!res.ok) return;
-      const json = (await res.json()) as {
-        error: boolean;
-        data?: Array<{ name: string; states: Array<{ name: string }> }>;
-      };
-      const canada = json.data?.find((country) => country.name === "Canada");
-      const options = (canada?.states ?? [])
-        .map((state) => state.name.trim())
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
-      setProvinceOptions(options);
-    } catch {
-      setProvinceOptions([]);
-    }
-  };
-
-  const loadCityOptions = async (province: string) => {
-    const state = province.trim();
-    if (!state) {
-      setCityOptions([]);
-      return;
-    }
-    try {
-      const cityParams = new URLSearchParams({ country: "Canada", state });
-      const municipalityParams = new URLSearchParams({
-        where: `PRNAME LIKE '${state.replace(/'/g, "''")}%'`,
-        outFields: "CSDNAME",
-        returnGeometry: "false",
-        f: "json"
-      });
-      const [cityRes, municipalityRes] = await Promise.all([
-        fetch(`https://countriesnow.space/api/v0.1/countries/state/cities/q?${cityParams.toString()}`),
-        fetch(`https://geo.statcan.gc.ca/geo_wa/rest/services/2024/lcsd000a24s_e/MapServer/0/query?${municipalityParams.toString()}`)
-      ]);
-      if (!cityRes.ok && !municipalityRes.ok) return;
-      const cities = cityRes.ok ? ((await cityRes.json()) as { data?: string[] }).data ?? [] : [];
-      const municipalities = municipalityRes.ok
-        ? ((await municipalityRes.json()) as { features?: Array<{ attributes: { CSDNAME?: string } }> }).features?.map((feature) => feature.attributes.CSDNAME ?? "") ?? []
-        : [];
-      const options = Array.from(new Set([...cities, ...municipalities].map((place) => place.trim())))
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
-      setCityOptions(options);
-    } catch {
-      setCityOptions([]);
-    }
-  };
-
-  useEffect(() => {
-    if (!createOpen) return;
-    void loadProvinceOptions();
-  }, [createOpen]);
 
   useEffect(() => {
     if (!canCreateWorkOrders) return;
@@ -1082,7 +1025,6 @@ export default function WorkOrderCreatePage() {
                               const province = selected?.label ?? "";
                               setNewCustomerProvince(province);
                               setNewCustomerCity("");
-                              void loadCityOptions(province);
                             }}
                             loadOptions={async (q) => {
                               const needle = q.trim().toLowerCase();
@@ -1097,6 +1039,7 @@ export default function WorkOrderCreatePage() {
                         <div className="space-y-1">
                           <label className="text-sm">City / Municipality</label>
                           <SingleSearchableDropdown
+                            key={newCustomerProvince || "no-province"}
                             value={selectedCityOptionId}
                             valueLabel={newCustomerCity}
                             onChange={(id) => {
