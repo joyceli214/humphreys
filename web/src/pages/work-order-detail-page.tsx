@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Copy, Mail } from "lucide-react";
+import { ChevronDown, Copy, Mail, Share2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +28,7 @@ import { SingleSearchableDropdown } from "@/components/work-order-dropdowns/sing
 import { MultiSearchableDropdown } from "@/components/work-order-dropdowns/multi-searchable-dropdown";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
-import { normalizeMarkdownInput } from "@/lib/markdown";
+import { markdownToPlainText, normalizeMarkdownInput } from "@/lib/markdown";
 import { DEFAULT_EMAIL_TEMPLATES, renderEmailTemplate, type CustomerEmailTemplateKey } from "@/lib/email-templates";
 import {
   BlockTypeSelect,
@@ -965,6 +965,57 @@ export default function WorkOrderDetailPage() {
     });
   };
 
+  const buildShareContent = () => {
+    const url = window.location.origin + "/work-orders/" + item.reference_id;
+    const subject = `Humphrey's Work Order #${item.reference_id}`;
+    const equipment = [item.item_name, ...item.brand_names, item.model_number]
+      .map((value) => value?.trim())
+      .filter(Boolean)
+      .join(" ");
+    const problem = normalizeMarkdownInput(item.problem_description)
+      ? markdownToPlainText(item.problem_description).replace(/\s+/g, " ").trim()
+      : "";
+    const summary = problem.length > 300 ? problem.slice(0, 299).trimEnd() + "…" : problem;
+    const text = [
+      `Work Order #${item.reference_id}`,
+      item.status_name?.trim() ? `Status: ${item.status_name.trim()}` : "",
+      equipment ? `Equipment: ${equipment}` : "",
+      summary ? `Problem: ${summary}` : "",
+      `Link: ${url}`
+    ].filter(Boolean).join("\n");
+    return { url, subject, text };
+  };
+
+  const shareWhatsApp = () => {
+    const { text } = buildShareContent();
+    window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank", "noopener,noreferrer");
+  };
+
+  const shareEmail = () => {
+    const { subject, text } = buildShareContent();
+    window.location.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(text);
+  };
+
+  const shareMore = async () => {
+    const { subject, text, url } = buildShareContent();
+    try {
+      await navigator.share({ title: subject, text, url });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      alerts.error("Failed to share", err instanceof Error ? err.message : "Sharing is unavailable");
+    }
+  };
+
+  const copyShareLink = async () => {
+    const { url } = buildShareContent();
+    try {
+      await navigator.clipboard.writeText(url);
+      alerts.success("Work order link copied");
+    } catch (err) {
+      alerts.error("Failed to copy", err instanceof Error ? err.message : "Clipboard is unavailable");
+    }
+  };
+
   const copyProblemDescription = async () => {
     const text = normalizeMarkdownInput(item.problem_description).trim();
     if (!text) {
@@ -994,6 +1045,14 @@ export default function WorkOrderDetailPage() {
       current_markdown: currentMarkdown
     });
     return normalizeMarkdownInput(res.markdown);
+  };
+
+  const proofreadMarkdown = (field: "problem_description" | "work_done" | "repair_log", notes: string, currentMarkdown: string) =>
+    generateMarkdown(field, `Proofread and improve grammar/clarity of the current markdown. User notes: ${notes}\n\nUse only the current markdown as the source. Preserve its facts and meaning; do not add work or information from other fields or work-order context. Return the full corrected markdown only.`, currentMarkdown);
+
+  const directlyGenerateWorkDone = async () => {
+    const res = await apiClient.generateAIWorkDoneFromRepairLogs(parsedReferenceId);
+    return normalizeMarkdownInput(res.work_done);
   };
 
   const openCreateLineItemModal = () => {
@@ -1889,7 +1948,9 @@ export default function WorkOrderDetailPage() {
             contentEditableClassName={workNotesEditorContentClassName}
             onChange={handleRepairLogDetailsChange}
             plugins={workNotesEditorPlugins}
-            onGenerate={(prompt) => generateMarkdown("repair_log", prompt, repairLogForm.details)}
+            onGenerate={(prompt) => proofreadMarkdown("repair_log", prompt, repairLogForm.details)}
+            replaceOnGenerate
+            onDirectGenerate={() => generateMarkdown("repair_log", "Directly generate a clear, well-formatted repair-log details entry for this work order from the available context. Do not invent repairs or facts. Do not ask questions. Output markdown only.", repairLogForm.details)}
           />
         </div>
         <div className="flex gap-2 md:col-span-2">
@@ -1995,6 +2056,23 @@ export default function WorkOrderDetailPage() {
           <Button variant="outline" asChild>
             <Link to={backToWorkOrders}>Back</Link>
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="h-auto whitespace-normal py-2 text-center leading-tight" variant="outline">
+                <Share2 className="mr-2 h-4 w-4" />
+                Share
+                <ChevronDown className="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={shareWhatsApp}>WhatsApp</DropdownMenuItem>
+              <DropdownMenuItem onClick={shareEmail}>Email</DropdownMenuItem>
+              {typeof navigator !== "undefined" && typeof navigator.share === "function" && (
+                <DropdownMenuItem onClick={() => void shareMore()}>More…</DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => void copyShareLink()}>Copy link</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -2150,7 +2228,9 @@ export default function WorkOrderDetailPage() {
                     contentEditableClassName={workNotesEditorContentClassName}
                     onChange={handleProblemDescriptionChange}
                     plugins={workNotesEditorPlugins}
-                    onGenerate={(prompt) => generateMarkdown("problem_description", prompt, workNotesForm.problem_description)}
+                    onGenerate={(prompt) => proofreadMarkdown("problem_description", prompt, workNotesForm.problem_description)}
+                    replaceOnGenerate
+                    onDirectGenerate={() => generateMarkdown("problem_description", "Directly generate a clear, well-formatted Problem Description for this work order from the available context. Do not invent repairs or facts. Do not ask questions. Output markdown only.", workNotesForm.problem_description)}
                   />
                 </div>
                 <div>
@@ -2160,7 +2240,9 @@ export default function WorkOrderDetailPage() {
                     contentEditableClassName={workNotesEditorContentClassName}
                     onChange={handleWorkDoneChange}
                     plugins={workNotesEditorPlugins}
-                    onGenerate={(prompt) => generateMarkdown("work_done", prompt, workNotesForm.work_done)}
+                    onGenerate={(prompt) => proofreadMarkdown("work_done", prompt, workNotesForm.work_done)}
+                    replaceOnGenerate
+                    onDirectGenerate={directlyGenerateWorkDone}
                   />
                 </div>
                 <div className="flex gap-2">
