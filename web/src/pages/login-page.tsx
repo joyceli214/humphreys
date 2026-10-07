@@ -15,9 +15,12 @@ export default function LoginPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    const form = new FormData(e.currentTarget as HTMLFormElement);
+    const emailValue = String(form.get("email") ?? email).trim();
+    const passwordValue = String(form.get("password") ?? password);
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(emailValue, passwordValue);
       alerts.success("Signed in", "Welcome back.");
     } catch (err) {
       alerts.error("Login failed", err instanceof Error ? err.message : "Login failed");
@@ -28,19 +31,19 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen grid place-items-center bg-[conic-gradient(from_120deg_at_50%_50%,#fff7ed_0%,#ffedd5_40%,#f8fafc_100%)] p-4">
-      <form onSubmit={onSubmit} className="w-full max-w-md bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg">
+      <form onSubmit={onSubmit} method="post" autoComplete="on" className="w-full max-w-md bg-white border border-border rounded-xl p-6 space-y-4 shadow-lg">
         <div>
           <p className="text-xs uppercase tracking-widest text-muted-foreground">Admin Access</p>
           <h1 className="text-2xl font-bold">Sign in</h1>
         </div>
         <div>
-          <label className="mb-1 block text-sm">Email</label>
-          <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <label htmlFor="email" className="mb-1 block text-sm">Email</label>
+          <Input id="email" name="email" type="email" autoComplete="username" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </div>
         <div>
-          <label className="mb-1 block text-sm">Password</label>
+          <label htmlFor="password" className="mb-1 block text-sm">Password</label>
           <div className="relative">
-            <Input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required className="pr-10" />
+            <Input id="password" name="password" autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} required className="pr-10" />
             <button
               type="button"
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"

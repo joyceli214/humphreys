@@ -14,6 +14,8 @@ type AIMarkdownEditorProps = {
   markdown: string;
   onChange: (value: string) => void;
   onGenerate?: (prompt: string) => Promise<string>;
+  onDirectGenerate?: () => Promise<string>;
+  replaceOnGenerate?: boolean;
   contentEditableClassName?: string;
   plugins?: ComponentProps<typeof MDXEditor>["plugins"];
   className?: string;
@@ -27,7 +29,7 @@ function prependMarkdown(generated: string, existing: string) {
   return `${top}\n\n${bottom}`;
 }
 
-export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditableClassName, plugins, className }: AIMarkdownEditorProps) {
+export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGenerate, replaceOnGenerate = false, contentEditableClassName, plugins, className }: AIMarkdownEditorProps) {
   const editorContainerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MDXEditorMethods | null>(null);
   const currentMarkdownRef = useRef(markdown);
@@ -39,7 +41,8 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const canGenerate = Boolean(onGenerate);
+  const [mode, setMode] = useState<"prompt" | "direct">("prompt");
+  const canGenerate = Boolean(onGenerate || onDirectGenerate);
   const trimmedPrompt = prompt.trim();
 
   useEffect(() => {
@@ -58,7 +61,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
   };
 
   const generate = async (previousOutput = "") => {
-    if (!onGenerate || !trimmedPrompt) return;
+    if (!onGenerate || !trimmedPrompt || loading) return;
     setLoading(true);
     setError("");
     try {
@@ -73,9 +76,25 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
     }
   };
 
+  const directGenerate = async () => {
+    if (!onDirectGenerate || loading) return;
+    setMode("direct");
+    setOpen(true);
+    setPreview("");
+    setError("");
+    setLoading(true);
+    try {
+      setPreview((await onDirectGenerate()).trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate text");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const accept = () => {
     if (!preview.trim()) return;
-    handleChange(prependMarkdown(preview, markdown));
+    handleChange(mode === "prompt" && replaceOnGenerate ? preview.trim() : prependMarkdown(preview, currentMarkdownRef.current));
     setEditorVersion((value) => value + 1);
     setOpen(false);
     setPrompt("");
@@ -93,17 +112,41 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
     <div className={cn("space-y-2", className)}>
       <div ref={editorContainerRef} className="rounded-md border border-input bg-white p-2">
         {canGenerate && toolbarElement && createPortal(
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="order-first h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-            onClick={() => setOpen((value) => !value)}
-            aria-label="AI writing tool"
-            title="AI writing tool"
-          >
-            <PenLine className="h-4 w-4" aria-hidden="true" />
-          </Button>,
+          <div className="order-first flex shrink-0 items-center gap-1">
+            {onGenerate && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                disabled={loading}
+                onClick={() => {
+                  setMode("prompt");
+                  setPreview("");
+                  setError("");
+                  setOpen(mode === "prompt" ? !open : true);
+                }}
+                aria-label="Proofread"
+                title="Proofread"
+              >
+                <PenLine className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
+            {onDirectGenerate && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                disabled={loading}
+                onClick={() => void directGenerate()}
+                aria-label="Direct Gen"
+                title="Direct Gen"
+              >
+                Direct Gen
+              </Button>
+            )}
+          </div>,
           toolbarElement
         )}
         <MDXEditor
@@ -120,23 +163,28 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, contentEditab
         <div className="rounded-md border border-border bg-white p-3 shadow-sm">
           <div className="flex items-start gap-2">
             <PenLine className="mt-2 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              rows={preview ? 2 : 1}
-              placeholder="Tell AI what to write"
-              className="min-h-10 flex-1 resize-y rounded-md border border-input bg-muted/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            />
-            <Button type="button" variant={preview ? "outline" : "default"} onClick={() => void generate(preview)} disabled={loading || !trimmedPrompt}>
-              {loading ? "Creating..." : preview ? "Refine" : "Create"}
-            </Button>
+            {mode === "prompt" && (
+              <>
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  rows={preview ? 2 : 1}
+                  placeholder="What should AI fix or improve?"
+                  className="min-h-10 flex-1 resize-y rounded-md border border-input bg-muted/40 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                />
+                <Button type="button" variant={preview ? "outline" : "default"} onClick={() => void generate(preview)} disabled={loading || !trimmedPrompt}>
+                  {loading ? "Creating..." : preview ? "Refine" : "Create"}
+                </Button>
+              </>
+            )}
+            {mode === "direct" && loading && <p role="status" className="flex-1 py-2 text-sm text-muted-foreground">Creating...</p>}
             {preview && (
-              <Button type="button" onClick={accept}>
+              <Button type="button" onClick={accept} disabled={loading}>
                 <Check className="mr-2 h-4 w-4" aria-hidden="true" />
-                Insert
+                {mode === "prompt" && replaceOnGenerate ? "Replace" : "Insert"}
               </Button>
             )}
-            <Button type="button" variant="ghost" size="sm" className="h-10 w-10 p-0" onClick={close} aria-label="Close AI writing tool">
+            <Button type="button" variant="ghost" size="sm" className="h-10 w-10 p-0" onClick={close} disabled={loading} aria-label="Close AI preview">
               <X className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
