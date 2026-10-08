@@ -2,10 +2,13 @@ package workorders
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -30,11 +33,16 @@ type openRouterMessage struct {
 	Content string `json:"content"`
 }
 
+type openRouterReasoning struct {
+	Exclude bool `json:"exclude,omitempty"`
+}
+
 type openRouterChatRequest struct {
-	Model       string              `json:"model"`
-	Messages    []openRouterMessage `json:"messages"`
-	Temperature float64             `json:"temperature"`
-	MaxTokens   int                 `json:"max_tokens"`
+	Reasoning   *openRouterReasoning `json:"reasoning,omitempty"`
+	Model       string               `json:"model"`
+	Messages    []openRouterMessage  `json:"messages"`
+	Temperature float64              `json:"temperature"`
+	MaxTokens   int                  `json:"max_tokens"`
 }
 
 type openRouterChatResponse struct {
@@ -132,7 +140,8 @@ func (h *Handler) GenerateAISummary(c *gin.Context) {
 
 	summary, err := h.generateOpenRouterSummaryOnce(c, settings, buildWorkOrderAISummaryPrompt(settings.WorkOrderSummaryPrompt, item, repairLogs, partsRequests))
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
+		log.Printf("[ai] summary: %v", redactAIError(err.Error(), settings.OpenRouterAPIKey))
+		c.JSON(http.StatusBadGateway, gin.H{"error": redactAIError(aiErrorMessage(err), settings.OpenRouterAPIKey)})
 		return
 	}
 
@@ -185,7 +194,8 @@ func (h *Handler) GenerateAIWorkDoneFromRepairLogs(c *gin.Context) {
 
 	workDone, err := h.generateOpenRouterSummaryOnce(c, settings, buildWorkDoneFromRepairLogsPrompt(settings.WorkDonePrompt, repairLogs))
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
+		log.Printf("[ai] work-done: %v", redactAIError(err.Error(), settings.OpenRouterAPIKey))
+		c.JSON(http.StatusBadGateway, gin.H{"error": redactAIError(aiErrorMessage(err), settings.OpenRouterAPIKey)})
 		return
 	}
 
@@ -266,10 +276,11 @@ func (h *Handler) generateAIMarkdown(c *gin.Context, referenceID *int) {
 		settings,
 		aiMarkdownSystemPrompt(field),
 		buildAIMarkdownPrompt(field, strings.TrimSpace(req.Prompt), req.CurrentMarkdown, item, repairLogs, partsRequests),
-		700,
+		3000,
 	)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed"})
+		log.Printf("[ai] markdown: %v", redactAIError(err.Error(), settings.OpenRouterAPIKey))
+		c.JSON(http.StatusBadGateway, gin.H{"error": redactAIError(aiErrorMessage(err), settings.OpenRouterAPIKey)})
 		return
 	}
 
@@ -295,12 +306,83 @@ func (h *Handler) getAISettings(c *gin.Context) (aisettings.Settings, error) {
 }
 
 func (h *Handler) generateOpenRouterSummaryOnce(c *gin.Context, settings aisettings.Settings, prompt string) (string, error) {
-	return h.generateOpenRouterTextOnce(c, settings, aisettings.DefaultSystemPrompt, prompt, 320)
+	return h.generateOpenRouterTextOnce(c, settings, aisettings.DefaultSystemPrompt, prompt, 2000)
 }
 
-func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int) (string, error) {
+type openRouterError struct {
+	StatusCode int
+	Message    string
+	Empty      bool
+	Retryable  bool
+	Cause      error
+}
+
+func (e *openRouterError) Error() string { return e.Message }
+func (e *openRouterError) Unwrap() error { return e.Cause }
+
+func redactAIError(message, key string) string {
+	if key != "" {
+		return strings.ReplaceAll(message, key, "[redacted]")
+	}
+	return message
+}
+
+func aiErrorMessage(err error) string {
+	var provider *openRouterError
+	if errors.As(err, &provider) {
+		switch provider.StatusCode {
+		case 429:
+			return "AI is busy (rate limited). Please try again in a minute."
+		case 402:
+			return "AI credits exhausted. Please top up OpenRouter credits."
+		case 401, 403:
+			return "AI API key rejected. Check AI Settings."
+		}
+	}
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout()) {
+		return "AI took too long to respond. Please try again."
+	}
+	if provider != nil && provider.Empty {
+		return "AI returned an empty response. Please try again."
+	}
+	return "AI request failed: " + err.Error()
+}
+
+func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int) (string, error) {
+	for attempt := 0; ; attempt++ {
+		text, err := h.generateOpenRouterTextAttempt(c.Request.Context(), settings, systemPrompt, prompt, maxTokens)
+		if err == nil {
+			return text, nil
+		}
+		var provider *openRouterError
+		var network net.Error
+		retry := errors.As(err, &network) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.ErrUnexpectedEOF)
+		if errors.As(err, &provider) {
+			retry = provider.Retryable || (provider.StatusCode < 300 && retry)
+		}
+		if attempt == 1 || !retry || c.Request.Context().Err() != nil {
+			return "", err
+		}
+		if provider != nil && provider.Empty {
+			maxTokens *= 2
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-c.Request.Context().Done():
+			timer.Stop()
+			return "", c.Request.Context().Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (h *Handler) generateOpenRouterTextAttempt(ctx context.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
 	payload := openRouterChatRequest{
-		Model: settings.OpenRouterModel,
+		Reasoning: &openRouterReasoning{Exclude: true},
+		Model:     settings.OpenRouterModel,
 		Messages: []openRouterMessage{
 			{
 				Role:    "system",
@@ -320,7 +402,11 @@ func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(body))
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("OPENROUTER_BASE_URL")), "/")
+	if baseURL == "" {
+		baseURL = "https://openrouter.ai/api/v1"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -329,7 +415,10 @@ func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings
 	req.Header.Set("HTTP-Referer", "https://humphreys.local")
 	req.Header.Set("X-Title", "Humphreys Work Orders")
 
-	res, err := h.httpClient.Do(req)
+	// Copy the shared client so email retains its original timeout and transport.
+	client := *h.httpClient
+	client.Timeout = 45 * time.Second
+	res, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -337,21 +426,23 @@ func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings
 
 	responseBody, err := io.ReadAll(res.Body)
 	if err != nil {
-		return "", err
+		return "", &openRouterError{StatusCode: res.StatusCode, Message: fmt.Sprintf("reading provider response (status %d): %v", res.StatusCode, err), Cause: err, Retryable: res.StatusCode == 429 || res.StatusCode >= 500 && res.StatusCode <= 599}
 	}
 
 	var decoded openRouterChatResponse
-	if err := json.Unmarshal(responseBody, &decoded); err != nil {
-		return "", fmt.Errorf("invalid provider response: %w", err)
-	}
+	decodeErr := json.Unmarshal(responseBody, &decoded)
 	if res.StatusCode >= 300 {
+		message := fmt.Sprintf("provider returned status %d", res.StatusCode)
 		if decoded.Error != nil && decoded.Error.Message != "" {
-			return "", fmt.Errorf("provider error: %s", decoded.Error.Message)
+			message = decoded.Error.Message
 		}
-		return "", fmt.Errorf("provider returned status %d", res.StatusCode)
+		return "", &openRouterError{StatusCode: res.StatusCode, Message: message, Retryable: res.StatusCode == 429 || res.StatusCode >= 500 && res.StatusCode <= 599}
+	}
+	if decodeErr != nil {
+		return "", &openRouterError{StatusCode: res.StatusCode, Message: fmt.Sprintf("invalid provider response: %v", decodeErr), Cause: decodeErr}
 	}
 	if len(decoded.Choices) == 0 {
-		return "", errors.New("provider returned no choices")
+		return "", &openRouterError{StatusCode: res.StatusCode, Message: "provider returned no choices", Empty: true, Retryable: true}
 	}
 	text := strings.TrimSpace(extractMessageText(decoded.Choices[0].Message.Content))
 	if text == "" {
@@ -361,7 +452,7 @@ func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings
 		text = strings.TrimSpace(extractMessageText(decoded.Choices[0].Message.Refusal))
 	}
 	if text == "" {
-		return "", fmt.Errorf("provider returned an empty summary (finish_reason=%s)", decoded.Choices[0].FinishReason)
+		return "", &openRouterError{StatusCode: res.StatusCode, Message: fmt.Sprintf("provider returned an empty summary (finish_reason=%s)", decoded.Choices[0].FinishReason), Empty: true, Retryable: true}
 	}
 	return text, nil
 }
