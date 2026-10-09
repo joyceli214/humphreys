@@ -162,13 +162,14 @@ type UpdateRepairLogInput struct {
 }
 
 type UpdatePartsPurchaseRequestInput struct {
-	CanApprove bool
-	Source     string
-	SourceURL  *string
-	Status     string
-	TotalPrice float64
-	ItemName   string
-	Quantity   int32
+	CanApprove  bool
+	ActorUserID string
+	Source      string
+	SourceURL   *string
+	Status      string
+	TotalPrice  float64
+	ItemName    string
+	Quantity    int32
 }
 
 type CustomerLookupOption struct {
@@ -318,8 +319,8 @@ func (s *Service) CreateWorkOrder(ctx context.Context, input CreateWorkOrderInpu
 	return s.repo.CreateWorkOrder(ctx, input)
 }
 
-func (s *Service) DeleteWorkOrder(ctx context.Context, referenceID int) error {
-	return s.repo.DeleteWorkOrder(ctx, referenceID)
+func (s *Service) DeleteWorkOrder(ctx context.Context, referenceID int, actorUserID string) error {
+	return s.repo.DeleteWorkOrder(ctx, referenceID, actorUserID)
 }
 
 func stringValue(value *string) string {
@@ -453,6 +454,10 @@ func (s *Service) ListPartsPurchaseRequests(ctx context.Context, referenceID int
 	return s.repo.ListPartsPurchaseRequests(ctx, referenceID)
 }
 
+func (s *Service) PartsPurchaseRequestHistory(ctx context.Context, referenceID int, partsID *int64) ([]PartsAuditEntry, error) {
+	return s.repo.PartsAuditForWorkOrder(ctx, referenceID, partsID)
+}
+
 func (s *Service) CreatePartsPurchaseRequest(ctx context.Context, referenceID int, input CreatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error) {
 	source := strings.TrimSpace(strings.ToLower(input.Source))
 	if source != "online" && source != "supplier" {
@@ -531,16 +536,17 @@ func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID in
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsTotalPrice
 	}
 	return s.repo.UpdatePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID, UpdatePartsPurchaseRequestInput{
-		Source:     source,
-		SourceURL:  input.SourceURL,
-		Status:     status,
-		CanApprove: input.CanApprove,
-		TotalPrice: input.TotalPrice,
-		ItemName:   itemName,
-		Quantity:   input.Quantity,
+		Source:      source,
+		SourceURL:   input.SourceURL,
+		Status:      status,
+		CanApprove:  input.CanApprove,
+		ActorUserID: input.ActorUserID,
+		TotalPrice:  input.TotalPrice,
+		ItemName:    itemName,
+		Quantity:    input.Quantity,
 	})
 }
 
-func (s *Service) DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64) error {
-	return s.repo.DeletePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID)
+func (s *Service) DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, actorUserID string) error {
+	return s.repo.DeletePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID, actorUserID)
 }

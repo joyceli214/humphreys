@@ -107,6 +107,8 @@ type PartsPurchaseRequest struct {
 	ArrivedAt   *time.Time `json:"arrived_at"`
 	UsedAt      *time.Time `json:"used_at"`
 	CancelledAt *time.Time `json:"cancelled_at"`
+	// AuditFlags: review flags derived from the append-only audit log (e.g. approved_without_review).
+	AuditFlags []string `json:"audit_flags"`
 
 	PartsPurchaseRequestID int64      `json:"parts_purchase_request_id"`
 	ReferenceID            int32      `json:"reference_id"`

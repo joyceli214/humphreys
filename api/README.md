@@ -32,3 +32,19 @@ For direct Outlook email sending, create a Microsoft Entra app registration with
 - Refresh-token family revocation on reuse
 - Action-based RBAC middleware
 - Startup owner bootstrap from env
+
+## Parts request audit
+
+Migration `038_parts_purchase_request_audit.sql` adds an append-only log. Request
+creation, status/total-price edits, and deletion record the actor and their name
+in the same transaction. History survives request and work-order deletion.
+`GET /work-orders/:reference_id/parts-purchase-requests/history` requires
+`parts_purchase_requests:read`; optional `parts_purchase_request_id` filters one
+request, including a deleted request. Lists and create/update responses include
+`audit_flags` for approval without review and price changes after approval.
+Audit recording starts with this migration; prior actions are not reconstructed.
+
+Run PostgreSQL integration tests with
+`PARTS_AUDIT_TEST_DATABASE_URL='postgres://postgres@localhost/postgres?sslmode=disable' go test ./...`.
+The supplied connection must permit creating databases. Tests create and remove
+an isolated database without migrating or changing the supplied database.

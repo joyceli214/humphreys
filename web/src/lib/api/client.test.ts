@@ -75,3 +75,16 @@ describe("APIClient refresh retry", () => {
     expect(refreshCalls).toHaveLength(1);
   });
 });
+
+describe("parts audit API", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("loads work order history and filters individual requests", async () => {
+    const client = new APIClient();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse(200, []));
+    expect(await client.getPartsPurchaseRequestHistory(123)).toEqual([]);
+    expect(fetchSpy).toHaveBeenLastCalledWith(expect.stringContaining("/work-orders/123/parts-purchase-requests/history"), expect.any(Object));
+    await client.getPartsPurchaseRequestHistory(123, 7);
+    expect(fetchSpy).toHaveBeenLastCalledWith(expect.stringContaining("/work-orders/123/parts-purchase-requests/history?parts_purchase_request_id=7"), expect.any(Object));
+  });
+});

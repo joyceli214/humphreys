@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"humphreys/api/internal/domain"
 
@@ -18,7 +19,7 @@ type Repository interface {
 	GetWorkOrderDetail(ctx context.Context, referenceID int) (domain.WorkOrderDetail, error)
 	ListCustomers(ctx context.Context, query string) ([]CustomerLookupOption, error)
 	CreateWorkOrder(ctx context.Context, input CreateWorkOrderInput) (domain.WorkOrderDetail, error)
-	DeleteWorkOrder(ctx context.Context, referenceID int) error
+	DeleteWorkOrder(ctx context.Context, referenceID int, actorUserID string) error
 	UpdateStatus(ctx context.Context, referenceID int, statusID *int64) error
 	UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) error
 	UpdateWorkNotes(ctx context.Context, referenceID int, input WorkNotesUpdateInput) error
@@ -33,7 +34,8 @@ type Repository interface {
 	ListPartsPurchaseRequests(ctx context.Context, referenceID int) ([]domain.PartsPurchaseRequest, error)
 	CreatePartsPurchaseRequest(ctx context.Context, referenceID int, input CreatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error)
 	UpdatePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, input UpdatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error)
-	DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64) error
+	DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, actorUserID string) error
+	PartsAuditForWorkOrder(ctx context.Context, referenceID int, partsID *int64) ([]PartsAuditEntry, error)
 	GetDashboardData(ctx context.Context, input DashboardQueryInput) (domain.DashboardData, error)
 }
 
@@ -1378,7 +1380,14 @@ func (r *storeRepository) ListAllPartsPurchaseRequests(ctx context.Context) ([]d
 		}
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := attachPartsAuditFlags(ctx, r.db, items); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQueryInput) (domain.DashboardData, error) {
@@ -1723,12 +1732,24 @@ func (r *storeRepository) ListPartsPurchaseRequests(ctx context.Context, referen
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if err := attachPartsAuditFlags(ctx, r.db, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, referenceID int, input CreatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	defer tx.Rollback(ctx)
 	var inserted domain.PartsPurchaseRequest
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO public.parts_purchase_requests(
 			reference_id,
 			source,
@@ -1797,7 +1818,18 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 		return domain.PartsPurchaseRequest{}, err
 	}
 
-	if err := r.db.QueryRow(ctx, `SELECT full_name FROM public.users WHERE id = $1::uuid`, input.CreatedByUserID).Scan(&inserted.CreatedByName); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT full_name FROM public.users WHERE id = $1::uuid`, input.CreatedByUserID).Scan(&inserted.CreatedByName); err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	if err := insertPartsAudit(ctx, tx, inserted.PartsPurchaseRequestID, referenceID, input.CreatedByUserID, createPartsAuditRows(inserted.Status, inserted.TotalPrice)); err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	items := []domain.PartsPurchaseRequest{inserted}
+	if err := attachPartsAuditFlags(ctx, tx, items); err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	inserted = items[0]
+	if err := tx.Commit(ctx); err != nil {
 		return domain.PartsPurchaseRequest{}, err
 	}
 	return inserted, nil
@@ -1810,7 +1842,9 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 	}
 	defer tx.Rollback(ctx)
 	var currentStatus string
-	err = tx.QueryRow(ctx, `SELECT status FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2 FOR UPDATE`, referenceID, partsPurchaseRequestID).Scan(&currentStatus)
+	var currentPrice float64
+	var approvedAt *time.Time
+	err = tx.QueryRow(ctx, `SELECT status, total_price::double precision, approved_at FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2 FOR UPDATE`, referenceID, partsPurchaseRequestID).Scan(&currentStatus, &currentPrice, &approvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.PartsPurchaseRequest{}, ErrPartsPurchaseRequestNotFound
 	}
@@ -1891,24 +1925,46 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 	if err := tx.QueryRow(ctx, `SELECT full_name FROM public.users WHERE id = $1::uuid`, updated.CreatedByUserID).Scan(&updated.CreatedByName); err != nil {
 		return domain.PartsPurchaseRequest{}, err
 	}
+	auditRows := diffPartsAudit(currentStatus, updated.Status, currentPrice, updated.TotalPrice)
+	for i := range auditRows {
+		auditRows[i].AfterApproval = auditRows[i].Field == "total_price" && (approvedAt != nil || currentStatus == "approved")
+	}
+	if err := insertPartsAudit(ctx, tx, partsPurchaseRequestID, referenceID, input.ActorUserID, auditRows); err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	items := []domain.PartsPurchaseRequest{updated}
+	if err := attachPartsAuditFlags(ctx, tx, items); err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	updated = items[0]
 	if err := tx.Commit(ctx); err != nil {
 		return domain.PartsPurchaseRequest{}, err
 	}
 	return updated, nil
 }
 
-func (r *storeRepository) DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64) error {
-	cmd, err := r.db.Exec(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2`, referenceID, partsPurchaseRequestID)
+func (r *storeRepository) DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, actorUserID string) error {
+	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if cmd.RowsAffected() == 0 {
+	defer tx.Rollback(ctx)
+	var status string
+	var price float64
+	err = tx.QueryRow(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2 RETURNING status, total_price::double precision`, referenceID, partsPurchaseRequestID).Scan(&status, &price)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrPartsPurchaseRequestNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if err := insertPartsAudit(ctx, tx, partsPurchaseRequestID, referenceID, actorUserID, deletePartsAuditRows(status, price)); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
-func (r *storeRepository) DeleteWorkOrder(ctx context.Context, referenceID int) error {
+func (r *storeRepository) DeleteWorkOrder(ctx context.Context, referenceID int, actorUserID string) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -1924,8 +1980,27 @@ func (r *storeRepository) DeleteWorkOrder(ctx context.Context, referenceID int) 
 	if _, err := tx.Exec(ctx, `DELETE FROM public.repair_logs WHERE reference_id = $1`, referenceID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1`, referenceID); err != nil {
+	rows, err := tx.Query(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1 RETURNING parts_purchase_request_id, status, total_price::double precision`, referenceID)
+	if err != nil {
 		return err
+	}
+	var deleted []domain.PartsPurchaseRequest
+	for rows.Next() {
+		var item domain.PartsPurchaseRequest
+		if err := rows.Scan(&item.PartsPurchaseRequestID, &item.Status, &item.TotalPrice); err != nil {
+			rows.Close()
+			return err
+		}
+		deleted = append(deleted, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, item := range deleted {
+		if err := insertPartsAudit(ctx, tx, item.PartsPurchaseRequestID, referenceID, actorUserID, deletePartsAuditRows(item.Status, item.TotalPrice)); err != nil {
+			return err
+		}
 	}
 
 	cmd, err := tx.Exec(ctx, `DELETE FROM public.work_orders WHERE reference_id = $1`, referenceID)

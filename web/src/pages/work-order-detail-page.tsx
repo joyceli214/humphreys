@@ -7,6 +7,7 @@ import type { EmailTemplate, LookupOption, PartsPurchaseRequest, RepairLog, Work
 import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
+import { PartsRequestHistory, PartsRequestWarnings } from "@/components/parts-request-audit";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, Copy, Mail, Share2 } from "lucide-react";
 import {
@@ -2718,6 +2719,7 @@ export default function WorkOrderDetailPage() {
                         <Td className="capitalize">{request.source}</Td>
                         <Td>
                           <Badge className="capitalize">{request.status.replace("_", " ")}</Badge>
+                          <PartsRequestWarnings flags={request.audit_flags} />
                           {partsStatusDate(request) && <span className="ml-2 text-xs text-muted-foreground">{formatDateTime(partsStatusDate(request))}</span>}
                         </Td>
                         <Td>{formatCurrency(request.total_price)}</Td>
@@ -2763,6 +2765,7 @@ export default function WorkOrderDetailPage() {
                 </Table>
                 </div>
               )}
+              {canReadPartsRequests && <PartsRequestHistory referenceID={parsedReferenceId} requests={partsRequests} />}
             </article>
             ))
           )}

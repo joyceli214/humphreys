@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { PartsPurchaseRequest } from "@/lib/api/generated/types";
+import { PartsRequestWarnings } from "@/components/parts-request-audit";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
@@ -192,6 +193,7 @@ export default function PartsPurchaseRequestsPage() {
                     <Td className="capitalize">{item.source}</Td>
                     <Td>
                       <Badge className={`capitalize ${statusClass(item.status)}`}>{item.status.replace("_", " ")}</Badge>
+                      <PartsRequestWarnings flags={item.audit_flags} />
                     </Td>
                     <Td>{formatCurrency(item.total_price)}</Td>
                     <Td>{item.created_by_name ?? item.created_by_user_id}</Td>

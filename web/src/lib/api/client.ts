@@ -8,6 +8,7 @@ import type {
   EmailTemplateKey,
   LookupOption,
   PartsPurchaseRequest,
+  PartsAuditEntry,
   Permission,
   RepairLog,
   Role,
@@ -464,6 +465,11 @@ export class APIClient {
 
   listPartsPurchaseRequests(referenceID: number) {
     return this.request<{ items: PartsPurchaseRequest[] }>(`/work-orders/${referenceID}/parts-purchase-requests`);
+  }
+
+  getPartsPurchaseRequestHistory(referenceID: number, partsPurchaseRequestID?: number) {
+    const query = partsPurchaseRequestID === undefined ? "" : `?parts_purchase_request_id=${partsPurchaseRequestID}`;
+    return this.request<PartsAuditEntry[]>(`/work-orders/${referenceID}/parts-purchase-requests/history${query}`);
   }
 
   listAllPartsPurchaseRequests() {
