@@ -109,7 +109,7 @@ export default function PartsPurchaseRequestsPage() {
   if (!canReadPage) return null;
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       <div>
         <h1 className="text-2xl font-semibold">Parts Purchase Requests</h1>
         <p className="text-sm text-muted-foreground">Admin view across all work orders.</p>
@@ -153,6 +153,7 @@ export default function PartsPurchaseRequestsPage() {
           <Table className="min-w-[1100px]">
             <thead>
               <tr>
+                <Th className="w-16 whitespace-nowrap">#</Th>
                 <Th className="w-[90px]">Ref #</Th>
                 <Th>Item</Th>
                 <Th className="w-[80px]">Qty</Th>
@@ -167,17 +168,18 @@ export default function PartsPurchaseRequestsPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <Td colSpan={9}>Loading parts requests...</Td>
+                  <Td colSpan={10}>Loading parts requests...</Td>
                 </tr>
               )}
               {!loading && visibleItems.length === 0 && (
                 <tr>
-                  <Td colSpan={9}>No parts purchase requests found for current filters.</Td>
+                  <Td colSpan={10}>No parts purchase requests found for current filters.</Td>
                 </tr>
               )}
               {!loading &&
                 visibleItems.map((item) => (
                   <tr key={item.parts_purchase_request_id}>
+                    <Td className="whitespace-nowrap tabular-nums">#{item.parts_purchase_request_id}</Td>
                     <Td>{item.reference_id}</Td>
                     <Td>
                       <div className="space-y-1">

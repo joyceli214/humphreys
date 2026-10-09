@@ -2606,7 +2606,7 @@ export default function WorkOrderDetailPage() {
 
           {(canReadPartsRequests || canCreatePartsRequests) && (
             registerLayoutBlock("parts_order", (
-            <article className="rounded-lg border border-border bg-white p-4 space-y-3">
+            <article className="min-w-0 rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Parts Purchase Requests</h2>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2719,6 +2719,7 @@ export default function WorkOrderDetailPage() {
                 <Table className="min-w-[900px]">
                   <thead>
                     <tr>
+                      <Th className="w-16 whitespace-nowrap">#</Th>
                       <Th>Item</Th>
                       <Th className="w-[90px]">Qty</Th>
                       <Th className="w-[120px]">Source</Th>
@@ -2732,11 +2733,12 @@ export default function WorkOrderDetailPage() {
                   <tbody>
                     {partsRequests.length === 0 && (
                       <tr>
-                        <Td colSpan={(canUpdatePartsRequests || canDeletePartsRequests) ? 8 : 7}>No parts purchase requests yet.</Td>
+                        <Td colSpan={(canUpdatePartsRequests || canDeletePartsRequests) ? 9 : 8}>No parts purchase requests yet.</Td>
                       </tr>
                     )}
                     {partsRequests.map((request) => (
                       <tr key={request.parts_purchase_request_id}>
+                        <Td className="whitespace-nowrap tabular-nums">#{request.parts_purchase_request_id}</Td>
                         <Td>{request.item_name}</Td>
                         <Td>{request.quantity}</Td>
                         <Td className="capitalize">{request.source}</Td>
