@@ -23,6 +23,8 @@ type Repository interface {
 	UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) error
 	UpdateWorkNotes(ctx context.Context, referenceID int, input WorkNotesUpdateInput) error
 	UpdateLineItems(ctx context.Context, referenceID int, lineItems []LineItemUpsertInput) error
+	UpdateLabourDiscount(context.Context, int, *string, *float64, string) error
+	LabourDiscountHistory(context.Context, int) ([]LabourDiscountAudit, error)
 	UpdateTotals(ctx context.Context, referenceID int, input TotalsUpdateInput) error
 	UpdateCustomer(ctx context.Context, referenceID int, input CustomerUpdateInput) error
 	ListAllPartsPurchaseRequests(ctx context.Context) ([]domain.PartsPurchaseRequest, error)
@@ -350,7 +352,7 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 			wo.parts_total::double precision,
 			wo.delivery_total::double precision,
 			wo.labour_total::double precision,
-			wo.deposit::double precision
+			wo.deposit::double precision, wo.labour_discount_type, wo.labour_discount_value::double precision
 		FROM public.work_orders wo
 		LEFT JOIN public.customers c ON c.customer_id = wo.customer_id
 		LEFT JOIN public.locations loc ON loc.location_id = wo.location_id
@@ -411,7 +413,7 @@ func (r *storeRepository) GetWorkOrderDetail(ctx context.Context, referenceID in
 		&detail.PartsTotal,
 		&detail.DeliveryTotal,
 		&detail.LabourTotal,
-		&detail.Deposit,
+		&detail.Deposit, &detail.LabourDiscountType, &detail.LabourDiscountValue,
 	); err != nil {
 		return domain.WorkOrderDetail{}, err
 	}

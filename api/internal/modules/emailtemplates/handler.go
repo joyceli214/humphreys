@@ -151,6 +151,8 @@ var testTemplateValues = map[string]string{
 	"parts_total":          "$35.00",
 	"delivery_total":       "$0.00",
 	"labour_total":         "$120.00",
+	"labour_discount":      "-$12.00",
+	"labour_net_total":     "$108.00",
 	"total_before_deposit": "$175.15",
 	"deposit":              "$25.00",
 	"total_payable":        "$150.15",

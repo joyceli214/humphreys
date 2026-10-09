@@ -73,6 +73,8 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	group.PATCH("/:reference_id/equipment", requireEquipmentUpdatePermission(), h.UpdateEquipment)
 	group.PATCH("/:reference_id/work-notes", middleware.RequirePermission(permUpdate), h.UpdateWorkNotes)
 	group.PATCH("/:reference_id/line-items", middleware.RequirePermission(permUpdate), h.UpdateLineItems)
+	group.PATCH("/:reference_id/labour-discount", middleware.RequirePermission(permUpdate), middleware.RequirePermission("work_orders_sensitive:update"), h.UpdateLabourDiscount)
+	group.GET("/:reference_id/labour-discount/history", middleware.RequirePermission(permUpdate), middleware.RequirePermission("work_orders_sensitive:update"), h.LabourDiscountHistory)
 	group.PATCH("/:reference_id/totals", middleware.RequirePermission(permUpdate), h.UpdateTotals)
 	group.PATCH("/:reference_id/customer", middleware.RequirePermission(permUpdate), h.UpdateCustomer)
 	group.GET("/:reference_id/repair-logs", middleware.RequirePermission(permRepairLogsRead), h.ListRepairLogs)

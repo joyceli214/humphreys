@@ -83,6 +83,7 @@ func (s *Service) GetWorkOrderDetail(ctx context.Context, referenceID int) (doma
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.WorkOrderDetail{}, ErrWorkOrderNotFound
 	}
+	detail.LabourDiscountAmount = CalculateTotals(detail).LabourDiscount
 	return detail, err
 }
 

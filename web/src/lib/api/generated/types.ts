@@ -94,7 +94,15 @@ export interface WorkOrderLineItem {
   line_total_text: string | null;
 }
 
+export interface LabourDiscountAudit {
+ id: number; changed_by_user_id: string; changed_by_name: string; changed_at: string;
+ old_type: "percent" | "amount" | null; old_value: number | null;
+ new_type: "percent" | "amount" | null; new_value: number | null;
+}
 export interface WorkOrderDetail {
+ labour_discount_type: "percent" | "amount" | null;
+ labour_discount_value: number | null;
+ labour_discount_amount: number;
   reference_id: number;
   original_job_id: number | null;
   warranty_job_ids: number[];

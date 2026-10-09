@@ -1,3 +1,4 @@
+import { workOrderTotals } from "./work-order-totals";
 import type { WorkOrderDetail } from "@/lib/api/generated/types";
 import { normalizeMarkdownInput } from "@/lib/markdown";
 
@@ -92,6 +93,8 @@ export const EMAIL_TEMPLATE_VARIABLES: EmailTemplateVariable[] = [
   { token: "{{parts_total}}", label: "Parts Total" },
   { token: "{{delivery_total}}", label: "Delivery Total" },
   { token: "{{labour_total}}", label: "Labour Total" },
+  { token: "{{labour_discount}}", label: "Labour Discount" },
+  { token: "{{labour_net_total}}", label: "Labour Net Total" },
   { token: "{{total_before_deposit}}", label: "Total Before Deposit" },
   { token: "{{deposit}}", label: "Deposit" },
   { token: "{{total_payable}}", label: "Total Payable" },
@@ -126,10 +129,10 @@ function resolveTemplateValue(item: WorkOrderDetail, key: string) {
 }
 
 function derivedTemplateValues(item: WorkOrderDetail): Record<string, string> {
-  const subtotal = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
+  const totals = workOrderTotals(item);
   const hasTotal = item.parts_total !== null || item.delivery_total !== null || item.labour_total !== null;
-  const totalBeforeDeposit = subtotal * 1.13;
-  const totalPayable = Math.max(0, totalBeforeDeposit - item.deposit);
+  const totalBeforeDeposit = totals.total;
+  const totalPayable = totals.payable;
   return {
     customer_name: emailCustomerName(item),
     equipment_name: emailEquipmentName(item),
@@ -137,6 +140,8 @@ function derivedTemplateValues(item: WorkOrderDetail): Record<string, string> {
     total_before_deposit: hasTotal ? formatCurrency(totalBeforeDeposit) : "",
     parts_total: item.parts_total !== null ? formatCurrency(item.parts_total) : "",
     delivery_total: item.delivery_total !== null ? formatCurrency(item.delivery_total) : "",
+    labour_discount: item.labour_discount_type ? `-${formatCurrency(totals.labourDiscount)}` : "",
+    labour_net_total: item.labour_total !== null ? formatCurrency(totals.netLabour) : "",
     labour_total: item.labour_total !== null ? formatCurrency(item.labour_total) : "",
     deposit: item.deposit > 0 ? formatCurrency(item.deposit) : "",
     total_payable: hasTotal ? formatCurrency(totalPayable) : ""
@@ -180,11 +185,12 @@ function emailJobDetails(item: WorkOrderDetail) {
   const workDone = stripMarkdownForEmail(item.work_done);
   if (workDone) details.push(`Work done: ${workDone}`);
 
-  const subtotal = (item.parts_total ?? 0) + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
+  const totals = workOrderTotals(item);
   if (item.parts_total !== null || item.delivery_total !== null || item.labour_total !== null) {
-    details.push(`Estimated total before deposit: ${formatCurrency(subtotal * 1.13)}`);
+    details.push(`Estimated total before deposit: ${formatCurrency(totals.total)}`);
   }
 
+  if (item.labour_discount_type) details.push(`Labour discount: -${formatCurrency(totals.labourDiscount)}`);
   if (item.deposit > 0) details.push(`Deposit: ${formatCurrency(item.deposit)}`);
 
   return details.join("\n");

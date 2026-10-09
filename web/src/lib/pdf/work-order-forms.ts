@@ -1,3 +1,4 @@
+import { workOrderTotals } from "../work-order-totals";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { WorkOrderDetail } from "@/lib/api/generated/types";
@@ -343,10 +344,7 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
 
   const y = drawCommon(doc, item, 44);
   const partsTotal = calculatePartsTotal(item);
-  const subtotal = partsTotal + (item.delivery_total ?? 0) + (item.labour_total ?? 0);
-  const hst = subtotal * 0.13;
-  const total = subtotal + hst;
-  const payable = total - (item.deposit ?? 0);
+  const { subtotal, hst, total, payable, labourDiscount } = workOrderTotals({ ...item, parts_total: partsTotal });
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
@@ -428,19 +426,21 @@ export function generatePickupFormPdf(item: WorkOrderDetail) {
   doc.text(`Parts: ${money(partsTotal)}`, rowRightX, pricingY, { align: "right" });
   doc.text(`Delivery: ${money(item.delivery_total)}`, rowRightX, pricingY + rowGap, { align: "right" });
   doc.text(`Labour: ${money(item.labour_total)}`, rowRightX, pricingY + rowGap * 2, { align: "right" });
-  doc.text(`Subtotal: ${money(subtotal)}`, rowRightX, pricingY + rowGap * 3, { align: "right" });
-  doc.text(`HST (13%): ${money(hst)}`, rowRightX, pricingY + rowGap * 4, { align: "right" });
+  const discountRows = item.labour_discount_type ? 1 : 0;
+  if (discountRows) doc.text(`Labour discount: -${money(labourDiscount)}`, rowRightX, pricingY + rowGap * 3, { align: "right" });
+  doc.text(`Subtotal: ${money(subtotal)}`, rowRightX, pricingY + rowGap * (3 + discountRows), { align: "right" });
+  doc.text(`HST (13%): ${money(hst)}`, rowRightX, pricingY + rowGap * (4 + discountRows), { align: "right" });
   doc.setFont("helvetica", "bold");
-  doc.text(`Total: ${money(total)}`, rowRightX, pricingY + rowGap * 5, { align: "right" });
+  doc.text(`Total: ${money(total)}`, rowRightX, pricingY + rowGap * (5 + discountRows), { align: "right" });
   doc.setFont("helvetica", "normal");
-  doc.text(`Deposit: ${money(item.deposit)}`, rowRightX, pricingY + rowGap * 6, { align: "right" });
+  doc.text(`Deposit: ${money(item.deposit)}`, rowRightX, pricingY + rowGap * (6 + discountRows), { align: "right" });
   doc.setFont("helvetica", "bold");
-  doc.text(`Total Payable: ${money(payable)}`, rowRightX, pricingY + rowGap * 7, { align: "right" });
+  doc.text(`Total Payable: ${money(payable)}`, rowRightX, pricingY + rowGap * (7 + discountRows), { align: "right" });
   doc.setFont("helvetica", "normal");
   const finalPaymentMethod = item.payment_method_names.length ? item.payment_method_names[item.payment_method_names.length - 1] : "-";
-  doc.text(`Payment Method: ${finalPaymentMethod}`, rowRightX, pricingY + rowGap * 8, { align: "right" });
+  doc.text(`Payment Method: ${finalPaymentMethod}`, rowRightX, pricingY + rowGap * (8 + discountRows), { align: "right" });
 
-  const metadataY = Math.max(tableY, pricingY + rowGap * 9) + 5;
+  const metadataY = Math.max(tableY, pricingY + rowGap * (9 + discountRows)) + 5;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.text(`Technician(s): ${item.worker_names.length ? item.worker_names.join(", ") : "-"}`, 14, metadataY);

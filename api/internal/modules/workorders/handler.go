@@ -1234,6 +1234,9 @@ func sanitizeWorkOrderDetail(detail domain.WorkOrderDetail) domain.WorkOrderDeta
 	detail.PartsTotal = nil
 	detail.DeliveryTotal = nil
 	detail.LabourTotal = nil
+	detail.LabourDiscountType = nil
+	detail.LabourDiscountValue = nil
+	detail.LabourDiscountAmount = 0
 	detail.Deposit = 0
 	detail.LineItems = []domain.WorkOrderLineItem{}
 	detail.PaymentMethodIDs = []int64{}
