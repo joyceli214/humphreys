@@ -701,6 +701,17 @@ func summarizeActionsRequired(statusName *string, parts []domain.PartsPurchaseRe
 			break
 		}
 	}
+	for _, target := range []struct{ status, action string }{
+		{"approved", "Approved parts not yet ordered"},
+		{"arrived", "Parts arrived, ready to use"},
+	} {
+		for _, req := range parts {
+			if strings.EqualFold(strings.TrimSpace(req.Status), target.status) {
+				actions = append(actions, target.action)
+				break
+			}
+		}
+	}
 	status := strings.ToLower(strings.TrimSpace(orUnknown(statusName)))
 	if strings.Contains(status, "finished") {
 		actions = append(actions, "Awaiting customer pickup")

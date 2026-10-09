@@ -151,11 +151,18 @@ export interface RepairLog {
 }
 
 export interface PartsPurchaseRequest {
+  audit_flags: string[];
+  approved_at: string | null;
+  ordered_at: string | null;
+  arrived_at: string | null;
+  used_at: string | null;
+  cancelled_at: string | null;
+
   parts_purchase_request_id: number;
   reference_id: number;
   source: "online" | "supplier";
   source_url: string | null;
-  status: "draft" | "waiting_approval" | "ordered" | "used";
+  status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
   total_price: number;
   item_name: string;
   quantity: number;
@@ -163,6 +170,20 @@ export interface PartsPurchaseRequest {
   created_by_name: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface PartsAuditEntry {
+  id: number;
+  parts_purchase_request_id: number;
+  reference_id: number;
+  action: "create" | "update" | "delete";
+  field: "status" | "total_price" | "quantity" | "item_name" | "source" | "source_url";
+  old_value: string | null;
+  new_value: string | null;
+  changed_by_user_id: string;
+  changed_by_name: string | null;
+  changed_at: string;
+  after_approval: boolean;
 }
 
 export interface LookupOption {

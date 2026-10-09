@@ -19,6 +19,7 @@ const (
 	permRepairLogsDelete = "repair_logs:delete"
 	permPartsRead        = "parts_purchase_requests:read"
 	permPartsCreate      = "parts_purchase_requests:create"
+	permPartsApprove     = "parts_purchase_requests:approve"
 	permPartsUpdate      = "parts_purchase_requests:update"
 	permPartsDelete      = "parts_purchase_requests:delete"
 )
@@ -79,6 +80,7 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	group.PATCH("/:reference_id/repair-logs/:repair_log_id", middleware.RequirePermission(permRepairLogsUpdate), h.UpdateRepairLog)
 	group.DELETE("/:reference_id/repair-logs/:repair_log_id", middleware.RequirePermission(permRepairLogsDelete), h.DeleteRepairLog)
 	group.GET("/:reference_id/parts-purchase-requests", middleware.RequirePermission(permPartsRead), h.ListPartsPurchaseRequests)
+	group.GET("/:reference_id/parts-purchase-requests/history", middleware.RequirePermission(permPartsRead), h.PartsPurchaseRequestHistory)
 	group.POST("/:reference_id/parts-purchase-requests", middleware.RequirePermission(permPartsCreate), h.CreatePartsPurchaseRequest)
 	group.PATCH("/:reference_id/parts-purchase-requests/:parts_purchase_request_id", middleware.RequirePermission(permPartsUpdate), h.UpdatePartsPurchaseRequest)
 	group.DELETE("/:reference_id/parts-purchase-requests/:parts_purchase_request_id", middleware.RequirePermission(permPartsDelete), h.DeletePartsPurchaseRequest)

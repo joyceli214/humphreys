@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { PartsPurchaseRequest } from "@/lib/api/generated/types";
+import { PartsRequestWarnings } from "@/components/parts-request-audit";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +55,9 @@ function formatCurrency(value: number) {
 }
 
 function statusClass(status: PartsPurchaseRequest["status"]) {
+  if (status === "approved") return "bg-indigo-100 text-indigo-700";
+  if (status === "arrived") return "bg-teal-100 text-teal-700";
+  if (status === "cancelled") return "bg-red-100 text-red-700 line-through";
   if (status === "used") return "bg-emerald-100 text-emerald-700";
   if (status === "ordered") return "bg-sky-100 text-sky-700";
   if (status === "waiting_approval") return "bg-amber-100 text-amber-700";
@@ -105,7 +109,7 @@ export default function PartsPurchaseRequestsPage() {
   if (!canReadPage) return null;
 
   return (
-    <section className="space-y-4">
+    <section className="min-w-0 space-y-4">
       <div>
         <h1 className="text-2xl font-semibold">Parts Purchase Requests</h1>
         <p className="text-sm text-muted-foreground">Admin view across all work orders.</p>
@@ -122,6 +126,9 @@ export default function PartsPurchaseRequestsPage() {
             >
               <option value="waiting_approval">Waiting approval</option>
               <option value="draft">Draft</option>
+              <option value="approved">Approved</option>
+              <option value="arrived">Arrived</option>
+              <option value="cancelled">Cancelled</option>
               <option value="ordered">Ordered</option>
               <option value="used">Used</option>
               <option value="all">All statuses</option>
@@ -146,6 +153,7 @@ export default function PartsPurchaseRequestsPage() {
           <Table className="min-w-[1100px]">
             <thead>
               <tr>
+                <Th className="w-16 whitespace-nowrap">#</Th>
                 <Th className="w-[90px]">Ref #</Th>
                 <Th>Item</Th>
                 <Th className="w-[80px]">Qty</Th>
@@ -160,17 +168,18 @@ export default function PartsPurchaseRequestsPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <Td colSpan={9}>Loading parts requests...</Td>
+                  <Td colSpan={10}>Loading parts requests...</Td>
                 </tr>
               )}
               {!loading && visibleItems.length === 0 && (
                 <tr>
-                  <Td colSpan={9}>No parts purchase requests found for current filters.</Td>
+                  <Td colSpan={10}>No parts purchase requests found for current filters.</Td>
                 </tr>
               )}
               {!loading &&
                 visibleItems.map((item) => (
                   <tr key={item.parts_purchase_request_id}>
+                    <Td className="whitespace-nowrap tabular-nums">#{item.parts_purchase_request_id}</Td>
                     <Td>{item.reference_id}</Td>
                     <Td>
                       <div className="space-y-1">
@@ -185,7 +194,8 @@ export default function PartsPurchaseRequestsPage() {
                     <Td>{item.quantity}</Td>
                     <Td className="capitalize">{item.source}</Td>
                     <Td>
-                      <Badge className={statusClass(item.status)}>{item.status.replace("_", " ")}</Badge>
+                      <Badge className={`capitalize ${statusClass(item.status)}`}>{item.status.replace("_", " ")}</Badge>
+                      <PartsRequestWarnings flags={item.audit_flags} />
                     </Td>
                     <Td>{formatCurrency(item.total_price)}</Td>
                     <Td>{item.created_by_name ?? item.created_by_user_id}</Td>

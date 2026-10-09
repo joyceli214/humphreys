@@ -2,11 +2,12 @@
 
 import { type CSSProperties, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { apiClient } from "@/lib/api/client";
+import { APIError, apiClient } from "@/lib/api/client";
 import type { EmailTemplate, LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
+import { PartsRequestHistory, PartsRequestWarnings } from "@/components/parts-request-audit";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, Copy, Mail, Share2 } from "lucide-react";
 import {
@@ -556,6 +557,7 @@ export default function WorkOrderDetailPage() {
   const canReadPartsRequests = hasPermission("parts_purchase_requests:read");
   const canCreatePartsRequests = hasPermission("parts_purchase_requests:create");
   const canUpdatePartsRequests = hasPermission("parts_purchase_requests:update");
+  const canApprovePartsRequests = hasPermission("parts_purchase_requests:approve");
   const canDeletePartsRequests = hasPermission("parts_purchase_requests:delete");
   const { referenceId } = useParams();
   const [item, setItem] = useState<WorkOrderDetail | null>(null);
@@ -591,7 +593,8 @@ export default function WorkOrderDetailPage() {
   const [creatingWarranty, setCreatingWarranty] = useState(false);
   const [editingRepairLogID, setEditingRepairLogID] = useState<number | null>(null);
   const [editingPartsRequestID, setEditingPartsRequestID] = useState<number | null>(null);
-  const [editingPartsRequestStatus, setEditingPartsRequestStatus] = useState<"draft" | "waiting_approval" | "ordered" | "used" | null>(null);
+  const [editingPartsRequestUpdatedAt, setEditingPartsRequestUpdatedAt] = useState<string | null>(null);
+  const [editingPartsRequestStatus, setEditingPartsRequestStatus] = useState<"draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled" | null>(null);
   const [aiSummary, setAISummary] = useState("");
   const [aiSummaryModel, setAISummaryModel] = useState<string | null>(null);
   const [aiSummaryGeneratedAt, setAISummaryGeneratedAt] = useState<string | null>(null);
@@ -1547,8 +1550,19 @@ export default function WorkOrderDetailPage() {
     }
   };
 
+  const handlePartsRequestConflict = async (err: unknown) => {
+    if (!(err instanceof APIError) || err.status !== 409) return false;
+    setPartsRequestModalOpen(false);
+    setEditingPartsRequestID(null);
+    setEditingPartsRequestStatus(null);
+    setEditingPartsRequestUpdatedAt(null);
+    alerts.error("Parts request changed", "Another user updated this request. Refreshing the list; reopen it and review the latest details before trying again.");
+    await loadExtras(parsedReferenceId);
+    return true;
+  };
+
   const savePartsRequest = async (status: "draft" | "waiting_approval") => {
-    if (!canCreatePartsRequests) return;
+    if (editingPartsRequestID !== null ? !canUpdatePartsRequests : !canCreatePartsRequests) return;
     const quantity = Number(partsRequestForm.quantity.trim());
     const totalPrice = Number(partsRequestForm.total_price.trim() || "0");
     if (!partsRequestForm.item_name.trim()) {
@@ -1574,7 +1588,9 @@ export default function WorkOrderDetailPage() {
     setSavingPartsRequest(true);
     try {
       if (editingPartsRequestID !== null) {
+        if (!editingPartsRequestUpdatedAt) throw new Error("Refresh and reopen this request before saving.");
         await apiClient.updatePartsPurchaseRequest(parsedReferenceId, editingPartsRequestID, {
+          updated_at: editingPartsRequestUpdatedAt,
           source: partsRequestForm.source,
           source_url: blankToNull(partsRequestForm.source_url),
           status: effectiveStatus,
@@ -1601,10 +1617,12 @@ export default function WorkOrderDetailPage() {
       });
       setEditingPartsRequestID(null);
       setEditingPartsRequestStatus(null);
+      setEditingPartsRequestUpdatedAt(null);
       setPartsRequestModalOpen(false);
       await loadExtras(parsedReferenceId);
       alerts.success(editingPartsRequestID !== null ? "Parts request updated" : "Parts request added");
     } catch (err) {
+      if (await handlePartsRequestConflict(err)) return;
       alerts.error(editingPartsRequestID !== null ? "Failed to update parts request" : "Failed to add parts request", err instanceof Error ? err.message : "Request failed");
     } finally {
       setSavingPartsRequest(false);
@@ -1647,6 +1665,7 @@ export default function WorkOrderDetailPage() {
   const openCreatePartsRequestModal = () => {
     setEditingPartsRequestID(null);
     setEditingPartsRequestStatus(null);
+    setEditingPartsRequestUpdatedAt(null);
     setPartsRequestForm({
       source: "online",
       source_url: "",
@@ -1660,6 +1679,7 @@ export default function WorkOrderDetailPage() {
   const openEditPartsRequestModal = (request: PartsPurchaseRequest) => {
     setEditingPartsRequestID(request.parts_purchase_request_id);
     setEditingPartsRequestStatus(request.status);
+    setEditingPartsRequestUpdatedAt(request.updated_at);
     setPartsRequestForm({
       source: request.source,
       source_url: request.source_url ?? "",
@@ -1756,20 +1776,24 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  const markPartsRequestOrdered = async (request: PartsPurchaseRequest) => {
+  const updatePartsRequestStatus = async (request: PartsPurchaseRequest, status: PartsPurchaseRequest["status"]) => {
+    if (status === "cancelled" && !confirm("Cancel this parts purchase request?")) return;
     try {
+      if (!request.updated_at) throw new Error("Refresh this request before changing its status.");
       await apiClient.updatePartsPurchaseRequest(parsedReferenceId, request.parts_purchase_request_id, {
+        updated_at: request.updated_at,
         source: request.source,
         source_url: request.source_url,
-        status: "ordered",
+        status,
         total_price: request.total_price,
         item_name: request.item_name,
         quantity: request.quantity
       });
       await loadExtras(parsedReferenceId);
-      alerts.success("Marked as ordered");
+      alerts.success("Parts request status updated");
     } catch (err) {
-      alerts.error("Failed to mark as ordered", err instanceof Error ? err.message : "Request failed");
+      if (await handlePartsRequestConflict(err)) return;
+      alerts.error("Failed to update parts request status", err instanceof Error ? err.message : "Request failed");
     }
   };
 
@@ -2582,7 +2606,7 @@ export default function WorkOrderDetailPage() {
 
           {(canReadPartsRequests || canCreatePartsRequests) && (
             registerLayoutBlock("parts_order", (
-            <article className="rounded-lg border border-border bg-white p-4 space-y-3">
+            <article className="min-w-0 rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Parts Purchase Requests</h2>
                 <div className="flex flex-wrap items-center gap-2">
@@ -2595,7 +2619,7 @@ export default function WorkOrderDetailPage() {
                 </div>
               </div>
 
-              {canCreatePartsRequests && (
+              {(canCreatePartsRequests || canUpdatePartsRequests) && (
                 <Dialog open={partsRequestModalOpen} onOpenChange={setPartsRequestModalOpen}>
                   <DialogContent className="max-w-2xl">
                     <DialogTitle className="text-lg font-semibold">
@@ -2657,6 +2681,7 @@ export default function WorkOrderDetailPage() {
                             setPartsRequestModalOpen(false);
                             setEditingPartsRequestID(null);
                             setEditingPartsRequestStatus(null);
+      setEditingPartsRequestUpdatedAt(null);
                           }}
                           disabled={savingPartsRequest}
                         >
@@ -2694,6 +2719,7 @@ export default function WorkOrderDetailPage() {
                 <Table className="min-w-[900px]">
                   <thead>
                     <tr>
+                      <Th className="w-16 whitespace-nowrap">#</Th>
                       <Th>Item</Th>
                       <Th className="w-[90px]">Qty</Th>
                       <Th className="w-[120px]">Source</Th>
@@ -2701,21 +2727,26 @@ export default function WorkOrderDetailPage() {
                       <Th className="w-[140px]">Total</Th>
                       <Th>URL</Th>
                       <Th className="w-[180px]">User</Th>
-                      {(canUpdatePartsRequests || canDeletePartsRequests || (canViewSensitive && canUpdatePartsRequests)) && <Th className="w-[70px]" />}
+                      {(canUpdatePartsRequests || canDeletePartsRequests) && <Th className="w-[70px]" />}
                     </tr>
                   </thead>
                   <tbody>
                     {partsRequests.length === 0 && (
                       <tr>
-                        <Td colSpan={(canUpdatePartsRequests || canDeletePartsRequests || (canViewSensitive && canUpdatePartsRequests)) ? 8 : 7}>No parts purchase requests yet.</Td>
+                        <Td colSpan={(canUpdatePartsRequests || canDeletePartsRequests) ? 9 : 8}>No parts purchase requests yet.</Td>
                       </tr>
                     )}
                     {partsRequests.map((request) => (
                       <tr key={request.parts_purchase_request_id}>
+                        <Td className="whitespace-nowrap tabular-nums">#{request.parts_purchase_request_id}</Td>
                         <Td>{request.item_name}</Td>
                         <Td>{request.quantity}</Td>
                         <Td className="capitalize">{request.source}</Td>
-                        <Td>{request.status.replace("_", " ")}</Td>
+                        <Td>
+                          <Badge className="capitalize">{request.status.replace("_", " ")}</Badge>
+                          <PartsRequestWarnings flags={request.audit_flags} />
+                          {partsStatusDate(request) && <span className="ml-2 text-xs text-muted-foreground">{formatDateTime(partsStatusDate(request))}</span>}
+                        </Td>
                         <Td>{formatCurrency(request.total_price)}</Td>
                         <Td>
                           {request.source_url ? (
@@ -2727,7 +2758,7 @@ export default function WorkOrderDetailPage() {
                           )}
                         </Td>
                         <Td>{request.created_by_name ?? request.created_by_user_id}</Td>
-                        {(canUpdatePartsRequests || canDeletePartsRequests || (canViewSensitive && canUpdatePartsRequests)) && (
+                        {(canUpdatePartsRequests || canDeletePartsRequests) && (
                           <Td>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -2740,8 +2771,14 @@ export default function WorkOrderDetailPage() {
                                 {canDeletePartsRequests && (
                                   <DropdownMenuItem onClick={() => setPartsRequestDeleteTarget(request)}>Delete</DropdownMenuItem>
                                 )}
-                                {canViewSensitive && canUpdatePartsRequests && request.status !== "ordered" && (
-                                  <DropdownMenuItem onClick={() => markPartsRequestOrdered(request)}>Mark as Ordered</DropdownMenuItem>
+                                {canUpdatePartsRequests && (
+                                  <>
+                                    {request.status === "waiting_approval" && canApprovePartsRequests && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "approved")}>Approve</DropdownMenuItem>}
+                                    {request.status === "approved" && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "ordered")}>Mark as Ordered</DropdownMenuItem>}
+                                    {request.status === "ordered" && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "arrived")}>Mark as Arrived</DropdownMenuItem>}
+                                    {request.status === "arrived" && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "used")}>Mark as Used</DropdownMenuItem>}
+                                    {(["draft", "approved", "ordered", "arrived", "used"].includes(request.status) || (request.status === "waiting_approval" && canApprovePartsRequests)) && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "cancelled")}>Cancel</DropdownMenuItem>}
+                                  </>
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -2753,6 +2790,7 @@ export default function WorkOrderDetailPage() {
                 </Table>
                 </div>
               )}
+              {canReadPartsRequests && <PartsRequestHistory referenceID={parsedReferenceId} requests={partsRequests} />}
             </article>
             ))
           )}
@@ -2992,4 +3030,15 @@ export default function WorkOrderDetailPage() {
       </AlertDialog>
     </section>
   );
+}
+
+function partsStatusDate(request: PartsPurchaseRequest): string | null {
+  switch (request.status) {
+    case "approved": return request.approved_at;
+    case "ordered": return request.ordered_at;
+    case "arrived": return request.arrived_at;
+    case "used": return request.used_at;
+    case "cancelled": return request.cancelled_at;
+    default: return null;
+  }
 }

@@ -164,12 +164,13 @@ type updateRepairLogRequest struct {
 }
 
 type updatePartsPurchaseRequest struct {
-	Source     string  `json:"source" binding:"required"`
-	SourceURL  *string `json:"source_url"`
-	Status     string  `json:"status" binding:"required"`
-	TotalPrice float64 `json:"total_price"`
-	ItemName   string  `json:"item_name" binding:"required"`
-	Quantity   int32   `json:"quantity" binding:"required,gte=1"`
+	UpdatedAt  time.Time `json:"updated_at" binding:"required"`
+	Source     string    `json:"source" binding:"required"`
+	SourceURL  *string   `json:"source_url"`
+	Status     string    `json:"status" binding:"required"`
+	TotalPrice float64   `json:"total_price"`
+	ItemName   string    `json:"item_name" binding:"required"`
+	Quantity   int32     `json:"quantity" binding:"required,gte=1"`
 }
 
 type dashboardResponse struct {
@@ -570,7 +571,11 @@ func (h *Handler) DeleteWorkOrder(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.DeleteWorkOrder(c.Request.Context(), referenceID); err != nil {
+	if actorUserID(c) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+		return
+	}
+	if err := h.service.DeleteWorkOrder(c.Request.Context(), referenceID, actorUserID(c)); err != nil {
 		if errors.Is(err, ErrWorkOrderNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
 			return
@@ -1120,6 +1125,10 @@ func (h *Handler) CreatePartsPurchaseRequest(c *gin.Context) {
 }
 
 func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
+	if actorUserID(c) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+		return
+	}
 	referenceID, err := strconv.Atoi(c.Param("reference_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
@@ -1138,20 +1147,32 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 	}
 
 	item, err := h.service.UpdatePartsPurchaseRequest(c.Request.Context(), referenceID, partsPurchaseRequestID, UpdatePartsPurchaseRequestInput{
-		Source:     req.Source,
-		SourceURL:  req.SourceURL,
-		Status:     req.Status,
-		TotalPrice: req.TotalPrice,
-		ItemName:   req.ItemName,
-		Quantity:   req.Quantity,
+		UpdatedAt:   req.UpdatedAt,
+		CanApprove:  hasPermission(c, permPartsApprove),
+		ActorUserID: actorUserID(c),
+		Source:      req.Source,
+		SourceURL:   req.SourceURL,
+		Status:      req.Status,
+		TotalPrice:  req.TotalPrice,
+		ItemName:    req.ItemName,
+		Quantity:    req.Quantity,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPartsPurchaseRequestConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, ErrPartsApprovalPermission) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, ErrPartsPurchaseRequestNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, ErrInvalidPartsSource) ||
+		if errors.Is(err, ErrPartsUpdatedAtRequired) || errors.Is(err, ErrInvalidPartsSource) ||
 			errors.Is(err, ErrInvalidPartsStatus) ||
+			errors.Is(err, ErrInvalidPartsTransition) ||
 			errors.Is(err, ErrInvalidPartsItemName) ||
 			errors.Is(err, ErrInvalidPartsQuantity) ||
 			errors.Is(err, ErrInvalidPartsTotalPrice) {
@@ -1165,6 +1186,10 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 }
 
 func (h *Handler) DeletePartsPurchaseRequest(c *gin.Context) {
+	if actorUserID(c) == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+		return
+	}
 	referenceID, err := strconv.Atoi(c.Param("reference_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
@@ -1176,7 +1201,7 @@ func (h *Handler) DeletePartsPurchaseRequest(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.DeletePartsPurchaseRequest(c.Request.Context(), referenceID, partsPurchaseRequestID); err != nil {
+	if err := h.service.DeletePartsPurchaseRequest(c.Request.Context(), referenceID, partsPurchaseRequestID, actorUserID(c)); err != nil {
 		if errors.Is(err, ErrPartsPurchaseRequestNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
@@ -1265,4 +1290,37 @@ func (h *Handler) signDashboardActivityMarkdown(ctx context.Context, items []dom
 	for i := range items {
 		items[i].Details = h.signMarkdownForResponse(ctx, items[i].Details)
 	}
+}
+
+func actorUserID(c *gin.Context) string {
+	claims, ok := middleware.Claims(c)
+	if !ok {
+		return ""
+	}
+	return claims.UserID
+}
+
+// PartsPurchaseRequestHistory returns the append-only audit log for a work order's parts requests.
+// Optional ?parts_purchase_request_id= filters to one request (works for deleted requests too).
+func (h *Handler) PartsPurchaseRequestHistory(c *gin.Context) {
+	referenceID, err := strconv.Atoi(c.Param("reference_id"))
+	if err != nil || referenceID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
+		return
+	}
+	var partsID *int64
+	if raw := c.Query("parts_purchase_request_id"); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid parts_purchase_request_id"})
+			return
+		}
+		partsID = &v
+	}
+	items, err := h.service.PartsPurchaseRequestHistory(c.Request.Context(), referenceID, partsID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load parts request history"})
+		return
+	}
+	c.JSON(http.StatusOK, items)
 }

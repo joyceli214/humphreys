@@ -8,6 +8,7 @@ import type {
   EmailTemplateKey,
   LookupOption,
   PartsPurchaseRequest,
+  PartsAuditEntry,
   Permission,
   RepairLog,
   Role,
@@ -19,6 +20,13 @@ import type { WorkOrderLayout } from "@/lib/work-order-layout";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export class APIError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "APIError";
+  }
+}
 
 export class APIClient {
   private accessToken: string | null = null;
@@ -105,7 +113,7 @@ export class APIClient {
         }
       }
 
-      throw new Error(body.error ? `${body.error} (${res.status} ${path})` : `Request failed (${res.status} ${path})`);
+      throw new APIError(body.error ? `${body.error} (${res.status} ${path})` : `Request failed (${res.status} ${path})`, res.status);
     }
 
     if (res.status === 204) return undefined as T;
@@ -466,6 +474,11 @@ export class APIClient {
     return this.request<{ items: PartsPurchaseRequest[] }>(`/work-orders/${referenceID}/parts-purchase-requests`);
   }
 
+  getPartsPurchaseRequestHistory(referenceID: number, partsPurchaseRequestID?: number) {
+    const query = partsPurchaseRequestID === undefined ? "" : `?parts_purchase_request_id=${partsPurchaseRequestID}`;
+    return this.request<PartsAuditEntry[]>(`/work-orders/${referenceID}/parts-purchase-requests/history${query}`);
+  }
+
   listAllPartsPurchaseRequests() {
     return this.request<{ items: PartsPurchaseRequest[] }>("/parts-purchase-requests");
   }
@@ -475,7 +488,7 @@ export class APIClient {
     payload: {
       source: "online" | "supplier";
       source_url: string | null;
-      status: "draft" | "waiting_approval" | "ordered" | "used";
+      status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
       total_price: number;
       item_name: string;
       quantity: number;
@@ -491,9 +504,10 @@ export class APIClient {
     referenceID: number,
     partsPurchaseRequestID: number,
     payload: {
+      updated_at: string;
       source: "online" | "supplier";
       source_url: string | null;
-      status: "draft" | "waiting_approval" | "ordered" | "used";
+      status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
       total_price: number;
       item_name: string;
       quantity: number;

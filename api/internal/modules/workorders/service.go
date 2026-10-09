@@ -6,6 +6,7 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"time"
 
 	"humphreys/api/internal/domain"
 
@@ -28,11 +29,13 @@ var ErrLocationNotFound = errors.New("location not found")
 var ErrInvalidRepairLogDetails = errors.New("repair log details are required")
 var ErrInvalidRepairLogHoursUsed = errors.New("repair log hours_used must be zero or greater")
 var ErrInvalidPartsSource = errors.New("parts source must be online or supplier")
-var ErrInvalidPartsStatus = errors.New("parts status must be draft, waiting_approval, ordered, or used")
+var ErrInvalidPartsStatus = errors.New("parts status must be draft, waiting_approval, approved, ordered, arrived, used, or cancelled")
 var ErrInvalidPartsItemName = errors.New("parts item name is required")
 var ErrInvalidPartsQuantity = errors.New("parts quantity must be at least 1")
 var ErrInvalidPartsTotalPrice = errors.New("parts total price must be zero or greater")
 var ErrRepairLogNotFound = errors.New("repair log not found")
+var ErrPartsPurchaseRequestConflict = errors.New("parts request changed; refresh and try again")
+var ErrPartsUpdatedAtRequired = errors.New("updated_at is required")
 var ErrPartsPurchaseRequestNotFound = errors.New("parts purchase request not found")
 var ErrInvalidCreationMode = errors.New("creation mode must be new_job or stock")
 var ErrStockJobTypeNotFound = errors.New("stock job type not found")
@@ -162,12 +165,15 @@ type UpdateRepairLogInput struct {
 }
 
 type UpdatePartsPurchaseRequestInput struct {
-	Source     string
-	SourceURL  *string
-	Status     string
-	TotalPrice float64
-	ItemName   string
-	Quantity   int32
+	UpdatedAt   time.Time
+	CanApprove  bool
+	ActorUserID string
+	Source      string
+	SourceURL   *string
+	Status      string
+	TotalPrice  float64
+	ItemName    string
+	Quantity    int32
 }
 
 type CustomerLookupOption struct {
@@ -317,8 +323,8 @@ func (s *Service) CreateWorkOrder(ctx context.Context, input CreateWorkOrderInpu
 	return s.repo.CreateWorkOrder(ctx, input)
 }
 
-func (s *Service) DeleteWorkOrder(ctx context.Context, referenceID int) error {
-	return s.repo.DeleteWorkOrder(ctx, referenceID)
+func (s *Service) DeleteWorkOrder(ctx context.Context, referenceID int, actorUserID string) error {
+	return s.repo.DeleteWorkOrder(ctx, referenceID, actorUserID)
 }
 
 func stringValue(value *string) string {
@@ -452,6 +458,10 @@ func (s *Service) ListPartsPurchaseRequests(ctx context.Context, referenceID int
 	return s.repo.ListPartsPurchaseRequests(ctx, referenceID)
 }
 
+func (s *Service) PartsPurchaseRequestHistory(ctx context.Context, referenceID int, partsID *int64) ([]PartsAuditEntry, error) {
+	return s.repo.PartsAuditForWorkOrder(ctx, referenceID, partsID)
+}
+
 func (s *Service) CreatePartsPurchaseRequest(ctx context.Context, referenceID int, input CreatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error) {
 	source := strings.TrimSpace(strings.ToLower(input.Source))
 	if source != "online" && source != "supplier" {
@@ -465,7 +475,7 @@ func (s *Service) CreatePartsPurchaseRequest(ctx context.Context, referenceID in
 			status = normalized
 		}
 	}
-	if status != "draft" && status != "waiting_approval" && status != "ordered" && status != "used" {
+	if !validPartsStatus(status) {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsStatus
 	}
 
@@ -511,12 +521,15 @@ func (s *Service) DeleteRepairLog(ctx context.Context, referenceID int, repairLo
 }
 
 func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, input UpdatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error) {
+	if input.UpdatedAt.IsZero() {
+		return domain.PartsPurchaseRequest{}, ErrPartsUpdatedAtRequired
+	}
 	source := strings.TrimSpace(strings.ToLower(input.Source))
 	if source != "online" && source != "supplier" {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsSource
 	}
 	status := strings.TrimSpace(strings.ToLower(input.Status))
-	if status != "draft" && status != "waiting_approval" && status != "ordered" && status != "used" {
+	if !validPartsStatus(status) {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsStatus
 	}
 	itemName := strings.TrimSpace(input.ItemName)
@@ -530,15 +543,18 @@ func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID in
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsTotalPrice
 	}
 	return s.repo.UpdatePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID, UpdatePartsPurchaseRequestInput{
-		Source:     source,
-		SourceURL:  input.SourceURL,
-		Status:     status,
-		TotalPrice: input.TotalPrice,
-		ItemName:   itemName,
-		Quantity:   input.Quantity,
+		UpdatedAt:   input.UpdatedAt,
+		Source:      source,
+		SourceURL:   input.SourceURL,
+		Status:      status,
+		CanApprove:  input.CanApprove,
+		ActorUserID: input.ActorUserID,
+		TotalPrice:  input.TotalPrice,
+		ItemName:    itemName,
+		Quantity:    input.Quantity,
 	})
 }
 
-func (s *Service) DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64) error {
-	return s.repo.DeletePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID)
+func (s *Service) DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, actorUserID string) error {
+	return s.repo.DeletePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID, actorUserID)
 }
