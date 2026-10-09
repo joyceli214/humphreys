@@ -37,5 +37,5 @@ FROM resources WHERE name = 'parts_purchase_requests'
 ON CONFLICT (code) DO NOTHING;
 INSERT INTO role_permissions(role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code = 'parts_purchase_requests:approve'
-WHERE r.name = 'owner'
+WHERE r.name IN ('owner', 'admin')
 ON CONFLICT DO NOTHING;

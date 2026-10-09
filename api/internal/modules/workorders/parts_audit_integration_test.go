@@ -337,3 +337,44 @@ func TestPartsWorkflowMigrationPostgres(t *testing.T) {
 		t.Fatalf("approval permission missing: %d %v", count, err)
 	}
 }
+
+func TestPartsApprovalPermissionMigrationPostgres(t *testing.T) {
+	db := partsAuditTestDB(t, func(db *pgxpool.Pool) {
+		if _, err := db.Exec(context.Background(), `INSERT INTO roles(name) VALUES ('owner'), ('admin'), ('staff')`); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx := context.Background()
+	assertGrants := func() {
+		t.Helper()
+		for _, role := range []string{"owner", "admin", "staff"} {
+			var count int
+			err := db.QueryRow(ctx, `SELECT count(*) FROM role_permissions rp
+				JOIN roles r ON r.id = rp.role_id
+				JOIN permissions p ON p.id = rp.permission_id
+				WHERE r.name = $1 AND p.code = 'parts_purchase_requests:approve'`, role).Scan(&count)
+			want := 1
+			if role == "staff" {
+				want = 0
+			}
+			if err != nil || count != want {
+				t.Fatalf("%s approval grants: got %d, want %d: %v", role, count, want, err)
+			}
+		}
+	}
+	assertGrants()
+
+	// Replay the actual permission seed; the audit-table DDL is not repeatable.
+	migration, err := os.ReadFile("../../../migrations/038_parts_purchase_request_audit.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, seed, ok := strings.Cut(string(migration), "-- Application permission, independent of sensitive work-order access.")
+	if !ok {
+		t.Fatal("approval permission seed not found")
+	}
+	if _, err := db.Exec(ctx, seed); err != nil {
+		t.Fatalf("repeated approval permission seed: %v", err)
+	}
+	assertGrants()
+}

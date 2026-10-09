@@ -53,7 +53,7 @@ existing ordered/used timestamps (without changing `updated_at`).
 
 Approving or cancelling a waiting-approval request requires
 `parts_purchase_requests:approve` in addition to update permission. Migration 038
-grants approve to the owner application role; administrators can assign it to
+grants approve to the owner and admin application roles; administrators can assign it to
 other approvers explicitly. Sensitive-read access alone does not grant approval.
 Creating a request directly as approved remains allowed and produces a warning.
 A draft and its price edits produce no warning until approval; warning flags
