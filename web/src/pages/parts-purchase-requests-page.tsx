@@ -54,6 +54,9 @@ function formatCurrency(value: number) {
 }
 
 function statusClass(status: PartsPurchaseRequest["status"]) {
+  if (status === "approved") return "bg-indigo-100 text-indigo-700";
+  if (status === "arrived") return "bg-teal-100 text-teal-700";
+  if (status === "cancelled") return "bg-red-100 text-red-700 line-through";
   if (status === "used") return "bg-emerald-100 text-emerald-700";
   if (status === "ordered") return "bg-sky-100 text-sky-700";
   if (status === "waiting_approval") return "bg-amber-100 text-amber-700";
@@ -122,6 +125,9 @@ export default function PartsPurchaseRequestsPage() {
             >
               <option value="waiting_approval">Waiting approval</option>
               <option value="draft">Draft</option>
+              <option value="approved">Approved</option>
+              <option value="arrived">Arrived</option>
+              <option value="cancelled">Cancelled</option>
               <option value="ordered">Ordered</option>
               <option value="used">Used</option>
               <option value="all">All statuses</option>
@@ -185,7 +191,7 @@ export default function PartsPurchaseRequestsPage() {
                     <Td>{item.quantity}</Td>
                     <Td className="capitalize">{item.source}</Td>
                     <Td>
-                      <Badge className={statusClass(item.status)}>{item.status.replace("_", " ")}</Badge>
+                      <Badge className={`capitalize ${statusClass(item.status)}`}>{item.status.replace("_", " ")}</Badge>
                     </Td>
                     <Td>{formatCurrency(item.total_price)}</Td>
                     <Td>{item.created_by_name ?? item.created_by_user_id}</Td>

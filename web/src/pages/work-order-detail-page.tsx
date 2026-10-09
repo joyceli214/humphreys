@@ -591,7 +591,7 @@ export default function WorkOrderDetailPage() {
   const [creatingWarranty, setCreatingWarranty] = useState(false);
   const [editingRepairLogID, setEditingRepairLogID] = useState<number | null>(null);
   const [editingPartsRequestID, setEditingPartsRequestID] = useState<number | null>(null);
-  const [editingPartsRequestStatus, setEditingPartsRequestStatus] = useState<"draft" | "waiting_approval" | "ordered" | "used" | null>(null);
+  const [editingPartsRequestStatus, setEditingPartsRequestStatus] = useState<"draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled" | null>(null);
   const [aiSummary, setAISummary] = useState("");
   const [aiSummaryModel, setAISummaryModel] = useState<string | null>(null);
   const [aiSummaryGeneratedAt, setAISummaryGeneratedAt] = useState<string | null>(null);
@@ -1756,20 +1756,21 @@ export default function WorkOrderDetailPage() {
     }
   };
 
-  const markPartsRequestOrdered = async (request: PartsPurchaseRequest) => {
+  const updatePartsRequestStatus = async (request: PartsPurchaseRequest, status: PartsPurchaseRequest["status"]) => {
+    if (status === "cancelled" && !confirm("Cancel this parts purchase request?")) return;
     try {
       await apiClient.updatePartsPurchaseRequest(parsedReferenceId, request.parts_purchase_request_id, {
         source: request.source,
         source_url: request.source_url,
-        status: "ordered",
+        status,
         total_price: request.total_price,
         item_name: request.item_name,
         quantity: request.quantity
       });
       await loadExtras(parsedReferenceId);
-      alerts.success("Marked as ordered");
+      alerts.success("Parts request status updated");
     } catch (err) {
-      alerts.error("Failed to mark as ordered", err instanceof Error ? err.message : "Request failed");
+      alerts.error("Failed to update parts request status", err instanceof Error ? err.message : "Request failed");
     }
   };
 
@@ -2715,7 +2716,10 @@ export default function WorkOrderDetailPage() {
                         <Td>{request.item_name}</Td>
                         <Td>{request.quantity}</Td>
                         <Td className="capitalize">{request.source}</Td>
-                        <Td>{request.status.replace("_", " ")}</Td>
+                        <Td>
+                          <Badge className="capitalize">{request.status.replace("_", " ")}</Badge>
+                          {partsStatusDate(request) && <span className="ml-2 text-xs text-muted-foreground">{formatDateTime(partsStatusDate(request))}</span>}
+                        </Td>
                         <Td>{formatCurrency(request.total_price)}</Td>
                         <Td>
                           {request.source_url ? (
@@ -2740,8 +2744,14 @@ export default function WorkOrderDetailPage() {
                                 {canDeletePartsRequests && (
                                   <DropdownMenuItem onClick={() => setPartsRequestDeleteTarget(request)}>Delete</DropdownMenuItem>
                                 )}
-                                {canViewSensitive && canUpdatePartsRequests && request.status !== "ordered" && (
-                                  <DropdownMenuItem onClick={() => markPartsRequestOrdered(request)}>Mark as Ordered</DropdownMenuItem>
+                                {canUpdatePartsRequests && (
+                                  <>
+                                    {request.status === "waiting_approval" && canViewSensitive && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "approved")}>Approve</DropdownMenuItem>}
+                                    {request.status === "approved" && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "ordered")}>Mark as Ordered</DropdownMenuItem>}
+                                    {request.status === "ordered" && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "arrived")}>Mark as Arrived</DropdownMenuItem>}
+                                    {request.status === "arrived" && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "used")}>Mark as Used</DropdownMenuItem>}
+                                    {(["approved", "ordered", "arrived"].includes(request.status) || (request.status === "waiting_approval" && canViewSensitive)) && <DropdownMenuItem onClick={() => updatePartsRequestStatus(request, "cancelled")}>Cancel</DropdownMenuItem>}
+                                  </>
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -2992,4 +3002,15 @@ export default function WorkOrderDetailPage() {
       </AlertDialog>
     </section>
   );
+}
+
+function partsStatusDate(request: PartsPurchaseRequest): string | null {
+  switch (request.status) {
+    case "approved": return request.approved_at;
+    case "ordered": return request.ordered_at;
+    case "arrived": return request.arrived_at;
+    case "used": return request.used_at;
+    case "cancelled": return request.cancelled_at;
+    default: return null;
+  }
 }

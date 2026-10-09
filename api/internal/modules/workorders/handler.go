@@ -1138,6 +1138,7 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 	}
 
 	item, err := h.service.UpdatePartsPurchaseRequest(c.Request.Context(), referenceID, partsPurchaseRequestID, UpdatePartsPurchaseRequestInput{
+		CanApprove: hasPermission(c, permSensitiveRead),
 		Source:     req.Source,
 		SourceURL:  req.SourceURL,
 		Status:     req.Status,
@@ -1146,12 +1147,17 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 		Quantity:   req.Quantity,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPartsApprovalPermission) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, ErrPartsPurchaseRequestNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
 		if errors.Is(err, ErrInvalidPartsSource) ||
 			errors.Is(err, ErrInvalidPartsStatus) ||
+			errors.Is(err, ErrInvalidPartsTransition) ||
 			errors.Is(err, ErrInvalidPartsItemName) ||
 			errors.Is(err, ErrInvalidPartsQuantity) ||
 			errors.Is(err, ErrInvalidPartsTotalPrice) {

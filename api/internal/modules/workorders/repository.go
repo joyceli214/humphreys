@@ -1337,7 +1337,12 @@ func (r *storeRepository) ListAllPartsPurchaseRequests(ctx context.Context) ([]d
 			pr.created_by_user_id,
 			u.full_name,
 			pr.created_at,
-			pr.updated_at
+			pr.updated_at,
+			pr.approved_at,
+			pr.ordered_at,
+			pr.arrived_at,
+			pr.used_at,
+			pr.cancelled_at
 		FROM public.parts_purchase_requests pr
 		LEFT JOIN public.users u ON u.id = pr.created_by_user_id
 		ORDER BY pr.created_at DESC NULLS LAST, pr.parts_purchase_request_id DESC
@@ -1363,6 +1368,11 @@ func (r *storeRepository) ListAllPartsPurchaseRequests(ctx context.Context) ([]d
 			&item.CreatedByName,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&item.ApprovedAt,
+			&item.OrderedAt,
+			&item.ArrivedAt,
+			&item.UsedAt,
+			&item.CancelledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1671,7 +1681,12 @@ func (r *storeRepository) ListPartsPurchaseRequests(ctx context.Context, referen
 			ppr.created_by_user_id::text,
 			u.full_name,
 			ppr.created_at,
-			ppr.updated_at
+			ppr.updated_at,
+			ppr.approved_at,
+			ppr.ordered_at,
+			ppr.arrived_at,
+			ppr.used_at,
+			ppr.cancelled_at
 		FROM public.parts_purchase_requests ppr
 		LEFT JOIN public.users u ON u.id = ppr.created_by_user_id
 		WHERE ppr.reference_id = $1
@@ -1698,6 +1713,11 @@ func (r *storeRepository) ListPartsPurchaseRequests(ctx context.Context, referen
 			&item.CreatedByName,
 			&item.CreatedAt,
 			&item.UpdatedAt,
+			&item.ApprovedAt,
+			&item.OrderedAt,
+			&item.ArrivedAt,
+			&item.UsedAt,
+			&item.CancelledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1740,7 +1760,12 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 			quantity,
 			created_by_user_id::text,
 			created_at,
-			updated_at
+			updated_at,
+			approved_at,
+			ordered_at,
+			arrived_at,
+			used_at,
+			cancelled_at
 	`,
 		referenceID,
 		input.Source,
@@ -1762,6 +1787,11 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 		&inserted.CreatedByUserID,
 		&inserted.CreatedAt,
 		&inserted.UpdatedAt,
+		&inserted.ApprovedAt,
+		&inserted.OrderedAt,
+		&inserted.ArrivedAt,
+		&inserted.UsedAt,
+		&inserted.CancelledAt,
 	)
 	if err != nil {
 		return domain.PartsPurchaseRequest{}, err
@@ -1774,13 +1804,35 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 }
 
 func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, input UpdatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	defer tx.Rollback(ctx)
+	var currentStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2 FOR UPDATE`, referenceID, partsPurchaseRequestID).Scan(&currentStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.PartsPurchaseRequest{}, ErrPartsPurchaseRequestNotFound
+	}
+	if err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	if err := validatePartsTransition(currentStatus, input.Status, input.CanApprove); err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
 	var updated domain.PartsPurchaseRequest
-	cmdErr := r.db.QueryRow(ctx, `
+	cmdErr := tx.QueryRow(ctx, `
 		UPDATE public.parts_purchase_requests
 		SET
 			source = $3,
 			source_url = NULLIF(BTRIM($4), ''),
 			status = $5,
+			approved_at = CASE WHEN status <> $5 AND $5 = 'approved' THEN now() ELSE approved_at END,
+			ordered_at = CASE WHEN status <> $5 AND $5 = 'ordered' THEN now() ELSE ordered_at END,
+			arrived_at = CASE WHEN status <> $5 AND $5 = 'arrived' THEN now() ELSE arrived_at END,
+			used_at = CASE WHEN status <> $5 AND $5 = 'used' THEN now() ELSE used_at END,
+			cancelled_at = CASE WHEN status <> $5 AND $5 = 'cancelled' THEN now() ELSE cancelled_at END,
+
 			total_price = $6,
 			item_name = BTRIM($7),
 			quantity = $8,
@@ -1797,7 +1849,12 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 			quantity,
 			created_by_user_id::text,
 			created_at,
-			updated_at
+			updated_at,
+			approved_at,
+			ordered_at,
+			arrived_at,
+			used_at,
+			cancelled_at
 	`,
 		referenceID,
 		partsPurchaseRequestID,
@@ -1819,6 +1876,11 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 		&updated.CreatedByUserID,
 		&updated.CreatedAt,
 		&updated.UpdatedAt,
+		&updated.ApprovedAt,
+		&updated.OrderedAt,
+		&updated.ArrivedAt,
+		&updated.UsedAt,
+		&updated.CancelledAt,
 	)
 	if cmdErr != nil {
 		if cmdErr == pgx.ErrNoRows {
@@ -1826,7 +1888,10 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 		}
 		return domain.PartsPurchaseRequest{}, cmdErr
 	}
-	if err := r.db.QueryRow(ctx, `SELECT full_name FROM public.users WHERE id = $1::uuid`, updated.CreatedByUserID).Scan(&updated.CreatedByName); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT full_name FROM public.users WHERE id = $1::uuid`, updated.CreatedByUserID).Scan(&updated.CreatedByName); err != nil {
+		return domain.PartsPurchaseRequest{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return domain.PartsPurchaseRequest{}, err
 	}
 	return updated, nil

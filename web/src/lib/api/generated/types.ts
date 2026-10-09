@@ -151,11 +151,17 @@ export interface RepairLog {
 }
 
 export interface PartsPurchaseRequest {
+  approved_at: string | null;
+  ordered_at: string | null;
+  arrived_at: string | null;
+  used_at: string | null;
+  cancelled_at: string | null;
+
   parts_purchase_request_id: number;
   reference_id: number;
   source: "online" | "supplier";
   source_url: string | null;
-  status: "draft" | "waiting_approval" | "ordered" | "used";
+  status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
   total_price: number;
   item_name: string;
   quantity: number;

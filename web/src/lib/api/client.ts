@@ -475,7 +475,7 @@ export class APIClient {
     payload: {
       source: "online" | "supplier";
       source_url: string | null;
-      status: "draft" | "waiting_approval" | "ordered" | "used";
+      status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
       total_price: number;
       item_name: string;
       quantity: number;
@@ -493,7 +493,7 @@ export class APIClient {
     payload: {
       source: "online" | "supplier";
       source_url: string | null;
-      status: "draft" | "waiting_approval" | "ordered" | "used";
+      status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
       total_price: number;
       item_name: string;
       quantity: number;

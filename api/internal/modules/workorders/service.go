@@ -28,7 +28,7 @@ var ErrLocationNotFound = errors.New("location not found")
 var ErrInvalidRepairLogDetails = errors.New("repair log details are required")
 var ErrInvalidRepairLogHoursUsed = errors.New("repair log hours_used must be zero or greater")
 var ErrInvalidPartsSource = errors.New("parts source must be online or supplier")
-var ErrInvalidPartsStatus = errors.New("parts status must be draft, waiting_approval, ordered, or used")
+var ErrInvalidPartsStatus = errors.New("parts status must be draft, waiting_approval, approved, ordered, arrived, used, or cancelled")
 var ErrInvalidPartsItemName = errors.New("parts item name is required")
 var ErrInvalidPartsQuantity = errors.New("parts quantity must be at least 1")
 var ErrInvalidPartsTotalPrice = errors.New("parts total price must be zero or greater")
@@ -162,6 +162,7 @@ type UpdateRepairLogInput struct {
 }
 
 type UpdatePartsPurchaseRequestInput struct {
+	CanApprove bool
 	Source     string
 	SourceURL  *string
 	Status     string
@@ -465,7 +466,7 @@ func (s *Service) CreatePartsPurchaseRequest(ctx context.Context, referenceID in
 			status = normalized
 		}
 	}
-	if status != "draft" && status != "waiting_approval" && status != "ordered" && status != "used" {
+	if !validPartsStatus(status) {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsStatus
 	}
 
@@ -516,7 +517,7 @@ func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID in
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsSource
 	}
 	status := strings.TrimSpace(strings.ToLower(input.Status))
-	if status != "draft" && status != "waiting_approval" && status != "ordered" && status != "used" {
+	if !validPartsStatus(status) {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsStatus
 	}
 	itemName := strings.TrimSpace(input.ItemName)
@@ -533,6 +534,7 @@ func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID in
 		Source:     source,
 		SourceURL:  input.SourceURL,
 		Status:     status,
+		CanApprove: input.CanApprove,
 		TotalPrice: input.TotalPrice,
 		ItemName:   itemName,
 		Quantity:   input.Quantity,
