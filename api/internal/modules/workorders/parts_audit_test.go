@@ -1,6 +1,7 @@
 package workorders
 
 import (
+	"humphreys/api/internal/domain"
 	"reflect"
 	"testing"
 )
@@ -10,24 +11,46 @@ func entry(action, field string, old, new *string) PartsAuditEntry {
 }
 
 func TestDiffPartsAudit(t *testing.T) {
-	if got := diffPartsAudit("draft", "draft", 10, 10.001); len(got) != 0 {
-		t.Fatalf("expected no rows, got %+v", got)
+	old := domain.PartsPurchaseRequest{Status: "approved", TotalPrice: 10, Quantity: 1, ItemName: "Part", Source: "supplier"}
+	updated := old
+	updated.TotalPrice = 10.001
+	if got := diffPartsAudit(old, updated); len(got) != 0 {
+		t.Fatalf("rounded no-op: %+v", got)
 	}
-	got := diffPartsAudit("approved", "ordered", 10, 12.5)
-	if len(got) != 2 || got[1].Field != "status" || *got[1].Old != "approved" || *got[1].New != "ordered" ||
-		got[0].Field != "total_price" || *got[0].Old != "10.00" || *got[0].New != "12.50" {
-		t.Fatalf("unexpected rows %+v", got)
+	updated = domain.PartsPurchaseRequest{Status: "ordered", TotalPrice: 12.5, Quantity: 2, ItemName: "New_part", Source: "online", SourceURL: strPtr("https://example.com/a_b")}
+	got := diffPartsAudit(old, updated)
+	want := []partsAuditRow{
+		{Action: "update", Field: "total_price", Old: strPtr("10.00"), New: strPtr("12.50")},
+		{Action: "update", Field: "quantity", Old: strPtr("1"), New: strPtr("2")},
+		{Action: "update", Field: "item_name", Old: strPtr("Part"), New: strPtr("New_part")},
+		{Action: "update", Field: "source", Old: strPtr("supplier"), New: strPtr("online")},
+		{Action: "update", Field: "source_url", New: strPtr("https://example.com/a_b")},
+		{Action: "update", Field: "status", Old: strPtr("approved"), New: strPtr("ordered")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+	cleared := updated
+	cleared.SourceURL = nil
+	got = diffPartsAudit(updated, cleared)
+	if len(got) != 1 || got[0].New != nil || *got[0].Old != "https://example.com/a_b" {
+		t.Fatalf("URL clearing: %+v", got)
 	}
 }
 
 func TestCreateDeleteAuditRows(t *testing.T) {
-	c := createPartsAuditRows("approved", 5)
-	if len(c) != 2 || c[0].Action != "create" || c[0].Old != nil || *c[0].New != "approved" || *c[1].New != "5.00" {
-		t.Fatalf("bad create rows %+v", c)
+	item := domain.PartsPurchaseRequest{Status: "approved", TotalPrice: 5, Quantity: 2, ItemName: "Part", Source: "supplier"}
+	c, d := createPartsAuditRows(item), deletePartsAuditRows(item)
+	if len(c) != 6 || len(d) != 6 {
+		t.Fatalf("incomplete snapshots: %+v %+v", c, d)
 	}
-	d := deletePartsAuditRows("ordered", 7)
-	if len(d) != 2 || d[0].Action != "delete" || d[0].New != nil || *d[0].Old != "ordered" || *d[1].Old != "7.00" {
-		t.Fatalf("bad delete rows %+v", d)
+	for i := range c {
+		if c[i].Action != "create" || c[i].Old != nil || d[i].Action != "delete" || d[i].New != nil || !sameAuditValue(c[i].New, d[i].Old) {
+			t.Fatalf("snapshot mismatch: %+v %+v", c[i], d[i])
+		}
+	}
+	if *c[1].New != "5.00" || *c[2].New != "2" || *c[3].New != "Part" || *c[4].New != "supplier" || c[5].New != nil {
+		t.Fatalf("bad snapshot: %+v", c)
 	}
 }
 
@@ -56,6 +79,7 @@ func TestComputePartsFlags(t *testing.T) {
 			entry("update", "status", s("waiting_approval"), s("approved")), entry("delete", "total_price", s("10.00"), nil)}, []string{}},
 		{"no-op price does not warn", []PartsAuditEntry{entry("create", "status", nil, s("waiting_approval")),
 			entry("update", "status", s("waiting_approval"), s("approved")), entry("update", "total_price", s("10.00"), s("10.00"))}, []string{}},
+		{"draft price edit", []PartsAuditEntry{entry("create", "status", nil, s("draft")), entry("update", "total_price", s("10.00"), s("99.00"))}, []string{}},
 		{"no history", nil, []string{}},
 	}
 	for _, tc := range cases {

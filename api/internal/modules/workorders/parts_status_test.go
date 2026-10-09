@@ -13,6 +13,7 @@ func TestPartsStatusTransitions(t *testing.T) {
 		"approved":         {"ordered": true, "cancelled": true},
 		"ordered":          {"arrived": true, "cancelled": true},
 		"arrived":          {"used": true, "cancelled": true},
+		"used":             {"cancelled": true},
 	}
 	for _, from := range statuses {
 		for _, to := range statuses {

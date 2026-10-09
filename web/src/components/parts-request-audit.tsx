@@ -5,6 +5,11 @@ import { Table, Td, Th } from "@/components/ui/table";
 import { apiClient } from "@/lib/api/client";
 import type { PartsAuditEntry, PartsPurchaseRequest } from "@/lib/api/generated/types";
 
+const fieldLabels: Record<PartsAuditEntry["field"], string> = {
+  status: "Status", total_price: "Total price", quantity: "Quantity",
+  item_name: "Item name", source: "Source", source_url: "Source URL"
+};
+
 const warningLabels: Record<string, string> = {
   approved_without_review: "Approved without waiting for approval",
   price_changed_after_approval: "Price changed after approval"
@@ -25,7 +30,7 @@ function auditValue(value: string | null, field: PartsAuditEntry["field"]) {
   if (field === "total_price") {
     return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(Number(value));
   }
-  return value.replace(/_/g, " ");
+  return field === "status" ? value.replace(/_/g, " ") : value;
 }
 
 export function PartsRequestHistory({ referenceID, requests }: { referenceID: number; requests: PartsPurchaseRequest[] }) {
@@ -78,10 +83,10 @@ export function PartsRequestHistory({ referenceID, requests }: { referenceID: nu
             <tbody>{visible.map((entry) => <tr key={entry.id}>
               <Td>#{entry.parts_purchase_request_id}</Td>
               <Td className="capitalize">{entry.action}</Td>
-              <Td>{entry.field === "total_price" ? "Total price" : "Status"}</Td>
+              <Td>{fieldLabels[entry.field]}</Td>
               <Td>{auditValue(entry.old_value, entry.field)}</Td>
               <Td>{auditValue(entry.new_value, entry.field)}</Td>
-              <Td><span title={entry.changed_by_user_id}>{entry.changed_by_name}</span></Td>
+              <Td><span title={entry.changed_by_user_id}>{entry.changed_by_name ?? entry.changed_by_user_id}</span></Td>
               <Td><time dateTime={entry.changed_at}>{new Date(entry.changed_at).toLocaleString()}</time></Td>
             </tr>)}</tbody>
           </Table>

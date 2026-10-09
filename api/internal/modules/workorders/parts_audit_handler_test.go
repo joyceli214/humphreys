@@ -19,13 +19,16 @@ import (
 
 type partsAuditStub struct {
 	Repository
-	entries   []PartsAuditEntry
-	err       error
-	reference int
-	partsID   *int64
-	actor     string
-	status    string
-	price     float64
+	entries    []PartsAuditEntry
+	err        error
+	reference  int
+	partsID    *int64
+	actor      string
+	status     string
+	price      float64
+	canApprove bool
+	updatedAt  time.Time
+	transition bool
 }
 
 func (r *partsAuditStub) PartsAuditForWorkOrder(_ context.Context, reference int, partsID *int64) ([]PartsAuditEntry, error) {
@@ -40,7 +43,13 @@ func (r *partsAuditStub) CreatePartsPurchaseRequest(_ context.Context, reference
 
 func (r *partsAuditStub) UpdatePartsPurchaseRequest(_ context.Context, reference int, _ int64, input UpdatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error) {
 	r.reference, r.actor, r.status, r.price = reference, input.ActorUserID, input.Status, input.TotalPrice
-	return domain.PartsPurchaseRequest{Status: input.Status, TotalPrice: input.TotalPrice}, nil
+	r.canApprove, r.updatedAt = input.CanApprove, input.UpdatedAt
+	if r.transition {
+		if err := validatePartsTransition("waiting_approval", input.Status, input.CanApprove); err != nil {
+			return domain.PartsPurchaseRequest{}, err
+		}
+	}
+	return domain.PartsPurchaseRequest{Status: input.Status, TotalPrice: input.TotalPrice}, r.err
 }
 
 func (r *partsAuditStub) DeletePartsPurchaseRequest(_ context.Context, reference int, _ int64, actor string) error {
@@ -115,7 +124,7 @@ func TestPartsAuditActorsAndAllowedActions(t *testing.T) {
 	repo := &partsAuditStub{}
 	router := partsAuditRouter(t, repo)
 	path := "/work-orders/123/parts-purchase-requests"
-	body := `{"source":"supplier","status":"approved","total_price":25,"item_name":"Capacitor","quantity":1,"actor_user_id":"forged"}`
+	body := `{"source":"supplier","status":"approved","total_price":25,"item_name":"Capacitor","quantity":1,"actor_user_id":"forged","updated_at":"2026-10-09T12:00:00.123456Z"}`
 	for _, tc := range []struct {
 		method, path, permission string
 		status                   int
@@ -134,6 +143,42 @@ func TestPartsAuditActorsAndAllowedActions(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &item); err != nil || item.Status != "approved" || item.TotalPrice != 25 {
 				t.Fatalf("approved request action failed: %s, %v", response.Body.String(), err)
 			}
+		}
+	}
+}
+
+func TestPartsPatchPermissionAndConflict(t *testing.T) {
+	repo := &partsAuditStub{transition: true}
+	router := partsAuditRouter(t, repo)
+	path := "/work-orders/123/parts-purchase-requests/7"
+	body := `{"source":"supplier","status":"approved","total_price":25,"item_name":"Capacitor","quantity":1,"updated_at":"2026-10-09T12:00:00.123456Z"}`
+	for _, tc := range []struct {
+		permissions []string
+		want        int
+	}{
+		{[]string{permPartsUpdate, permSensitiveRead}, http.StatusForbidden},
+		{[]string{permPartsUpdate, permPartsApprove}, http.StatusOK},
+		{[]string{permPartsApprove}, http.StatusForbidden},
+	} {
+		got := partsAuditRequest(t, router, http.MethodPatch, path, body, tc.permissions)
+		if got.Code != tc.want {
+			t.Fatalf("permissions %v: %d %s", tc.permissions, got.Code, got.Body.String())
+		}
+	}
+	expected, _ := time.Parse(time.RFC3339Nano, "2026-10-09T12:00:00.123456Z")
+	if !repo.updatedAt.Equal(expected) {
+		t.Fatalf("timestamp not forwarded: %v", repo.updatedAt)
+	}
+	repo.err = ErrPartsPurchaseRequestConflict
+	got := partsAuditRequest(t, router, http.MethodPatch, path, body, []string{permPartsUpdate, permPartsApprove})
+	if got.Code != http.StatusConflict {
+		t.Fatalf("stale response: %d %s", got.Code, got.Body.String())
+	}
+	for _, version := range []string{"", `,"updated_at":null`, `,"updated_at":"bad"`, `,"updated_at":"0001-01-01T00:00:00Z"`} {
+		payload := `{"source":"supplier","status":"approved","total_price":25,"item_name":"Capacitor","quantity":1` + version + `}`
+		got := partsAuditRequest(t, router, http.MethodPatch, path, payload, []string{permPartsUpdate, permPartsApprove})
+		if got.Code != http.StatusBadRequest {
+			t.Fatalf("invalid version %s: %d %s", version, got.Code, got.Body.String())
 		}
 	}
 }

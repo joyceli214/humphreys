@@ -19,6 +19,7 @@ const (
 	permRepairLogsDelete = "repair_logs:delete"
 	permPartsRead        = "parts_purchase_requests:read"
 	permPartsCreate      = "parts_purchase_requests:create"
+	permPartsApprove     = "parts_purchase_requests:approve"
 	permPartsUpdate      = "parts_purchase_requests:update"
 	permPartsDelete      = "parts_purchase_requests:delete"
 )

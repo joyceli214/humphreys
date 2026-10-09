@@ -52,6 +52,23 @@ describe("parts request audit", () => {
     expect(screen.getByRole("option", { name: "#8 · Deleted request" })).toBeInTheDocument();
   });
 
+  it("labels metadata changes, preserves literal values and shows a missing actor ID", async () => {
+    const metadata: PartsAuditEntry[] = [
+      { ...entries[1], id: 10, field: "quantity", old_value: "1", new_value: "3" },
+      { ...entries[1], id: 11, field: "item_name", old_value: "Old_part", new_value: "New_part" },
+      { ...entries[1], id: 12, field: "source", old_value: "supplier", new_value: "online" },
+      { ...entries[1], id: 13, field: "source_url", old_value: null, new_value: "https://example.com/a_b", changed_by_name: null }
+    ];
+    vi.mocked(apiClient.getPartsPurchaseRequestHistory).mockResolvedValueOnce(metadata);
+    render(<PartsRequestHistory referenceID={123} requests={requests} />);
+    fireEvent.click(screen.getByText("Parts request history"));
+    await waitFor(() => expect(screen.getByRole("table")).toBeVisible());
+    for (const label of ["Quantity", "Item name", "Source", "Source URL", "Old_part", "New_part", "https://example.com/a_b"]) {
+      expect(screen.getByText(label)).toBeVisible();
+    }
+    expect(screen.getByText("editor-id")).toHaveAttribute("title", "editor-id");
+  });
+
   it("refreshes history after a request change", async () => {
     const { rerender } = render(<PartsRequestHistory referenceID={123} requests={requests} />);
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());

@@ -41,36 +41,54 @@ type partsAuditRow struct {
 func priceString(v float64) string { return strconv.FormatFloat(math.Round(v*100)/100, 'f', 2, 64) }
 func strPtr(s string) *string      { return &s }
 
-// diffPartsAudit returns the audit rows for an update (status and/or total_price changes).
-func diffPartsAudit(oldStatus, newStatus string, oldPrice, newPrice float64) []partsAuditRow {
-	rows := []partsAuditRow{}
-	// Price is changed before the new status takes effect. A price edit made in
-	// the same save as first approval is not an edit after approval.
-	if priceString(oldPrice) != priceString(newPrice) {
-		rows = append(rows, partsAuditRow{Action: "update", Field: "total_price", Old: strPtr(priceString(oldPrice)), New: strPtr(priceString(newPrice))})
+// partsAuditValues snapshots every editable field, preserving NULL source URLs.
+func partsAuditValues(item domain.PartsPurchaseRequest) []partsAuditRow {
+	return []partsAuditRow{
+		{Field: "status", New: strPtr(item.Status)},
+		{Field: "total_price", New: strPtr(priceString(item.TotalPrice))},
+		{Field: "quantity", New: strPtr(strconv.FormatInt(int64(item.Quantity), 10))},
+		{Field: "item_name", New: strPtr(item.ItemName)},
+		{Field: "source", New: strPtr(item.Source)},
+		{Field: "source_url", New: item.SourceURL},
 	}
-	if oldStatus != newStatus {
-		rows = append(rows, partsAuditRow{Action: "update", Field: "status", Old: strPtr(oldStatus), New: strPtr(newStatus)})
+}
+
+func sameAuditValue(a, b *string) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+// diffPartsAudit records all editable fields. Price precedes status so a price
+// edit alongside first approval is not treated as an edit after approval.
+func diffPartsAudit(old, updated domain.PartsPurchaseRequest) []partsAuditRow {
+	before, after := partsAuditValues(old), partsAuditValues(updated)
+	rows := []partsAuditRow{}
+	for _, i := range []int{1, 2, 3, 4, 5, 0} {
+		if !sameAuditValue(before[i].New, after[i].New) {
+			rows = append(rows, partsAuditRow{Action: "update", Field: after[i].Field, Old: before[i].New, New: after[i].New})
+		}
 	}
 	return rows
 }
 
-func createPartsAuditRows(status string, price float64) []partsAuditRow {
-	return []partsAuditRow{
-		{Action: "create", Field: "status", New: strPtr(status)},
-		{Action: "create", Field: "total_price", New: strPtr(priceString(price))},
+func createPartsAuditRows(item domain.PartsPurchaseRequest) []partsAuditRow {
+	rows := partsAuditValues(item)
+	for i := range rows {
+		rows[i].Action = "create"
 	}
+	return rows
 }
 
-func deletePartsAuditRows(status string, price float64) []partsAuditRow {
-	return []partsAuditRow{
-		{Action: "delete", Field: "status", Old: strPtr(status)},
-		{Action: "delete", Field: "total_price", Old: strPtr(priceString(price))},
+func deletePartsAuditRows(item domain.PartsPurchaseRequest) []partsAuditRow {
+	rows := partsAuditValues(item)
+	for i := range rows {
+		rows[i].Action, rows[i].Old, rows[i].New = "delete", rows[i].New, nil
 	}
+	return rows
 }
 
 // ComputePartsFlags derives persistent review flags from one request's audit entries.
 // approved_without_review: request reached "approved" (via create or status change) without ever having been in waiting_approval before.
+// A draft (including price edits while still draft) has no flags until approval.
 // price_changed_after_approval: total_price changed after the request first became approved.
 func ComputePartsFlags(entries []PartsAuditEntry) []string {
 	entries = append([]PartsAuditEntry(nil), entries...)

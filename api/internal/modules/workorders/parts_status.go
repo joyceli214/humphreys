@@ -3,7 +3,7 @@ package workorders
 import "errors"
 
 var ErrInvalidPartsTransition = errors.New("invalid parts status transition")
-var ErrPartsApprovalPermission = errors.New("work_orders_sensitive:read permission required")
+var ErrPartsApprovalPermission = errors.New("parts_purchase_requests:approve permission required")
 
 func validPartsStatus(status string) bool {
 	switch status {
@@ -32,6 +32,8 @@ func validatePartsTransition(from, to string, canApprove bool) error {
 		allowed = to == "arrived" || to == "cancelled"
 	case "arrived":
 		allowed = to == "used" || to == "cancelled"
+	case "used":
+		allowed = to == "cancelled"
 	}
 	if !allowed {
 		return ErrInvalidPartsTransition

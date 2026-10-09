@@ -177,11 +177,11 @@ export interface PartsAuditEntry {
   parts_purchase_request_id: number;
   reference_id: number;
   action: "create" | "update" | "delete";
-  field: "status" | "total_price";
+  field: "status" | "total_price" | "quantity" | "item_name" | "source" | "source_url";
   old_value: string | null;
   new_value: string | null;
   changed_by_user_id: string;
-  changed_by_name: string;
+  changed_by_name: string | null;
   changed_at: string;
   after_approval: boolean;
 }

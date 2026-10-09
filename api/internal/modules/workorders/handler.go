@@ -164,12 +164,13 @@ type updateRepairLogRequest struct {
 }
 
 type updatePartsPurchaseRequest struct {
-	Source     string  `json:"source" binding:"required"`
-	SourceURL  *string `json:"source_url"`
-	Status     string  `json:"status" binding:"required"`
-	TotalPrice float64 `json:"total_price"`
-	ItemName   string  `json:"item_name" binding:"required"`
-	Quantity   int32   `json:"quantity" binding:"required,gte=1"`
+	UpdatedAt  time.Time `json:"updated_at" binding:"required"`
+	Source     string    `json:"source" binding:"required"`
+	SourceURL  *string   `json:"source_url"`
+	Status     string    `json:"status" binding:"required"`
+	TotalPrice float64   `json:"total_price"`
+	ItemName   string    `json:"item_name" binding:"required"`
+	Quantity   int32     `json:"quantity" binding:"required,gte=1"`
 }
 
 type dashboardResponse struct {
@@ -1146,7 +1147,8 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 	}
 
 	item, err := h.service.UpdatePartsPurchaseRequest(c.Request.Context(), referenceID, partsPurchaseRequestID, UpdatePartsPurchaseRequestInput{
-		CanApprove:  hasPermission(c, permSensitiveRead),
+		UpdatedAt:   req.UpdatedAt,
+		CanApprove:  hasPermission(c, permPartsApprove),
 		ActorUserID: actorUserID(c),
 		Source:      req.Source,
 		SourceURL:   req.SourceURL,
@@ -1156,6 +1158,10 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 		Quantity:    req.Quantity,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPartsPurchaseRequestConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, ErrPartsApprovalPermission) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
@@ -1164,7 +1170,7 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, ErrInvalidPartsSource) ||
+		if errors.Is(err, ErrPartsUpdatedAtRequired) || errors.Is(err, ErrInvalidPartsSource) ||
 			errors.Is(err, ErrInvalidPartsStatus) ||
 			errors.Is(err, ErrInvalidPartsTransition) ||
 			errors.Is(err, ErrInvalidPartsItemName) ||

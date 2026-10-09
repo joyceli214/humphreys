@@ -6,6 +6,7 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"time"
 
 	"humphreys/api/internal/domain"
 
@@ -33,6 +34,8 @@ var ErrInvalidPartsItemName = errors.New("parts item name is required")
 var ErrInvalidPartsQuantity = errors.New("parts quantity must be at least 1")
 var ErrInvalidPartsTotalPrice = errors.New("parts total price must be zero or greater")
 var ErrRepairLogNotFound = errors.New("repair log not found")
+var ErrPartsPurchaseRequestConflict = errors.New("parts request changed; refresh and try again")
+var ErrPartsUpdatedAtRequired = errors.New("updated_at is required")
 var ErrPartsPurchaseRequestNotFound = errors.New("parts purchase request not found")
 var ErrInvalidCreationMode = errors.New("creation mode must be new_job or stock")
 var ErrStockJobTypeNotFound = errors.New("stock job type not found")
@@ -162,6 +165,7 @@ type UpdateRepairLogInput struct {
 }
 
 type UpdatePartsPurchaseRequestInput struct {
+	UpdatedAt   time.Time
 	CanApprove  bool
 	ActorUserID string
 	Source      string
@@ -517,6 +521,9 @@ func (s *Service) DeleteRepairLog(ctx context.Context, referenceID int, repairLo
 }
 
 func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, input UpdatePartsPurchaseRequestInput) (domain.PartsPurchaseRequest, error) {
+	if input.UpdatedAt.IsZero() {
+		return domain.PartsPurchaseRequest{}, ErrPartsUpdatedAtRequired
+	}
 	source := strings.TrimSpace(strings.ToLower(input.Source))
 	if source != "online" && source != "supplier" {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsSource
@@ -536,6 +543,7 @@ func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID in
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsTotalPrice
 	}
 	return s.repo.UpdatePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID, UpdatePartsPurchaseRequestInput{
+		UpdatedAt:   input.UpdatedAt,
 		Source:      source,
 		SourceURL:   input.SourceURL,
 		Status:      status,
