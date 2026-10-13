@@ -1,3 +1,4 @@
+import { workOrderTotals } from "@/lib/work-order-totals";
 "use client";
 
 import { type CSSProperties, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -547,6 +548,7 @@ export default function WorkOrderDetailPage() {
   const { hasPermission, user } = useAuth();
   const alerts = useAlerts();
   const canEdit = hasPermission("work_orders:update");
+  const canEditDiscount = canEdit && hasPermission("work_orders_sensitive:update");
   const canAdminDeleteJob = hasPermission("work_orders:create");
   const canUpdateStatus = hasPermission("work_orders_status:update");
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
@@ -561,6 +563,22 @@ export default function WorkOrderDetailPage() {
   const canDeletePartsRequests = hasPermission("parts_purchase_requests:delete");
   const { referenceId } = useParams();
   const [item, setItem] = useState<WorkOrderDetail | null>(null);
+  const [discountType, setDiscountType] = useState<"percent" | "amount" | "">("");
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountHistory, setDiscountHistory] = useState<import("@/lib/api/generated/types").LabourDiscountAudit[]>([]);
+  const [discountHistoryError, setDiscountHistoryError] = useState("");
+  const [savingDiscount, setSavingDiscount] = useState(false);
+  useEffect(() => {
+    if (!item) return;
+    setDiscountType(item.labour_discount_type ?? "");
+    setDiscountValue(item.labour_discount_value == null ? "" : String(item.labour_discount_value));
+    if (canEditDiscount) {
+      let cancelled = false;
+      setDiscountHistoryError("");
+      apiClient.getWorkOrderLabourDiscountHistory(item.reference_id).then((rows) => { if (!cancelled) setDiscountHistory(rows); }).catch(() => { if (!cancelled) setDiscountHistoryError("Could not load discount history."); });
+      return () => { cancelled = true; };
+    }
+  }, [item, canEditDiscount]);
   const [repairLogs, setRepairLogs] = useState<RepairLog[]>([]);
   const [partsRequests, setPartsRequests] = useState<PartsPurchaseRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -927,18 +945,22 @@ export default function WorkOrderDetailPage() {
   const editLabour = parseOptionalNumber(totalsForm.labour_total) ?? 0;
   const editDepositRaw = Number(totalsForm.deposit.trim() || "0");
   const editDeposit = Number.isFinite(editDepositRaw) ? editDepositRaw : 0;
-  const editSubtotal = editParts + editDelivery + editLabour;
-  const editTax = editSubtotal * 0.13;
-  const editTotal = editSubtotal + editTax;
-  const editTotalPayable = editTotal - editDeposit;
-
-  const viewParts = item.parts_total ?? 0;
-  const viewDelivery = item.delivery_total ?? 0;
-  const viewLabour = item.labour_total ?? 0;
-  const viewSubtotal = viewParts + viewDelivery + viewLabour;
-  const viewTax = viewSubtotal * 0.13;
-  const viewTotal = viewSubtotal + viewTax;
-  const viewTotalPayable = viewTotal - item.deposit;
+  const editTotals = workOrderTotals({ parts_total: editParts, delivery_total: editDelivery, labour_total: editLabour, deposit: editDeposit, labour_discount_type: discountType || null, labour_discount_value: Number(discountValue) });
+  const { subtotal: editSubtotal, hst: editTax, total: editTotal, payable: editTotalPayable } = editTotals;
+  const viewTotals = workOrderTotals(item);
+  const { subtotal: viewSubtotal, hst: viewTax, total: viewTotal, payable: viewTotalPayable } = viewTotals;
+  const saveDiscount = async () => {
+    const value = discountType ? Number(discountValue) : null;
+    if (discountType && (!discountValue.trim() || value == null || !Number.isFinite(value) || value < 0 || (discountType === "percent" && value > 100) || (discountType === "amount" && (item.labour_total == null || value > item.labour_total)))) {
+      setSectionError("Enter a valid discount. Amount discounts cannot exceed saved labour; save labour changes first."); return;
+    }
+    setSavingDiscount(true); setSectionError("");
+    try { setItem(await apiClient.updateWorkOrderLabourDiscount(item.reference_id, discountType || null, value)); }
+    catch (err) { setSectionError(err instanceof Error ? err.message : "Could not save labour discount."); }
+    finally { setSavingDiscount(false); }
+  };
+  const discountLabel = (type: string | null, value: number | null) => type === "percent" ? `${value}%` : type === "amount" ? formatCurrency(value) : "None";
+  const discountHistoryList = canEditDiscount && <div className="text-xs space-y-1"><p className="font-medium">Discount history</p>{discountHistoryError ? <p role="alert">{discountHistoryError}</p> : discountHistory.length ? discountHistory.map((entry) => <p key={entry.id}>{entry.changed_by_name} · {new Date(entry.changed_at).toLocaleString()} · {discountLabel(entry.old_type, entry.old_value)} → {discountLabel(entry.new_type, entry.new_value)}</p>) : <p>No discount changes.</p>}</div>;
   const openFullscreenImage = (src: string, alt?: string | null) => {
     setFullscreenImage({ src, alt: alt?.trim() || "Image preview" });
   };
@@ -2481,6 +2503,15 @@ export default function WorkOrderDetailPage() {
                       <label className="mb-1 block text-sm text-muted-foreground">Labour</label>
                       <Input value={totalsForm.labour_total} onChange={(e) => setTotalsForm((prev) => ({ ...prev, labour_total: e.target.value }))} />
                     </div>
+                    {canEditDiscount && <div className="space-y-2">
+                      <label className="block text-sm text-muted-foreground" htmlFor="labour-discount-type">Labour discount</label>
+                      <div className="flex gap-2">
+                        <select id="labour-discount-type" className="rounded border p-2" value={discountType} onChange={(e) => setDiscountType(e.target.value as typeof discountType)}><option value="">None</option><option value="percent">%</option><option value="amount">$</option></select>
+                        {discountType && <Input aria-label="Labour discount value" type="number" min="0" max={discountType === "percent" ? 100 : item.labour_total ?? 0} step="0.01" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} />}
+                      </div>
+                      <Button size="sm" onClick={saveDiscount} disabled={savingDiscount}>{savingDiscount ? "Saving..." : "Save discount"}</Button>
+                      {discountHistoryList}
+                    </div>}
                     <div>
                       <label className="mb-1 block text-sm text-muted-foreground">Subtotal</label>
                       <Input value={formatCurrency(editSubtotal)} disabled />
@@ -2522,6 +2553,8 @@ export default function WorkOrderDetailPage() {
                   {detailRow("Parts", formatCurrency(item.parts_total))}
                   {detailRow("Delivery", formatCurrency(item.delivery_total))}
                   {detailRow("Labour", formatCurrency(item.labour_total))}
+                  {item.labour_discount_type && <>{detailRow(`Labour discount (${discountLabel(item.labour_discount_type, item.labour_discount_value)})`, `-${formatCurrency(viewTotals.labourDiscount)}`)}{detailRow("Labour (net)", formatCurrency(viewTotals.netLabour))}</>}
+                  {discountHistoryList}
                   {detailRow("Subtotal", formatCurrency(viewSubtotal))}
                   {detailRow("HST (13%)", formatCurrency(viewTax))}
                   {detailRow("Total", formatCurrency(viewTotal))}

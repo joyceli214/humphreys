@@ -115,8 +115,11 @@ func emailJobDetails(item domain.WorkOrderDetail) string {
 	}
 
 	if item.PartsTotal != nil || item.DeliveryTotal != nil || item.LabourTotal != nil {
-		total := float64Value(item.PartsTotal) + float64Value(item.DeliveryTotal) + float64Value(item.LabourTotal)
-		details = append(details, fmt.Sprintf("Estimated total before deposit: %s", formatEmailCurrency(total*1.13)))
+		totals := CalculateTotals(item)
+		if item.LabourDiscountType != nil {
+			details = append(details, fmt.Sprintf("Labour discount: -%s", formatEmailCurrency(totals.LabourDiscount)))
+		}
+		details = append(details, fmt.Sprintf("Estimated total before deposit: %s", formatEmailCurrency(totals.Total)))
 	}
 
 	if item.Deposit > 0 {

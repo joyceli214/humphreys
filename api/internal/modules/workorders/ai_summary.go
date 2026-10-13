@@ -598,6 +598,7 @@ func buildWorkOrderAISummaryPrompt(template string, item domain.WorkOrderDetail,
 	pendingActions := summarizeActionsRequired(item.StatusName, partsRequests)
 	partsRequestSummary := summarizePartsRequests(partsRequests)
 
+	totals := CalculateTotals(item)
 	data := fmt.Sprintf(`Work order data:
 - Reference ID: %d
 - Status: %s
@@ -613,6 +614,12 @@ func buildWorkOrderAISummaryPrompt(template string, item domain.WorkOrderDetail,
 - Technicians: %s
 - Parts Total: %s
 - Labour Total: %s
+- Labour Discount: %.2f
+- Labour (net): %.2f
+- Subtotal: %.2f
+- HST: %.2f
+- Total: %.2f
+- Payable: %.2f
 - Delivery Total: %s
 - Deposit: %.2f
 - Line Items Count: %d
@@ -634,7 +641,7 @@ func buildWorkOrderAISummaryPrompt(template string, item domain.WorkOrderDetail,
 		orUnknown(item.WorkDone),
 		orUnknown(joinOrEmpty(item.WorkerNames)),
 		formatMoney(item.PartsTotal),
-		formatMoney(item.LabourTotal),
+		formatMoney(item.LabourTotal), totals.LabourDiscount, totals.NetLabour, totals.Subtotal, totals.HST, totals.Total, totals.Payable,
 		formatMoney(item.DeliveryTotal),
 		item.Deposit,
 		len(item.LineItems),

@@ -392,6 +392,14 @@ export class APIClient {
     });
   }
 
+  updateWorkOrderLabourDiscount(referenceID: number, type: "percent" | "amount" | null, value: number | null) {
+    return this.request<WorkOrderDetail>(`/work-orders/${referenceID}/labour-discount`, { method: "PATCH", body: JSON.stringify({ type, value }) });
+  }
+
+  getWorkOrderLabourDiscountHistory(referenceID: number) {
+    return this.request<import("./generated/types").LabourDiscountAudit[]>(`/work-orders/${referenceID}/labour-discount/history`);
+  }
+
   updateWorkOrderTotals(
     referenceID: number,
     payload: {
