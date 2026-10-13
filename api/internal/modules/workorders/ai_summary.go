@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"humphreys/api/internal/domain"
+	"humphreys/api/internal/middleware"
 	"humphreys/api/internal/modules/aisettings"
 
 	"github.com/gin-gonic/gin"
@@ -80,13 +81,30 @@ func getOpenRouterModel() string {
 	return value
 }
 
+func hasSensitiveAccess(c *gin.Context) bool {
+	claims, ok := middleware.Claims(c)
+	if !ok || claims == nil {
+		return false
+	}
+	for _, scope := range claims.Scope {
+		if scope == "work_orders_sensitive:update" {
+			return true
+		}
+	}
+	return false
+}
+
+func aiSummaryCacheKey(referenceID int, sensitive bool) string {
+	return fmt.Sprintf("work-order:%d:sensitive=%t", referenceID, sensitive)
+}
+
 func (h *Handler) GenerateAISummary(c *gin.Context) {
 	referenceID, err := strconv.Atoi(c.Param("reference_id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
 		return
 	}
-	cacheKey := fmt.Sprintf("work-order:%d", referenceID)
+	cacheKey := aiSummaryCacheKey(referenceID, hasSensitiveAccess(c))
 	if h.aiSummaryCache != nil {
 		if cached := h.aiSummaryCache.Get(cacheKey); cached != nil {
 			value := cached.Value()
@@ -668,7 +686,6 @@ func buildWorkOrderAISummaryPrompt(template string, item domain.WorkOrderDetail,
 	pendingActions := summarizeActionsRequired(item.StatusName, partsRequests)
 	partsRequestSummary := summarizePartsRequests(partsRequests)
 
-	totals := CalculateTotals(item)
 	data := fmt.Sprintf(`Work order data:
 - Reference ID: %d
 - Status: %s
@@ -684,12 +701,6 @@ func buildWorkOrderAISummaryPrompt(template string, item domain.WorkOrderDetail,
 - Technicians: %s
 - Parts Total: %s
 - Labour Total: %s
-- Labour Discount: %.2f
-- Labour (net): %.2f
-- Subtotal: %.2f
-- HST: %.2f
-- Total: %.2f
-- Payable: %.2f
 - Delivery Total: %s
 - Deposit: %.2f
 - Line Items Count: %d
@@ -711,7 +722,7 @@ func buildWorkOrderAISummaryPrompt(template string, item domain.WorkOrderDetail,
 		orUnknown(item.WorkDone),
 		orUnknown(joinOrEmpty(item.WorkerNames)),
 		formatMoney(item.PartsTotal),
-		formatMoney(item.LabourTotal), totals.LabourDiscount, totals.NetLabour, totals.Subtotal, totals.HST, totals.Total, totals.Payable,
+		formatMoney(item.LabourTotal),
 		formatMoney(item.DeliveryTotal),
 		item.Deposit,
 		len(item.LineItems),
