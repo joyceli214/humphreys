@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
+import mobileTables from "./mobile-list-tables.module.css";
 import { CustomerSearchableDropdown } from "@/components/work-order-dropdowns/customer-searchable-dropdown";
 import { SingleSearchableDropdown } from "@/components/work-order-dropdowns/single-searchable-dropdown";
 import { useAlerts } from "@/lib/alerts/alert-context";
@@ -479,8 +480,8 @@ export default function WorkOrdersPage() {
           )}
         </form>
 
-        <div className="overflow-x-auto">
-          <Table className="min-w-[920px]">
+        <div className={`${mobileTables.container} sm:overflow-x-auto`}>
+          <Table className={`${mobileTables.table} min-w-[920px]`}>
             <thead>
               <tr>
                 <Th className="w-[110px]">Ref #</Th>
@@ -512,25 +513,25 @@ export default function WorkOrdersPage() {
                     className="cursor-pointer transition-colors hover:bg-muted/50"
                     onClick={() => navigate(detailPath)}
                   >
-                    <Td>{item.reference_id}</Td>
-                    <Td>
+                    <Td data-label="Ref #">{item.reference_id}</Td>
+                    <Td data-label="Customer">
                       <div className="space-y-1">
                         <p>{item.customer_name ?? "-"}</p>
                         {canViewSensitive && item.customer_email && <p className="text-xs text-muted-foreground">{item.customer_email}</p>}
                       </div>
                     </Td>
-                    <Td>
+                    <Td data-label="Status">
                       <Badge className={statusClass(item.status_group)}>{item.status}</Badge>
                     </Td>
-                    <Td>{item.job_type}</Td>
-                    <Td>
+                    <Td data-label="Job Type">{item.job_type}</Td>
+                    <Td data-label="Item">
                       <div className="space-y-1">
                         <p>{item.item_name ?? "-"}</p>
                         {item.brand_names.length > 0 && <p className="text-xs text-muted-foreground">{item.brand_names.join(", ")}</p>}
                       </div>
                     </Td>
-                    <Td>{item.model_number ?? "-"}</Td>
-                    <Td>
+                    <Td data-label="Model #">{item.model_number ?? "-"}</Td>
+                    <Td data-label="Location">
                       <div onClick={(event) => event.stopPropagation()}>
                         {canUpdateWorkOrders ? (
                           <SingleSearchableDropdown
@@ -552,7 +553,7 @@ export default function WorkOrdersPage() {
                         )}
                       </div>
                     </Td>
-                    <Td>{formatDateTime(item.created_at)}</Td>
+                    <Td data-label="Created">{formatDateTime(item.created_at)}</Td>
                   </tr>
                 );
               })}

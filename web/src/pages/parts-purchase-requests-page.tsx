@@ -10,6 +10,7 @@ import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, Td, Th } from "@/components/ui/table";
+import mobileTables from "./mobile-list-tables.module.css";
 
 function parseLocalDate(value: string) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -149,8 +150,8 @@ export default function PartsPurchaseRequestsPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <Table className="min-w-[1100px]">
+        <div className={`${mobileTables.container} sm:overflow-x-auto`}>
+          <Table className={`${mobileTables.table} min-w-[1100px]`}>
             <thead>
               <tr>
                 <Th className="w-16 whitespace-nowrap">#</Th>
@@ -179,9 +180,9 @@ export default function PartsPurchaseRequestsPage() {
               {!loading &&
                 visibleItems.map((item) => (
                   <tr key={item.parts_purchase_request_id}>
-                    <Td className="whitespace-nowrap tabular-nums">#{item.parts_purchase_request_id}</Td>
-                    <Td>{item.reference_id}</Td>
-                    <Td>
+                    <Td data-label="#" className="whitespace-nowrap tabular-nums">#{item.parts_purchase_request_id}</Td>
+                    <Td data-label="Ref #">{item.reference_id}</Td>
+                    <Td data-label="Item">
                       <div className="space-y-1">
                         <p>{item.item_name}</p>
                         {item.source_url ? (
@@ -191,16 +192,16 @@ export default function PartsPurchaseRequestsPage() {
                         ) : null}
                       </div>
                     </Td>
-                    <Td>{item.quantity}</Td>
-                    <Td className="capitalize">{item.source}</Td>
-                    <Td>
+                    <Td data-label="Qty">{item.quantity}</Td>
+                    <Td data-label="Source" className="capitalize">{item.source}</Td>
+                    <Td data-label="Status">
                       <Badge className={`capitalize ${statusClass(item.status)}`}>{item.status.replace("_", " ")}</Badge>
                       <PartsRequestWarnings flags={item.audit_flags} />
                     </Td>
-                    <Td>{formatCurrency(item.total_price)}</Td>
-                    <Td>{item.created_by_name ?? item.created_by_user_id}</Td>
-                    <Td>{formatDate(item.created_at)}</Td>
-                    <Td>
+                    <Td data-label="Total">{formatCurrency(item.total_price)}</Td>
+                    <Td data-label="Requested By">{item.created_by_name ?? item.created_by_user_id}</Td>
+                    <Td data-label="Created">{formatDate(item.created_at)}</Td>
+                    <Td data-label="Action">
                       <Button variant="outline" size="sm" asChild>
                         <Link to={`/work-orders/${item.reference_id}`}>Open WO</Link>
                       </Button>
