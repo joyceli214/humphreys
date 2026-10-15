@@ -28,13 +28,14 @@
 }
 
 .cardView tbody tr {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 0;
-  flex-direction: column;
-  gap: 0.75rem;
+  column-gap: 0.75rem;
+  row-gap: 0.625rem;
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
-  padding: 1rem;
+  padding: 0.75rem;
   background: hsl(var(--card));
 }
 
@@ -59,23 +60,79 @@
 
 .cardView td[data-label="#"],
 .cardView td[data-label="Ref #"] {
-  order: -3;
+  order: -20;
 }
 
 .cardView td[data-label="Status"] {
-  order: -2;
+  order: -19;
+}
+
+.cardView td[data-label="Customer"] {
+  order: -18;
 }
 
 .cardView td[data-label="Item"] {
-  order: -1;
+  order: -17;
+}
+
+.cardView td[data-label="#"] ~ td[data-label="Ref #"] {
+  order: -16;
+}
+
+.cardView td[data-label="Qty"] {
+  order: -15;
+}
+
+.cardView td[data-label="Source"] {
+  order: -14;
+}
+
+.cardView td[data-label="Total"] {
+  order: -13;
+}
+
+.cardView td[data-label="Job Type"] {
+  order: -12;
+}
+
+.cardView td[data-label="Created"] {
+  order: -11;
+}
+
+.cardView td[data-label="Item"],
+.cardView td[data-label="Customer"],
+.cardView td[data-label="Requested By"],
+.cardView td[data-label="Action"],
+.cardView td[data-label="Location"],
+.cardView td[data-label="Model #"],
+.cardView td[data-label="Message"] {
+  grid-column: 1 / -1;
+}
+
+.cardView td[data-label="Action"] {
+  order: 1;
 }
 
 .cardView td[data-label="Status"],
 .cardView td[data-label="Status"] span {
-  display: inline-block;
   max-width: 100%;
   overflow: visible;
   text-overflow: clip;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.cardView td[data-label="Status"] {
+  display: block;
+  min-width: 0;
+}
+
+.cardView td[data-label="Status"] span {
+  display: inline-block;
+}
+
+@media (max-width: 359.98px) {
+  .cardView tbody tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
