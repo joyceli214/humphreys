@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, Td, Th } from "@/components/ui/table";
 import mobileTables from "./mobile-list-tables.module.css";
+import { ListViewToggle, useListViewMode } from "./list-view-toggle";
 
 function parseLocalDate(value: string) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -68,6 +69,7 @@ function statusClass(status: PartsPurchaseRequest["status"]) {
 export default function PartsPurchaseRequestsPage() {
   const { hasPermission } = useAuth();
   const alerts = useAlerts();
+  const [viewMode, setViewMode] = useListViewMode("humphreys.viewMode.partsPurchaseRequests");
   const canReadPage = hasPermission("parts_purchase_requests:read") && hasPermission("work_orders_sensitive:read");
   const [items, setItems] = useState<PartsPurchaseRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,7 +152,8 @@ export default function PartsPurchaseRequestsPage() {
           </div>
         </div>
 
-        <div className={`${mobileTables.container} sm:overflow-x-auto`}>
+        <ListViewToggle mode={viewMode} onChange={setViewMode} />
+        <div className={`${mobileTables.container} ${viewMode === "card" ? mobileTables.cardView : mobileTables.tableView}`}>
           <Table className={`${mobileTables.table} min-w-[1100px]`}>
             <thead>
               <tr>
@@ -169,12 +172,12 @@ export default function PartsPurchaseRequestsPage() {
             <tbody>
               {loading && (
                 <tr>
-                  <Td colSpan={10}>Loading parts requests...</Td>
+                  <Td data-label="Message" colSpan={10}>Loading parts requests...</Td>
                 </tr>
               )}
               {!loading && visibleItems.length === 0 && (
                 <tr>
-                  <Td colSpan={10}>No parts purchase requests found for current filters.</Td>
+                  <Td data-label="Message" colSpan={10}>No parts purchase requests found for current filters.</Td>
                 </tr>
               )}
               {!loading &&

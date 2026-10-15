@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import mobileTables from "./mobile-list-tables.module.css";
+import { ListViewToggle, useListViewMode } from "./list-view-toggle";
 import { CustomerSearchableDropdown } from "@/components/work-order-dropdowns/customer-searchable-dropdown";
 import { SingleSearchableDropdown } from "@/components/work-order-dropdowns/single-searchable-dropdown";
 import { useAlerts } from "@/lib/alerts/alert-context";
@@ -86,6 +87,7 @@ export default function WorkOrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPermission } = useAuth();
   const alerts = useAlerts();
+  const [viewMode, setViewMode] = useListViewMode("humphreys.viewMode.workOrders");
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canCreateWorkOrders = hasPermission("work_orders:create");
   const canUpdateWorkOrders = hasPermission("work_orders:update");
@@ -480,7 +482,8 @@ export default function WorkOrdersPage() {
           )}
         </form>
 
-        <div className={`${mobileTables.container} sm:overflow-x-auto`}>
+        <ListViewToggle mode={viewMode} onChange={setViewMode} />
+        <div className={`${mobileTables.container} ${viewMode === "card" ? mobileTables.cardView : mobileTables.tableView}`}>
           <Table className={`${mobileTables.table} min-w-[920px]`}>
             <thead>
               <tr>
@@ -497,12 +500,12 @@ export default function WorkOrdersPage() {
             <tbody>
               {loading && items.length === 0 && (
                 <tr>
-                  <Td colSpan={8}>Loading work orders...</Td>
+                  <Td data-label="Message" colSpan={8}>Loading work orders...</Td>
                 </tr>
               )}
               {!loading && items.length === 0 && (
                 <tr>
-                  <Td colSpan={8}>No work orders found.</Td>
+                  <Td data-label="Message" colSpan={8}>No work orders found.</Td>
                 </tr>
               )}
               {items.map((item) => {

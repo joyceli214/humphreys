@@ -1,105 +1,81 @@
 /* Scoped to the work order search and parts purchase request lists. */
-@media (max-width: 639.98px) {
-  .container {
-    overflow: visible;
-  }
-
-  .container .table {
-    display: block;
-    min-width: 0;
-  }
-
-  /* Keep column headings available to assistive technology. */
-  .table thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-
-  .table tbody {
-    display: grid;
-    gap: 0.75rem;
-  }
-
-  .table tbody tr {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 0.75rem;
-    border: 1px solid hsl(var(--border));
-    border-radius: 0.5rem;
-    padding: 1rem;
-  }
-
-  .table td {
-    display: block;
-    min-width: 0;
-    width: auto;
-    border: 0;
-    padding: 0;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .table td[data-label]::before {
-    content: attr(data-label);
-    display: block;
-    margin-bottom: 0.25rem;
-    color: hsl(var(--muted-foreground));
-    font-size: 0.75rem;
-    font-weight: 500;
-  }
-
-  .table td[data-label="#"],
-  .table td[data-label="Ref #"] {
-    order: -3;
-  }
-
-  .table td[data-label="Status"] {
-    order: -2;
-  }
-
-  .table td[data-label="Item"] {
-    order: -1;
-  }
-
-  .table td[data-label="Status"] span {
-    display: inline-block;
-    max-width: 100%;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
+.container.tableView {
+  overflow-x: auto;
 }
 
-@media (min-width: 640px) and (max-width: 1023.98px) {
-  .container {
-    overflow-x: auto;
-  }
+.container.cardView {
+  overflow: visible;
+}
 
-  /* Preserve native table layout and headings; scroll wide columns as needed. */
-  .container .table {
-    font-size: 1rem;
-  }
+.cardView .table {
+  display: block;
+  min-width: 0 !important;
+}
 
-  .table th,
-  .table td {
-    padding: 0.85rem 1rem;
-  }
+/* Keep column headings available to assistive technology. */
+.cardView thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 
-  .table td[data-label="Status"] {
-    min-width: 8rem;
-  }
+.cardView tbody {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: 0.75rem;
+}
 
-  .table td[data-label="Status"],
-  .table td[data-label="Status"] span {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
+.cardView tbody tr {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background: hsl(var(--card));
+}
 
-  .table td[data-label="Status"] span {
-    display: inline-block;
-    max-width: 100%;
-  }
+.cardView td {
+  display: block;
+  min-width: 0;
+  width: auto;
+  border: 0;
+  padding: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cardView td[data-label]::before {
+  content: attr(data-label);
+  display: block;
+  margin-bottom: 0.25rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.cardView td[data-label="#"],
+.cardView td[data-label="Ref #"] {
+  order: -3;
+}
+
+.cardView td[data-label="Status"] {
+  order: -2;
+}
+
+.cardView td[data-label="Item"] {
+  order: -1;
+}
+
+.cardView td[data-label="Status"],
+.cardView td[data-label="Status"] span {
+  display: inline-block;
+  max-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
