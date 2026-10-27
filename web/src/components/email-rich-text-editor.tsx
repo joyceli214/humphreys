@@ -46,7 +46,7 @@ function ToolbarButton({
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       className={cn(
-        "inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground/80 transition hover:bg-white hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+        "inline-flex h-8 w-8 items-center justify-center rounded text-muted-foreground transition hover:bg-white hover:text-foreground disabled:pointer-events-none disabled:opacity-40 sm:h-7 sm:w-7",
         active && "bg-white text-primary shadow-sm ring-1 ring-border"
       )}
     >
@@ -56,7 +56,7 @@ function ToolbarButton({
 }
 
 function Divider() {
-  return <span aria-hidden className="mx-1 h-5 w-px bg-border" />;
+  return <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />;
 }
 
 function LinkBar({ editor, onClose }: { editor: Editor; onClose: () => void }) {
@@ -93,10 +93,10 @@ function LinkBar({ editor, onClose }: { editor: Editor; onClose: () => void }) {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-sm">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/70 bg-muted/30 px-2 py-1.5 text-sm">
       {!hasSelection && !currentHref && (
         <input
-          className="h-9 min-w-0 flex-1 basis-40 rounded-md border border-input bg-white px-2 outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="h-8 min-w-0 flex-1 basis-40 rounded-md border border-input bg-white px-2 outline-none focus-visible:ring-2 focus-visible:ring-primary"
           placeholder="Text to show (optional)"
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -110,7 +110,7 @@ function LinkBar({ editor, onClose }: { editor: Editor; onClose: () => void }) {
       )}
       <input
         ref={inputRef}
-        className="h-9 min-w-0 flex-[2] basis-52 rounded-md border border-input bg-white px-2 outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="h-8 min-w-0 flex-[2] basis-52 rounded-md border border-input bg-white px-2 outline-none focus-visible:ring-2 focus-visible:ring-primary"
         placeholder="Link: website, email or phone number"
         aria-label="Link address"
         value={url}
@@ -131,15 +131,15 @@ function LinkBar({ editor, onClose }: { editor: Editor; onClose: () => void }) {
         }}
       />
       <div className="flex gap-2">
-        <button type="button" className="h-9 rounded-md bg-primary px-3 font-medium text-primary-foreground hover:opacity-90" onClick={apply}>
+        <button type="button" className="h-8 rounded-md bg-primary px-3 font-medium text-primary-foreground hover:opacity-90" onClick={apply}>
           {currentHref ? "Update link" : "Add link"}
         </button>
         {currentHref && (
-          <button type="button" className="h-9 rounded-md border border-border bg-white px-3 hover:bg-muted" onClick={remove}>
+          <button type="button" className="h-8 rounded-md border border-border bg-white px-3 hover:bg-muted" onClick={remove}>
             Remove
           </button>
         )}
-        <button type="button" className="h-9 rounded-md px-3 text-muted-foreground hover:bg-muted" onClick={onClose}>
+        <button type="button" className="h-8 rounded-md px-3 text-muted-foreground hover:bg-muted" onClick={onClose}>
           Cancel
         </button>
       </div>
@@ -176,7 +176,7 @@ export function EmailRichTextEditor({ value, onChange, disabled, className, aria
     immediatelyRender: true,
     editorProps: {
       attributes: {
-        class: "email-editor-content min-h-full px-4 py-4 text-[15px] leading-relaxed outline-none sm:px-5",
+        class: "email-editor-content min-h-full px-3 py-2 text-sm leading-6 outline-none",
         role: "textbox",
         "aria-multiline": "true",
         "aria-label": ariaLabel
@@ -207,40 +207,48 @@ export function EmailRichTextEditor({ value, onChange, disabled, className, aria
   const off = disabled;
 
   return (
-    <div className={cn("flex min-h-0 flex-col", className)}>
-      <div role="toolbar" aria-label="Formatting" className="flex flex-wrap items-center gap-0.5 border-b border-border bg-muted/60 px-2 py-1 sm:px-3">
+    // The whole box is drag-resizable (bottom-right handle), like the old message textarea.
+    // overflow must not be "visible" for CSS resize to work; the editor scrolls inside the box.
+    <div
+      data-testid="email-message-box"
+      className={cn(
+        "flex min-h-[280px] resize-y flex-col overflow-auto rounded-md border border-input bg-white focus-within:ring-2 focus-within:ring-primary",
+        className
+      )}
+    >
+      <div role="toolbar" aria-label="Formatting" className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border/70 bg-muted/30 px-1.5 py-0.5">
         <ToolbarButton label="Bold" active={state?.bold} disabled={off} onClick={() => editor.chain().focus().toggleBold().run()}>
-          <Bold className="h-4 w-4" />
+          <Bold className="h-3.5 w-3.5" />
         </ToolbarButton>
         <ToolbarButton label="Italic" active={state?.italic} disabled={off} onClick={() => editor.chain().focus().toggleItalic().run()}>
-          <Italic className="h-4 w-4" />
+          <Italic className="h-3.5 w-3.5" />
         </ToolbarButton>
         <ToolbarButton label="Underline" active={state?.underline} disabled={off} onClick={() => editor.chain().focus().toggleUnderline().run()}>
-          <Underline className="h-4 w-4" />
+          <Underline className="h-3.5 w-3.5" />
         </ToolbarButton>
         <Divider />
         <ToolbarButton label="Bulleted list" active={state?.bulletList} disabled={off} onClick={() => editor.chain().focus().toggleBulletList().run()}>
-          <List className="h-4 w-4" />
+          <List className="h-3.5 w-3.5" />
         </ToolbarButton>
         <ToolbarButton label="Numbered list" active={state?.orderedList} disabled={off} onClick={() => editor.chain().focus().toggleOrderedList().run()}>
-          <ListOrdered className="h-4 w-4" />
+          <ListOrdered className="h-3.5 w-3.5" />
         </ToolbarButton>
         <ToolbarButton label="Link" active={state?.link || linkOpen} disabled={off} onClick={() => setLinkOpen((open) => !open)}>
-          <Link2 className="h-4 w-4" />
+          <Link2 className="h-3.5 w-3.5" />
         </ToolbarButton>
         <Divider />
         <ToolbarButton label="Undo" disabled={off || !state?.canUndo} onClick={() => editor.chain().focus().undo().run()}>
-          <Undo2 className="h-4 w-4" />
+          <Undo2 className="h-3.5 w-3.5" />
         </ToolbarButton>
         <ToolbarButton label="Redo" disabled={off || !state?.canRedo} onClick={() => editor.chain().focus().redo().run()}>
-          <Redo2 className="h-4 w-4" />
+          <Redo2 className="h-3.5 w-3.5" />
         </ToolbarButton>
         <ToolbarButton label="Clear formatting" disabled={off} onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>
-          <RemoveFormatting className="h-4 w-4" />
+          <RemoveFormatting className="h-3.5 w-3.5" />
         </ToolbarButton>
       </div>
       {linkOpen && <LinkBar editor={editor} onClose={() => setLinkOpen(false)} />}
-      <div className="min-h-0 flex-1 cursor-text overflow-y-auto bg-white" onClick={() => editor.chain().focus().run()}>
+      <div className="min-h-0 flex-1 cursor-text overflow-y-auto" onClick={() => editor.chain().focus().run()}>
         <EditorContent editor={editor} className="h-full" />
       </div>
     </div>

@@ -10,7 +10,7 @@ import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
 import { PartsRequestHistory, PartsRequestWarnings } from "@/components/parts-request-audit";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Copy, Mail, Send, Share2 } from "lucide-react";
+import { ChevronDown, Copy, Mail, Share2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -2141,53 +2141,56 @@ export default function WorkOrderDetailPage() {
           }}
         >
           <DialogContent
-            className="flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 outline-none focus:outline-none sm:h-auto sm:max-h-[90vh] sm:w-[95vw] sm:max-w-[720px] sm:rounded-lg"
-            // Don't pre-select the To address (and pop the phone keyboard) when the composer opens.
+            className="flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 outline-none focus:outline-none sm:h-[92vh] sm:max-h-[92vh] sm:w-[92vw] sm:max-w-[1280px] sm:rounded-lg"
+            // Don't pre-select the To address (and pop the phone keyboard) when the dialog opens.
             onOpenAutoFocus={(event) => event.preventDefault()}
             onEscapeKeyDown={(event) => {
               if (sendingCustomerEmail !== null) event.preventDefault();
             }}
           >
-            <div className="safe-area-top border-b border-border px-4 py-3 sm:px-5 sm:py-4">
-              <DialogTitle className="text-base font-semibold sm:text-lg">
+            <div className="safe-area-top shrink-0 px-4 pb-2 pt-4 sm:px-6 sm:pt-6">
+              <DialogTitle className="text-lg font-semibold">
                 {customerEmailDraft?.template === "job_completed" ? "Job Completed Email" : "Job Started Email"}
               </DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
-                Check the email below, make any changes, then press Send.
+              <DialogDescription className="text-sm text-muted-foreground">
+                Review and edit the email before sending it to the customer.
               </DialogDescription>
             </div>
             {customerEmailDraft && (
               <>
-                <div className="border-b border-border text-sm">
-                  <label className="flex items-center gap-3 border-b border-border px-4 sm:px-5">
-                    <span className="w-16 shrink-0 text-muted-foreground">To</span>
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-2 sm:px-6">
+                  <div>
+                    <label htmlFor="customer-email-to" className="mb-1 block text-sm text-muted-foreground">To</label>
                     <Input
+                      id="customer-email-to"
                       type="email"
                       inputMode="email"
-                      autoComplete="off"
-                      className="h-11 rounded-none border-0 px-0 text-[15px] focus-visible:ring-0"
                       value={customerEmailDraft.to}
                       onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, to: event.target.value } : prev)}
                     />
-                  </label>
-                  <label className="flex items-center gap-3 px-4 sm:px-5">
-                    <span className="w-16 shrink-0 text-muted-foreground">Subject</span>
+                  </div>
+                  <div>
+                    <label htmlFor="customer-email-subject" className="mb-1 block text-sm text-muted-foreground">Subject</label>
                     <Input
-                      className="h-11 rounded-none border-0 px-0 text-[15px] font-medium focus-visible:ring-0"
+                      id="customer-email-subject"
                       value={customerEmailDraft.subject}
                       onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, subject: event.target.value } : prev)}
                     />
-                  </label>
+                  </div>
+                  <div>
+                    <span className="mb-1 block text-sm text-muted-foreground">Message</span>
+                    <Suspense fallback={<div className="h-[50vh] min-h-[280px] rounded-md border border-input bg-white px-3 py-2 text-sm text-muted-foreground">Loading editor...</div>}>
+                      {/* Default height fills the dialog (92vh minus header, To/Subject and footer); drag the corner to resize. */}
+                      <EmailRichTextEditor
+                        className="h-[max(280px,calc(100dvh-330px))] sm:h-[max(280px,calc(92vh-340px))]"
+                        value={customerEmailDraft.bodyHtml}
+                        disabled={sendingCustomerEmail !== null}
+                        onChange={(html) => setCustomerEmailDraft((prev) => prev ? { ...prev, bodyHtml: html } : prev)}
+                      />
+                    </Suspense>
+                  </div>
                 </div>
-                <Suspense fallback={<div className="min-h-[240px] flex-1 px-5 py-4 text-sm text-muted-foreground sm:h-[360px] sm:flex-none">Loading editor...</div>}>
-                  <EmailRichTextEditor
-                    className="min-h-[240px] flex-1 sm:h-[360px] sm:min-h-[320px] sm:flex-none"
-                    value={customerEmailDraft.bodyHtml}
-                    disabled={sendingCustomerEmail !== null}
-                    onChange={(html) => setCustomerEmailDraft((prev) => prev ? { ...prev, bodyHtml: html } : prev)}
-                  />
-                </Suspense>
-                <div className="safe-area-bottom flex items-center justify-end gap-2 border-t border-border bg-white px-4 py-3 sm:px-5">
+                <div className="safe-area-bottom flex shrink-0 flex-wrap justify-end gap-2 px-4 pb-4 pt-3 sm:px-6 sm:pb-6">
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -2198,9 +2201,8 @@ export default function WorkOrderDetailPage() {
                   >
                     Cancel
                   </Button>
-                  <Button className="min-w-[110px] gap-2" onClick={() => void sendCustomerEmail()} disabled={sendingCustomerEmail !== null}>
-                    <Send className="h-4 w-4" />
-                    {sendingCustomerEmail ? "Sending..." : "Send"}
+                  <Button onClick={() => void sendCustomerEmail()} disabled={sendingCustomerEmail !== null}>
+                    {sendingCustomerEmail ? "Sending..." : "Send Email"}
                   </Button>
                 </div>
               </>
