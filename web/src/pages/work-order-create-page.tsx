@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { LookupOption, WorkOrderListItem } from "@/lib/api/generated/types";
@@ -17,7 +17,7 @@ import { MultiSearchableDropdown } from "@/components/work-order-dropdowns/multi
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
-import { canadianProvinces, municipalitiesForProvince } from "@/data/canadian-municipalities";
+import { canadianProvinces } from "@/data/canadian-municipalities";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -338,17 +338,25 @@ export default function WorkOrderCreatePage() {
     []
   );
   const cityLookupOptions = useMemo(
-    () => municipalitiesForProvince(newCustomerProvince).map((label, index) => ({ id: index + 1, label })),
+    () => new Map<number, LookupOption>(),
     [newCustomerProvince]
   );
+  const loadCityOptions = useCallback(async (query: string) => {
+    if (!newCustomerProvince) return [];
+    try {
+      const { items } = await apiClient.listCities(newCustomerProvince, query);
+      for (const item of items) cityLookupOptions.set(item.id, item);
+      return items;
+    } catch {
+      // Keep Other... available even when the catalog cannot be loaded.
+      return [];
+    }
+  }, [newCustomerProvince, cityLookupOptions]);
   const selectedProvinceOptionId = useMemo(
     () => provinceLookupOptions.find((option) => option.label === newCustomerProvince)?.id ?? null,
     [newCustomerProvince, provinceLookupOptions]
   );
-  const selectedCityOptionId = useMemo(
-    () => cityLookupOptions.find((option) => option.label === newCustomerCity)?.id ?? null,
-    [cityLookupOptions, newCustomerCity]
-  );
+  const selectedCityOptionId = Array.from(cityLookupOptions.values()).find((option) => option.label === newCustomerCity)?.id ?? null;
   const setCreateStep = (next: number | ((prev: number) => number)) =>
     setCreateForm((prev) => ({ ...prev, createStep: typeof next === "function" ? next(prev.createStep) : next }));
   const setCreationMode = (value: "new_job" | "stock") => setCreateForm((prev) => ({ ...prev, creationMode: value }));
@@ -1043,13 +1051,17 @@ export default function WorkOrderCreatePage() {
                             value={selectedCityOptionId}
                             valueLabel={newCustomerCity}
                             onChange={(id) => {
-                              const selected = cityLookupOptions.find((option) => option.id === id);
-                              setNewCustomerCity(selected?.label ?? "");
+                              const selected = id === null ? undefined : cityLookupOptions.get(id);
+                              // A create request can finish after the province changes.
+                              setCreateForm((prev) => prev.newCustomerProvince === newCustomerProvince
+                                ? { ...prev, newCustomerCity: selected?.label ?? "" }
+                                : prev);
                             }}
-                            loadOptions={async (q) => {
-                              const needle = q.trim().toLowerCase();
-                              if (!needle) return cityLookupOptions;
-                              return cityLookupOptions.filter((option) => option.label.toLowerCase().includes(needle));
+                            loadOptions={loadCityOptions}
+                            onAddNew={async (label) => {
+                              const created = await apiClient.createCity(newCustomerProvince, label);
+                              cityLookupOptions.set(created.id, created);
+                              return created;
                             }}
                             onAddOther={setNewCustomerCity}
                             placeholder={newCustomerProvince ? "Select city or municipality" : "Select province first"}
