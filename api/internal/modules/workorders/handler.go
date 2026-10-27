@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -93,6 +92,9 @@ type sendCustomerEmailRequest struct {
 	To       string `json:"to"`
 	Subject  string `json:"subject"`
 	Body     string `json:"body"`
+	// BodyHTML is optional. When it has visible text it is sanitized and sent
+	// as the HTML body; Body stays the plain-text copy for older clients.
+	BodyHTML string `json:"body_html"`
 }
 
 type createWorkOrderCustomerRequest struct {
@@ -424,18 +426,10 @@ func (h *Handler) SendCustomerEmail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if strings.TrimSpace(req.To) != "" {
-		if _, err := mail.ParseAddress(strings.TrimSpace(req.To)); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": ErrInvalidEmailFormat.Error()})
-			return
-		}
-		msg.To = strings.TrimSpace(req.To)
-	}
-	if strings.TrimSpace(req.Subject) != "" {
-		msg.Subject = strings.TrimSpace(req.Subject)
-	}
-	if strings.TrimSpace(req.Body) != "" {
-		msg.Body = strings.TrimSpace(req.Body)
+	msg, err = applyCustomerEmailOverrides(msg, req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	if err := h.emailClient.Send(c.Request.Context(), msg); err != nil {

@@ -21,7 +21,18 @@ var ErrNotConfigured = errors.New("email sending is not configured")
 type Message struct {
 	To      string
 	Subject string
-	Body    string
+	// Body is plain text / light markdown. It is converted to HTML when BodyHTML is empty.
+	Body string
+	// BodyHTML, when set, is sanitized and sent as the HTML body as-is.
+	BodyHTML string
+}
+
+// htmlContent returns the HTML that is sent for the message.
+func (m Message) htmlContent() string {
+	if sanitized := SanitizeEmailHTML(m.BodyHTML); emailHTMLHasText(sanitized) {
+		return wrapEmailHTML(sanitized)
+	}
+	return markdownToEmailHTML(m.Body)
 }
 
 type GraphClient struct {
@@ -61,7 +72,7 @@ func (c *GraphClient) Send(ctx context.Context, msg Message) error {
 			"subject": msg.Subject,
 			"body": map[string]string{
 				"contentType": "HTML",
-				"content":     markdownToEmailHTML(msg.Body),
+				"content":     msg.htmlContent(),
 			},
 			"toRecipients": []map[string]any{
 				{

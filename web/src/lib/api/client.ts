@@ -332,7 +332,7 @@ export class APIClient {
 
   sendWorkOrderCustomerEmail(
     referenceID: number,
-    payload: { template: EmailTemplateKey; to: string; subject: string; body: string }
+    payload: { template: EmailTemplateKey; to: string; subject: string; body: string; body_html?: string }
   ) {
     return this.request<{ sent: boolean }>(`/work-orders/${referenceID}/customer-email`, {
       method: "POST",

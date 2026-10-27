@@ -1,7 +1,7 @@
 import { workOrderTotals } from "@/lib/work-order-totals";
 "use client";
 
-import { type CSSProperties, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type ReactNode, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { APIError, apiClient } from "@/lib/api/client";
 import type { EmailTemplate, LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
@@ -10,7 +10,7 @@ import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
 import { PartsRequestHistory, PartsRequestWarnings } from "@/components/parts-request-audit";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Copy, Mail, Share2 } from "lucide-react";
+import { ChevronDown, Copy, Mail, Send, Share2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
 import { markdownToPlainText, normalizeMarkdownInput } from "@/lib/markdown";
 import { DEFAULT_EMAIL_TEMPLATES, renderEmailTemplate, type CustomerEmailTemplateKey } from "@/lib/email-templates";
+import { emailHtmlToPlainText, emailTextToHtml, finalizeEmailHtml, sanitizeEmailHtml } from "@/lib/email-html";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -56,6 +57,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { generateDropOffFormPdf, generatePickupFormPdf } from "@/lib/pdf/work-order-forms";
 import { DEFAULT_WORK_ORDER_LAYOUT, type WorkOrderLayoutBlockID, normalizeWorkOrderLayout } from "@/lib/work-order-layout";
+
+// The rich-text editor (TipTap) is only needed when the email dialog opens, so keep it out of the main bundle.
+const EmailRichTextEditor = lazy(() => import("@/components/email-rich-text-editor").then((module) => ({ default: module.EmailRichTextEditor })));
 
 function parseLocalDate(value: string) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -127,7 +131,7 @@ type CustomerEmailDraft = {
   template: CustomerEmailTemplate;
   to: string;
   subject: string;
-  body: string;
+  bodyHtml: string;
 };
 
 function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailTemplate, emailTemplate?: EmailTemplate): CustomerEmailDraft {
@@ -136,7 +140,7 @@ function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailT
     template,
     to: item.customer.email ?? "",
     subject: rendered.subject,
-    body: rendered.body
+    bodyHtml: sanitizeEmailHtml(emailTextToHtml(rendered.body))
   };
 }
 
@@ -1340,7 +1344,8 @@ export default function WorkOrderDetailPage() {
       return;
     }
     const subject = customerEmailDraft.subject.trim();
-    const body = customerEmailDraft.body.trim();
+    const bodyHtml = finalizeEmailHtml(customerEmailDraft.bodyHtml);
+    const body = emailHtmlToPlainText(bodyHtml);
     if (!subject) {
       alerts.error("Subject required", "Enter an email subject before sending.");
       return;
@@ -1356,7 +1361,8 @@ export default function WorkOrderDetailPage() {
         template: customerEmailDraft.template,
         to: email,
         subject,
-        body
+        body,
+        body_html: bodyHtml
       });
       alerts.success(customerEmailDraft.template === "job_completed" ? "Job completed email sent" : "Job started email sent");
       setCustomerEmailDialogOpen(false);
@@ -2134,39 +2140,54 @@ export default function WorkOrderDetailPage() {
             setCustomerEmailDialogOpen(open);
           }}
         >
-          <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-            <DialogTitle className="text-lg font-semibold">
-              {customerEmailDraft?.template === "job_completed" ? "Job Completed Email" : "Job Started Email"}
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              Review and edit the email before sending it to the customer.
-            </DialogDescription>
+          <DialogContent
+            className="flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 outline-none focus:outline-none sm:h-auto sm:max-h-[90vh] sm:w-[95vw] sm:max-w-[720px] sm:rounded-lg"
+            // Don't pre-select the To address (and pop the phone keyboard) when the composer opens.
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            onEscapeKeyDown={(event) => {
+              if (sendingCustomerEmail !== null) event.preventDefault();
+            }}
+          >
+            <div className="safe-area-top border-b border-border px-4 py-3 sm:px-5 sm:py-4">
+              <DialogTitle className="text-base font-semibold sm:text-lg">
+                {customerEmailDraft?.template === "job_completed" ? "Job Completed Email" : "Job Started Email"}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground sm:text-sm">
+                Check the email below, make any changes, then press Send.
+              </DialogDescription>
+            </div>
             {customerEmailDraft && (
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">To</label>
-                  <Input
-                    type="email"
-                    value={customerEmailDraft.to}
-                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, to: event.target.value } : prev)}
-                  />
+              <>
+                <div className="border-b border-border text-sm">
+                  <label className="flex items-center gap-3 border-b border-border px-4 sm:px-5">
+                    <span className="w-16 shrink-0 text-muted-foreground">To</span>
+                    <Input
+                      type="email"
+                      inputMode="email"
+                      autoComplete="off"
+                      className="h-11 rounded-none border-0 px-0 text-[15px] focus-visible:ring-0"
+                      value={customerEmailDraft.to}
+                      onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, to: event.target.value } : prev)}
+                    />
+                  </label>
+                  <label className="flex items-center gap-3 px-4 sm:px-5">
+                    <span className="w-16 shrink-0 text-muted-foreground">Subject</span>
+                    <Input
+                      className="h-11 rounded-none border-0 px-0 text-[15px] font-medium focus-visible:ring-0"
+                      value={customerEmailDraft.subject}
+                      onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, subject: event.target.value } : prev)}
+                    />
+                  </label>
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">Subject</label>
-                  <Input
-                    value={customerEmailDraft.subject}
-                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, subject: event.target.value } : prev)}
+                <Suspense fallback={<div className="min-h-[240px] flex-1 px-5 py-4 text-sm text-muted-foreground sm:h-[360px] sm:flex-none">Loading editor...</div>}>
+                  <EmailRichTextEditor
+                    className="min-h-[240px] flex-1 sm:h-[360px] sm:min-h-[320px] sm:flex-none"
+                    value={customerEmailDraft.bodyHtml}
+                    disabled={sendingCustomerEmail !== null}
+                    onChange={(html) => setCustomerEmailDraft((prev) => prev ? { ...prev, bodyHtml: html } : prev)}
                   />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">Message</label>
-                  <textarea
-                    className="min-h-[320px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    value={customerEmailDraft.body}
-                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, body: event.target.value } : prev)}
-                  />
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
+                </Suspense>
+                <div className="safe-area-bottom flex items-center justify-end gap-2 border-t border-border bg-white px-4 py-3 sm:px-5">
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -2177,11 +2198,12 @@ export default function WorkOrderDetailPage() {
                   >
                     Cancel
                   </Button>
-                  <Button onClick={() => void sendCustomerEmail()} disabled={sendingCustomerEmail !== null}>
-                    {sendingCustomerEmail ? "Sending..." : "Send Email"}
+                  <Button className="min-w-[110px] gap-2" onClick={() => void sendCustomerEmail()} disabled={sendingCustomerEmail !== null}>
+                    <Send className="h-4 w-4" />
+                    {sendingCustomerEmail ? "Sending..." : "Send"}
                   </Button>
                 </div>
-              </div>
+              </>
             )}
           </DialogContent>
         </Dialog>
