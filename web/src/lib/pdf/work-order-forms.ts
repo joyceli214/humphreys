@@ -17,10 +17,18 @@ function fullName(item: WorkOrderDetail) {
 }
 
 function address(item: WorkOrderDetail) {
-  const parts = [item.customer.address_line_1, item.customer.address_line_2, item.customer.city, item.customer.province]
+  const parts = [item.customer.address_line_1, item.customer.address_line_2, item.customer.city]
     .map((v) => (v ?? "").trim())
     .filter(Boolean);
   return parts.length ? parts.join(", ") : "-";
+}
+
+function postalCode(item: WorkOrderDetail) {
+  const raw = (item.customer.postal_code ?? "").trim().toUpperCase();
+  if (!raw) return "-";
+  // Canadian postal code without a space (e.g. M4C1A1) -> "M4C 1A1".
+  if (/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(raw)) return `${raw.slice(0, 3)} ${raw.slice(3)}`;
+  return raw;
 }
 
 function parseLocalDate(value: string) {
@@ -207,6 +215,42 @@ function lineField(doc: jsPDF, x: number, y: number, w: number, label: string, v
   doc.text(label, x, y + 4.3);
 }
 
+// Like lineField, but never truncates: shrinks the font (down to 8pt) and,
+// if still too wide, wraps onto two lines stacked upward above the field line
+// (the space above belongs to this row, so the row below is never touched).
+function wrappingLineField(doc: jsPDF, x: number, y: number, w: number, label: string, value: string) {
+  const clean = value.replace(/\s+/g, " ").trim() || "-";
+  const maxWidth = w - 2;
+  doc.setFont("helvetica", "normal");
+
+  let size = 10.5;
+  let lines: string[] = [clean];
+  for (; size >= 8; size -= 0.5) {
+    doc.setFontSize(size);
+    if (doc.getTextWidth(clean) <= maxWidth) break;
+  }
+  if (size < 8) {
+    size = 8;
+    doc.setFontSize(size);
+    lines = doc.splitTextToSize(clean, maxWidth) as string[];
+    // Extremely long values: keep shrinking until they fit on two lines.
+    while (lines.length > 2 && size > 6) {
+      size -= 0.5;
+      doc.setFontSize(size);
+      lines = doc.splitTextToSize(clean, maxWidth) as string[];
+    }
+    if (lines.length > 2) lines = [lines[0], fitText(doc, lines.slice(1).join(" "), maxWidth)];
+  }
+
+  const lineHeight = size * 0.3528 * 1.15; // pt -> mm with a little leading
+  lines.forEach((line, i) => {
+    doc.text(line, x + 1, y - 1.5 - (lines.length - 1 - i) * lineHeight);
+  });
+  doc.line(x, y + 0.6, x + w, y + 0.6);
+  doc.setFontSize(8.2);
+  doc.text(label, x, y + 4.3);
+}
+
 function drawHeader(doc: jsPDF, title: string) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
@@ -234,10 +278,10 @@ function drawCommon(doc: jsPDF, item: WorkOrderDetail, yStart: number, options?:
 
   lineField(doc, 14, y + 13, 40, "First Name", text(item.customer.first_name));
   lineField(doc, 60, y + 13, 40, "Last Name", text(item.customer.last_name));
-  lineField(doc, 106, y + 13, 86, "Address", address(item));
+  wrappingLineField(doc, 106, y + 13, 86, "Address", address(item));
 
   lineField(doc, 14, y + 24, 40, "Apart/Suite / Entry Code", text(item.customer.address_line_2));
-  lineField(doc, 60, y + 24, 40, "City", text(item.customer.city));
+  lineField(doc, 60, y + 24, 40, "Postal Code", postalCode(item));
   lineField(doc, 106, y + 24, 86, "Email", text(item.customer.email));
 
   lineField(doc, 14, y + 35, 40, "Home Phone", text(formatPhoneNumber(item.customer.home_phone)));
