@@ -13,6 +13,8 @@ type Service struct {
 }
 
 var ErrInvalidLookupLabel = errors.New("label is required")
+var ErrInvalidCityProvince = errors.New("province is required")
+var ErrInvalidCityName = errors.New("name is required")
 var ErrInvalidLocationShelf = errors.New("shelf is required")
 var ErrInvalidLocationFloor = errors.New("floor must be zero or greater")
 var ErrUnknownDropdownKey = errors.New("unknown dropdown key")
@@ -91,6 +93,27 @@ func (s *Service) ListItems(ctx context.Context, query string) ([]LookupOption, 
 
 func (s *Service) ListBrands(ctx context.Context, query string) ([]LookupOption, error) {
 	return s.repo.ListBrands(ctx, query)
+}
+
+func (s *Service) ListCities(ctx context.Context, province, query string) ([]LookupOption, error) {
+	province = strings.TrimSpace(province)
+	if province == "" {
+		return nil, ErrInvalidCityProvince
+	}
+	return s.repo.ListCities(ctx, province, strings.TrimSpace(query))
+}
+
+func (s *Service) CreateCity(ctx context.Context, province, name string) (LookupOption, error) {
+	province = strings.TrimSpace(province)
+	name = strings.TrimSpace(name)
+	if province == "" {
+		return LookupOption{}, ErrInvalidCityProvince
+	}
+	if name == "" {
+		return LookupOption{}, ErrInvalidCityName
+	}
+	// Cities are province-scoped suggestions, outside managed dropdown freezing.
+	return s.repo.CreateCity(ctx, province, name)
 }
 
 func (s *Service) ListWorkers(ctx context.Context, query string) ([]LookupOption, error) {

@@ -17,6 +17,12 @@ type createLookupRequest struct {
 	Label string `json:"label" binding:"required"`
 }
 
+type createCityRequest struct {
+	Province string  `json:"province"`
+	Name     *string `json:"name"`
+	Label    string  `json:"label"`
+}
+
 type createLocationRequest struct {
 	Label *string `json:"label"`
 	Shelf *string `json:"shelf"`
@@ -250,6 +256,41 @@ func (h *Handler) ListBrands(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) ListCities(c *gin.Context) {
+	items, err := h.service.ListCities(c.Request.Context(), c.Query("province"), c.Query("q"))
+	if errors.Is(err, ErrInvalidCityProvince) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list cities"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) CreateCity(c *gin.Context) {
+	var req createCityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	name := req.Label
+	if req.Name != nil {
+		name = *req.Name
+	}
+	item, err := h.service.CreateCity(c.Request.Context(), req.Province, name)
+	if errors.Is(err, ErrInvalidCityProvince) || errors.Is(err, ErrInvalidCityName) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create city"})
+		return
+	}
+	c.JSON(http.StatusCreated, item)
 }
 
 func (h *Handler) ListWorkers(c *gin.Context) {

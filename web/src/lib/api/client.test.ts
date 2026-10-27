@@ -9,6 +9,33 @@ function mockResponse(status: number, body: unknown) {
   } as unknown as Response;
 }
 
+describe("city catalog API", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("scopes each search to its province and sends city creation payloads", async () => {
+    const client = new APIClient();
+    const city = { id: 42, label: "Scarborough" };
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(mockResponse(200, { items: [city] }))
+      .mockResolvedValueOnce(mockResponse(200, { items: [] }))
+      .mockResolvedValueOnce(mockResponse(201, city));
+    expect(await client.listCities("Ontario", "scar %_")).toEqual({ items: [city] });
+    const firstURL = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
+    expect(firstURL.pathname).toMatch(/\/catalog\/cities$/);
+    expect(firstURL.searchParams.get("province")).toBe("Ontario");
+    expect(firstURL.searchParams.get("q")).toBe("scar %_");
+    await client.listCities("British Columbia");
+    const secondURL = new URL(String(fetchSpy.mock.calls[1][0]), "http://localhost");
+    expect(secondURL.searchParams.get("province")).toBe("British Columbia");
+    expect(secondURL.searchParams.get("q")).toBe("");
+    expect(await client.createCity("Ontario", "Scarborough")).toEqual(city);
+    expect(fetchSpy).toHaveBeenLastCalledWith(expect.stringContaining("/catalog/cities"), expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ province: "Ontario", name: "Scarborough" })
+    }));
+  });
+});
+
 describe("APIClient refresh retry", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

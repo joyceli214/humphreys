@@ -565,6 +565,11 @@ export class APIClient {
     return this.cachedLookup("/catalog/brands", q);
   }
 
+  listCities(province: string, q = "") {
+    const params = new URLSearchParams({ province, q });
+    return this.request<{ items: LookupOption[] }>(`/catalog/cities?${params.toString()}`);
+  }
+
   listWorkers(q = "") {
     return this.cachedLookup("/catalog/workers", q);
   }
@@ -684,6 +689,13 @@ export class APIClient {
 
   createBrand(label: string) {
     return this.createLookup("/catalog/brands", label);
+  }
+
+  createCity(province: string, name: string) {
+    return this.request<LookupOption>("/catalog/cities", {
+      method: "POST",
+      body: JSON.stringify({ province, name })
+    });
   }
 
   createWorker(label: string) {

@@ -11,6 +11,26 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    LookupOption:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: integer, format: int64 }
+        label: { type: string }
+    CreateCityRequest:
+      type: object
+      required: [province]
+      anyOf:
+        - required: [name]
+        - required: [label]
+      properties:
+        province: { type: string, minLength: 1, pattern: '\S' }
+        name: { type: string, minLength: 1, pattern: '\S' }
+        label:
+          type: string
+          minLength: 1
+          pattern: '\S'
+          description: Alias for name; name takes precedence when supplied.
     LoginRequest:
       type: object
       required: [email, password]
@@ -56,6 +76,54 @@ components:
         resource: { type: string }
         action: { type: string }
 paths:
+  /catalog/cities:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: List city and municipality suggestions for a province
+      description: Requires work_orders:read. Province is trimmed and matched case-insensitively. Search is a case-insensitive literal substring; prefix matches sort first, followed by alphabetical order. Returns all matches without a limit.
+      parameters:
+        - in: query
+          name: province
+          required: true
+          schema: { type: string, minLength: 1, pattern: '\S' }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200':
+          description: City lookup options, using the catalog items envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/LookupOption' }
+        '400': { description: Province is missing or blank. }
+        '401': { description: Authentication required. }
+        '403': { description: Requires work_orders:read. }
+        '500': { description: Failed to list cities. }
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Create a city or return its existing lookup option
+      description: Requires work_orders:update. Trims province and name, rejecting blank values. Case-insensitive duplicates within a province return the existing id and label, including concurrent creates. Cities are outside dropdown freezing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCityRequest' }
+      responses:
+        '201':
+          description: Created or existing city lookup option.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LookupOption' }
+        '400': { description: Invalid payload or blank province or name. }
+        '401': { description: Authentication required. }
+        '403': { description: Requires work_orders:update. }
+        '500': { description: Failed to create city. }
   /auth/login:
     post:
       summary: Login and issue tokens
