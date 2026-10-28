@@ -74,6 +74,10 @@ export function markdownToPlainText(value: string | null | undefined) {
     let cleaned = line
       .replace(/^\s{0,3}#{1,6}\s+/, "")
       .replace(/^\s{0,3}>\s?/, "")
+      // Task-list markers must be handled before the plain-bullet rule so a
+      // checklist renders as ☐/☑ instead of "• [ ]".
+      .replace(/^\s{0,3}[-*+]\s+\[ \]\s+/, "☐ ")
+      .replace(/^\s{0,3}[-*+]\s+\[[xX]\]\s+/, "☑ ")
       .replace(/^\s{0,3}[-*+]\s+/, "• ")
       .replace(/^\s{0,3}(\d+)\.\s+/, "$1. ")
       .replace(/^\s{0,3}\|/, "")
