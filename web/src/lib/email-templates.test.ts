@@ -41,4 +41,12 @@ describe("renderEmailTemplate work_done bullets", () => {
     const { body } = renderEmailTemplate({ subject_template: "x", body_template: "{{problem_description}}" }, workOrder({ problem_description: "CD *not* playable, **urgent** snake_case_word" }));
     expect(body).toBe("CD not playable, urgent snake_case_word");
   });
+
+  it("drops inline photos from field values (photos are attached separately)", () => {
+    const { body } = renderEmailTemplate(
+      { subject_template: "x", body_template: "Problem: {{problem_description}}" },
+      workOrder({ problem_description: "CD not playable\n\n![Front panel](https://s3.example/a.jpg?sig=1)\n\n<img src=\"https://s3.example/b.jpg\" alt=\"Back\">" })
+    );
+    expect(body).toBe("Problem: CD not playable");
+  });
 });

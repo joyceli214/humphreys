@@ -161,8 +161,8 @@ function formatTemplateValue(value: unknown): string {
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   const text = stripMarkdownForEmail(String(value));
-  // Multi-line lists start on their own line so "Work done: {{work_done}}" renders as a heading + bullet list.
-  return /\n/.test(text) && /^(?:• |\d+\. )/.test(text) ? `\n${text}` : text;
+  // Lists start on their own line so "Work done: {{work_done}}" renders as a heading + bullet list.
+  return /^(?:• |\d+\. )/.test(text) ? `\n${text}` : text;
 }
 
 function emailCustomerName(item: WorkOrderDetail) {
@@ -200,8 +200,8 @@ function emailJobDetails(item: WorkOrderDetail) {
 
 function stripMarkdownForEmail(value: string | null) {
   const text = normalizeMarkdownInput(value)
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
-    .replace(/<img\b[^>]*\balt=["']([^"']*)["'][^>]*>/gi, "$1")
+    // Photos are attached from the photo panel, so drop inline images (and their alt text) from the email text.
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
     .replace(/<img\b[^>]*>/gi, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     // List markers first, so "* item" bullets are not mistaken for *italic* pairs across lines.

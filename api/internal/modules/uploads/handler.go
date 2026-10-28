@@ -784,3 +784,47 @@ func normalizedImageExtension(filenameExt string) string {
 		return ""
 	}
 }
+
+// Enabled reports whether object storage is configured.
+func (h *Handler) Enabled() bool {
+	return h != nil && h.enabled
+}
+
+// ManagedImageKeys returns the storage keys of the app-managed images embedded
+// in markdown, in order of first appearance and without duplicates. Images
+// that are not stored in this app's bucket are ignored.
+func (h *Handler) ManagedImageKeys(markdown string) []string {
+	if !h.Enabled() {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	keys := make([]string, 0, 4)
+	for _, imageURL := range extractImageURLs(markdown) {
+		key, ok := h.keyForManagedURL(imageURL)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// GetObjectBytes reads a stored object (max 10 MB, the upload limit).
+func (h *Handler) GetObjectBytes(ctx context.Context, key string) ([]byte, string, error) {
+	if !h.Enabled() {
+		return nil, "", errors.New("object storage is not configured")
+	}
+	return h.getObject(ctx, key)
+}
+
+// PresignedGetURL returns a time-limited GET link for a stored object.
+func (h *Handler) PresignedGetURL(key string, expires time.Duration) (string, error) {
+	if !h.Enabled() {
+		return "", errors.New("object storage is not configured")
+	}
+	return h.presignedGetURLForKey(key, expires)
+}

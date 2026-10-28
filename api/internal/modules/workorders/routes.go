@@ -63,6 +63,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		middleware.RequirePermission(permSensitiveRead),
 		h.GenerateAIMarkdown,
 	)
+	group.GET(
+		"/:reference_id/email-photos",
+		middleware.RequirePermission(permRead),
+		middleware.RequirePermission(permSensitiveRead),
+		h.ListEmailPhotos,
+	)
 	group.POST(
 		"/:reference_id/customer-email",
 		middleware.RequirePermission(permRead),

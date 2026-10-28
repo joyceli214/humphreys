@@ -3,6 +3,9 @@ package workorders
 import (
 	"errors"
 	"testing"
+	"time"
+
+	"humphreys/api/internal/domain"
 )
 
 func TestApplyCustomerEmailOverridesUsesSanitizedHTML(t *testing.T) {
@@ -40,5 +43,16 @@ func TestApplyCustomerEmailOverridesRejectsBadAddress(t *testing.T) {
 	_, err := applyCustomerEmailOverrides(customerEmailMessage{}, sendCustomerEmailRequest{To: "not an email"})
 	if !errors.Is(err, ErrInvalidEmailFormat) {
 		t.Fatalf("expected invalid email error, got %v", err)
+	}
+}
+
+func TestWorkOrderPhotoSourcesIncludeRepairLogs(t *testing.T) {
+	problem := "![a](https://x/a.jpg)"
+	work := "done"
+	date := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
+	sources := workOrderPhotoSources(domain.WorkOrderDetail{ProblemDescription: &problem, WorkDone: &work},
+		[]domain.RepairLog{{Details: "log1", RepairDate: &date}, {Details: "log2"}})
+	if len(sources) != 4 || sources[0].Markdown != problem || sources[2].Label != "Repair log Oct 22" || sources[3].Label != "Repair log" {
+		t.Fatalf("unexpected sources: %+v", sources)
 	}
 }

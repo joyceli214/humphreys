@@ -17,6 +17,7 @@ import type {
   WorkOrderListItem
 } from "@/lib/api/generated/types";
 import type { WorkOrderLayout } from "@/lib/work-order-layout";
+import type { EmailPhoto } from "@/lib/email-photos";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -332,12 +333,16 @@ export class APIClient {
 
   sendWorkOrderCustomerEmail(
     referenceID: number,
-    payload: { template: EmailTemplateKey; to: string; subject: string; body: string; body_html?: string }
+    payload: { template: EmailTemplateKey; to: string; subject: string; body: string; body_html?: string; photo_ids?: string[] }
   ) {
     return this.request<{ sent: boolean }>(`/work-orders/${referenceID}/customer-email`, {
       method: "POST",
       body: JSON.stringify(payload)
     });
+  }
+
+  listWorkOrderEmailPhotos(referenceID: number) {
+    return this.request<{ items: EmailPhoto[]; max_photos: number; max_total_bytes: number }>(`/work-orders/${referenceID}/email-photos`);
   }
 
   deleteWorkOrder(referenceID: number) {
