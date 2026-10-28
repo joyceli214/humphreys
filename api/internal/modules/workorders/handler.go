@@ -669,6 +669,9 @@ func (h *Handler) UpdateEquipment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order"})
 		return
 	}
+	if !hasPermission(c, permSensitiveRead) {
+		item = sanitizeWorkOrderDetail(item)
+	}
 	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
 	c.JSON(http.StatusOK, item)
 }

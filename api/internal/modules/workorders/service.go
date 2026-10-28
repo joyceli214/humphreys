@@ -228,6 +228,17 @@ type CreateWorkOrderInput struct {
 }
 
 func (s *Service) UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) (domain.WorkOrderDetail, error) {
+	// A nil StatusID means "keep the current status": the equipment route's SQL
+	// writes status_id unconditionally, so without this an omitted (or explicit
+	// null) status_id would clear the job's status to NULL. Load the current
+	// detail and carry its status forward instead.
+	if input.StatusID == nil {
+		current, err := s.GetWorkOrderDetail(ctx, referenceID)
+		if err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		input.StatusID = current.StatusID
+	}
 	if err := s.repo.UpdateEquipment(ctx, referenceID, input); err != nil {
 		return domain.WorkOrderDetail{}, err
 	}
