@@ -228,10 +228,46 @@ type CreateWorkOrderInput struct {
 }
 
 func (s *Service) UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) (domain.WorkOrderDetail, error) {
+	// A nil StatusID means "keep the current status": the equipment route's SQL
+	// writes status_id unconditionally, so without this an omitted (or explicit
+	// null) status_id would clear the job's status to NULL. Load the current
+	// detail and carry its status forward instead.
+	if input.StatusID == nil {
+		current, err := s.GetWorkOrderDetail(ctx, referenceID)
+		if err != nil {
+			return domain.WorkOrderDetail{}, err
+		}
+		input.StatusID = current.StatusID
+	}
 	if err := s.repo.UpdateEquipment(ctx, referenceID, input); err != nil {
 		return domain.WorkOrderDetail{}, err
 	}
 	return s.GetWorkOrderDetail(ctx, referenceID)
+}
+
+// UpdateLocation changes only the work order's location, preserving every other
+// equipment field from the current record. It reuses UpdateEquipment so the
+// location is still validated against the locations table.
+func (s *Service) UpdateLocation(ctx context.Context, referenceID int, locationID *int64) (domain.WorkOrderDetail, error) {
+	current, err := s.GetWorkOrderDetail(ctx, referenceID)
+	if err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+	return s.UpdateEquipment(ctx, referenceID, EquipmentUpdateInput{
+		StatusID:           current.StatusID,
+		JobTypeID:          current.JobTypeID,
+		LocationID:         locationID,
+		ItemID:             current.ItemID,
+		BrandIDs:           current.BrandIDs,
+		ModelNumber:        current.ModelNumber,
+		SerialNumber:       current.SerialNumber,
+		OtherRemarks:       current.OtherRemarks,
+		RemoteControlQty:   current.RemoteControlQty,
+		CableQty:           current.CableQty,
+		CordQty:            current.CordQty,
+		DVDVHSQty:          current.DVDVHSQty,
+		AlbumCDCassetteQty: current.AlbumCDCassetteQty,
+	})
 }
 
 func (s *Service) ListCustomers(ctx context.Context, query string) ([]CustomerLookupOption, error) {

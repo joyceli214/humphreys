@@ -382,6 +382,13 @@ export class APIClient {
     });
   }
 
+  updateWorkOrderLocation(referenceID: number, payload: { location_id: number | null }) {
+    return this.request<WorkOrderDetail>(`/work-orders/${referenceID}/location`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
   updateWorkOrderWorkNotes(
     referenceID: number,
     payload: {

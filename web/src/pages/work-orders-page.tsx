@@ -91,6 +91,8 @@ export default function WorkOrdersPage() {
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canCreateWorkOrders = hasPermission("work_orders:create");
   const canUpdateWorkOrders = hasPermission("work_orders:update");
+  const canUpdateLocation = hasPermission("work_orders_location:update");
+  const canEditLocation = canUpdateWorkOrders || canUpdateLocation;
   const initialQuery = searchParams.get("q")?.trim() ?? "";
   const initialFilters: WorkOrderListFilters = {
     customerId: parsePositiveIntParam(searchParams.get("customer_id")),
@@ -272,21 +274,8 @@ export default function WorkOrdersPage() {
     if (updatingLocationByReferenceID[row.reference_id] === true) return;
     setUpdatingLocationByReferenceID((prev) => ({ ...prev, [row.reference_id]: true }));
     try {
-      const detail = await apiClient.getWorkOrderDetail(row.reference_id);
-      const updated = await apiClient.updateWorkOrderEquipment(row.reference_id, {
-        model_number: detail.model_number,
-        serial_number: detail.serial_number,
-        other_remarks: detail.other_remarks,
-        status_id: detail.status_id,
-        job_type_id: detail.job_type_id,
-        location_id: nextLocationID,
-        item_id: detail.item_id,
-        brand_ids: detail.brand_ids,
-        remote_control_qty: detail.remote_control_qty,
-        cable_qty: detail.cable_qty,
-        cord_qty: detail.cord_qty,
-        dvd_vhs_qty: detail.dvd_vhs_qty,
-        album_cd_cassette_qty: detail.album_cd_cassette_qty
+      const updated = await apiClient.updateWorkOrderLocation(row.reference_id, {
+        location_id: nextLocationID
       });
       setItems((prev) =>
         prev.map((item) =>
@@ -536,7 +525,7 @@ export default function WorkOrdersPage() {
                     <Td data-label="Model #">{item.model_number ?? "-"}</Td>
                     <Td data-label="Location">
                       <div onClick={(event) => event.stopPropagation()}>
-                        {canUpdateWorkOrders ? (
+                        {canEditLocation ? (
                           <SingleSearchableDropdown
                             className="min-w-[170px]"
                             value={item.location_id}
@@ -547,7 +536,7 @@ export default function WorkOrdersPage() {
                             }}
                             loadOptions={async (q) => (await apiClient.listLocations(q)).items}
                             placeholder="-"
-                            onAddLocation={isDropdownFrozen("locations") ? undefined : (payload) => apiClient.createLocation(payload)}
+                            onAddLocation={canUpdateWorkOrders && !isDropdownFrozen("locations") ? (payload) => apiClient.createLocation(payload) : undefined}
                             allowClear
                             clearLabel="None"
                           />
