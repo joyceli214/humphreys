@@ -110,7 +110,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div ref={editorContainerRef} className="rounded-md border border-input bg-white p-2">
+      <div ref={editorContainerRef} className="rounded-md border border-input bg-white p-2 [&_.mdxeditor-toolbar]:flex-wrap [&_.mdxeditor-toolbar]:overflow-x-visible">
         {canGenerate && toolbarElement && createPortal(
           <div className="order-first flex shrink-0 items-center gap-1">
             {onGenerate && (

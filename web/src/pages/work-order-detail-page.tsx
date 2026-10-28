@@ -466,7 +466,7 @@ const workNotesEditorPlugins = [
 ];
 
 const workNotesEditorContentClassName =
-  "min-h-28 px-3 py-2 text-sm leading-6 " +
+  "min-h-28 px-3 py-2 text-base md:text-sm leading-6 " +
   "[&_p]:mb-2 [&_p:last-child]:mb-0 " +
   "[&_strong]:font-semibold [&_em]:italic [&_u]:underline " +
   "[&_a]:text-primary [&_a]:underline " +
@@ -2025,15 +2025,16 @@ export default function WorkOrderDetailPage() {
     <div className="space-y-3">
       <h3 className="text-sm font-semibold">{editingRepairLogID !== null ? "Edit Repair Log" : "Add Repair Log"}</h3>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-sm text-muted-foreground">Repair Date</label>
           <Input
             type="date"
+            className="w-full min-w-0 [-webkit-appearance:none] appearance-none text-left [&::-webkit-date-and-time-value]:text-left"
             value={repairLogForm.repair_date}
             onChange={(e) => setRepairLogForm((prev) => ({ ...prev, repair_date: e.target.value }))}
           />
         </div>
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-sm text-muted-foreground">Hours Used</label>
           <Input
             type="text"
@@ -2666,19 +2667,19 @@ export default function WorkOrderDetailPage() {
 
           {(canReadRepairLogs || canCreateRepairLogs) && (
             registerLayoutBlock("repair_logs", (
-            <article className="rounded-lg border border-border bg-white p-4 space-y-3">
+            <article className="min-w-0 rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Repair Logs</h2>
                 <div className="flex flex-wrap items-center gap-2">
                   {loadingExtras && <span className="text-xs text-muted-foreground">Loading...</span>}
                   {canUpdateStatus &&
                     item.status_group !== "completed" && (
-                    <Button size="sm" variant="outline" onClick={completeJob} disabled={completingJob}>
+                    <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={completeJob} disabled={completingJob}>
                       {completingJob ? "Completing..." : "Complete Job"}
                     </Button>
                     )}
                   {canCreateRepairLogs && (
-                    <Button size="sm" onClick={openCreateRepairLogModal}>
+                    <Button size="sm" className="h-10 md:h-8" onClick={openCreateRepairLogModal}>
                       Add Repair Log
                     </Button>
                   )}
@@ -2703,12 +2704,12 @@ export default function WorkOrderDetailPage() {
                           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                             <p className="text-sm font-medium">{formatDateTime(log.repair_date)}</p>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Badge className="bg-slate-100 text-slate-700">{`${log.hours_used} hrs`}</Badge>
+                              <Badge className="bg-slate-100 text-slate-700">{`${log.hours_used} ${Number(log.hours_used) === 1 ? "hr" : "hrs"}`}</Badge>
                               <span>{log.created_by_name ?? log.created_by_user_id}</span>
                               {(canUpdateRepairLogs || canDeleteRepairLogs) && (
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-lg font-bold text-slate-500 hover:bg-slate-100">⋮</Button>
+                                    <Button variant="ghost" size="sm" className="h-10 w-10 md:h-7 md:w-7 p-0 text-lg font-bold text-slate-500 hover:bg-slate-100">⋮</Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
                                     {canUpdateRepairLogs && (
@@ -2722,7 +2723,7 @@ export default function WorkOrderDetailPage() {
                               )}
                             </div>
                           </div>
-                          <div className="text-sm leading-6">{markdownPlain(log.details, openFullscreenImage)}</div>
+                          <div className="text-sm leading-6 min-w-0 break-words [overflow-wrap:anywhere]">{markdownPlain(log.details, openFullscreenImage)}</div>
                         </div>
                       )}
                     </div>
