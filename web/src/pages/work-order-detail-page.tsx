@@ -36,28 +36,9 @@ import { emailHtmlToPlainText, emailTextToHtml, finalizeEmailHtml, sanitizeEmail
 import { DEFAULT_EMAIL_PHOTO_LIMITS, extractPhotoUrls, summarizePhotoSelection, type EmailPhoto, type EmailPhotoLimits } from "@/lib/email-photos";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { EmailPhotoPanel } from "@/components/email-photo-panel";
-import {
-  BlockTypeSelect,
-  BoldItalicUnderlineToggles,
-  CreateLink,
-  InsertImage,
-  InsertThematicBreak,
-  ListsToggle,
-  UndoRedo,
-  headingsPlugin,
-  imagePlugin,
-  linkDialogPlugin,
-  linkPlugin,
-  listsPlugin,
-  markdownShortcutPlugin,
-  quotePlugin,
-  thematicBreakPlugin,
-  toolbarPlugin
-} from "@mdxeditor/editor";
 import "@mdxeditor/editor/style.css";
-import rehypeRaw from "rehype-raw";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { workNotesEditorContentClassName, workNotesEditorPlugins } from "@/components/work-notes-editor-config";
+import { MarkdownContent, type ImageClickHandler } from "@/components/markdown-card";
 import { generateDropOffFormPdf, generatePickupFormPdf } from "@/lib/pdf/work-order-forms";
 import { DEFAULT_WORK_ORDER_LAYOUT, type WorkOrderLayoutBlockID, normalizeWorkOrderLayout } from "@/lib/work-order-layout";
 
@@ -165,105 +146,16 @@ function detailRowContent(label: string, value: ReactNode) {
   );
 }
 
-function parseImageDimension(value: number | string | undefined) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-}
-
-function markdownBlock(value: string | null, onImageClick?: (src: string, alt?: string | null) => void) {
-  const normalized = normalizeMarkdownInput(value);
-  const content = normalized || "-";
+function markdownBlock(value: string | null, onImageClick?: ImageClickHandler) {
   return (
     <div className="rounded-md border border-border p-3 text-sm break-words">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
-        components={{
-          p: ({ children }) => <p className="mb-2 leading-6 last:mb-0">{children}</p>,
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 break-all">
-              {children}
-            </a>
-          ),
-          h1: ({ children }) => <h1 className="mb-2 text-2xl font-semibold">{children}</h1>,
-          h2: ({ children }) => <h2 className="mb-2 text-xl font-semibold">{children}</h2>,
-          h3: ({ children }) => <h3 className="mb-2 text-lg font-semibold">{children}</h3>,
-          ul: ({ children }) => <ul className="mb-2 list-disc pl-6">{children}</ul>,
-          ol: ({ children }) => <ol className="mb-2 list-decimal pl-6">{children}</ol>,
-          li: ({ children }) => <li>{children}</li>,
-          img: ({ src, alt, width, height }) =>
-            src ? (
-              <button type="button" className="my-3 inline-block align-top cursor-zoom-in" onClick={() => onImageClick?.(src, alt)}>
-                <img
-                  src={src}
-                  alt={alt ?? "Embedded image"}
-                  width={parseImageDimension(width)}
-                  height={parseImageDimension(height)}
-                  className="max-w-full rounded-md"
-                />
-              </button>
-            ) : null,
-          u: ({ children }) => <u className="underline">{children}</u>,
-          blockquote: ({ children }) => (
-            <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>
-          ),
-          hr: () => <hr className="my-3 border-border" />,
-          strong: ({ children }) => <strong className="font-semibold">{children}</strong>
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+      <MarkdownContent value={value} onImageClick={onImageClick} />
     </div>
   );
 }
 
-function markdownPlain(value: string | null, onImageClick?: (src: string, alt?: string | null) => void) {
-  const normalized = normalizeMarkdownInput(value);
-  const content = normalized || "-";
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeRaw]}
-      components={{
-        p: ({ children }) => <p className="mb-2 leading-6 last:mb-0">{children}</p>,
-        a: ({ children, href }) => (
-          <a href={href} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2 break-all">
-            {children}
-          </a>
-        ),
-        h1: ({ children }) => <h1 className="mb-2 text-2xl font-semibold">{children}</h1>,
-        h2: ({ children }) => <h2 className="mb-2 text-xl font-semibold">{children}</h2>,
-        h3: ({ children }) => <h3 className="mb-2 text-lg font-semibold">{children}</h3>,
-        ul: ({ children }) => <ul className="mb-2 list-disc pl-6">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-2 list-decimal pl-6">{children}</ol>,
-        li: ({ children }) => <li>{children}</li>,
-        img: ({ src, alt, width, height }) =>
-          src ? (
-            <button type="button" className="my-3 inline-block align-top cursor-zoom-in" onClick={() => onImageClick?.(src, alt)}>
-              <img
-                src={src}
-                alt={alt ?? "Embedded image"}
-                width={parseImageDimension(width)}
-                height={parseImageDimension(height)}
-                className="max-w-full rounded-md"
-              />
-            </button>
-          ) : null,
-        u: ({ children }) => <u className="underline">{children}</u>,
-        blockquote: ({ children }) => (
-          <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>
-        ),
-        hr: () => <hr className="my-3 border-border" />,
-        strong: ({ children }) => <strong className="font-semibold">{children}</strong>
-      }}
-    >
-      {content}
-    </ReactMarkdown>
-  );
+function markdownPlain(value: string | null, onImageClick?: ImageClickHandler) {
+  return <MarkdownContent value={value} onImageClick={onImageClick} />;
 }
 
 function blankToNull(value: string) {
@@ -387,95 +279,6 @@ function normalizeMarkdownImageMetadata(markdown: string) {
     return `![${escapedAlt}](${imageURL} "${escapedTitle}")`;
   });
 }
-
-async function convertImageFileToJpeg(file: File) {
-  const objectURL = URL.createObjectURL(file);
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("Failed to load image"));
-      img.src = objectURL;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth || image.width;
-    canvas.height = image.naturalHeight || image.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Failed to prepare image canvas");
-    ctx.drawImage(image, 0, 0);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-    if (!blob) throw new Error("Failed to convert image");
-    const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
-    return new File([blob], `${baseName}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
-  } finally {
-    URL.revokeObjectURL(objectURL);
-  }
-}
-
-async function normalizeImageFileForUpload(file: File) {
-  const contentType = file.type.toLowerCase();
-  const needsJpegConversion =
-    contentType === "image/webp" ||
-    contentType === "image/avif" ||
-    contentType === "image/heic" ||
-    contentType === "image/heif";
-
-  if (!needsJpegConversion) return file;
-
-  try {
-    return await convertImageFileToJpeg(file);
-  } catch (error) {
-    if (contentType === "image/webp") {
-      throw new Error("WebP images are not supported. Please upload JPG/PNG/HEIC.");
-    }
-    return file;
-  }
-}
-
-async function markdownImageUploadHandler(file: File) {
-  const normalizedFile = await normalizeImageFileForUpload(file);
-  const { url } = await apiClient.uploadMarkdownImage(normalizedFile);
-  return url;
-}
-
-const workNotesEditorPlugins = [
-  headingsPlugin(),
-  listsPlugin(),
-  quotePlugin(),
-  thematicBreakPlugin(),
-  linkPlugin(),
-  linkDialogPlugin(),
-  imagePlugin({
-    imageUploadHandler: markdownImageUploadHandler,
-    disableImageSettingsButton: true
-  }),
-  markdownShortcutPlugin(),
-  toolbarPlugin({
-    toolbarContents: () => (
-      <>
-        <UndoRedo />
-        <BoldItalicUnderlineToggles />
-        <ListsToggle />
-        <CreateLink />
-        <InsertImage />
-        <InsertThematicBreak />
-        <BlockTypeSelect />
-      </>
-    )
-  })
-];
-
-const workNotesEditorContentClassName =
-  "min-h-28 px-3 py-2 text-sm leading-6 " +
-  "[&_p]:mb-2 [&_p:last-child]:mb-0 " +
-  "[&_strong]:font-semibold [&_em]:italic [&_u]:underline " +
-  "[&_a]:text-primary [&_a]:underline " +
-  "[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-6 [&_ol]:pl-6 " +
-  "[&_li]:my-1 " +
-  "[&_img]:my-3 [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-md " +
-  "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground " +
-  "[&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:text-lg [&_h3]:font-semibold " +
-  "[&_hr]:my-3 [&_hr]:border-border";
 
 type SectionKey = "equipment" | "work_notes" | "line_items" | "totals" | "customer";
 
@@ -2025,15 +1828,16 @@ export default function WorkOrderDetailPage() {
     <div className="space-y-3">
       <h3 className="text-sm font-semibold">{editingRepairLogID !== null ? "Edit Repair Log" : "Add Repair Log"}</h3>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-sm text-muted-foreground">Repair Date</label>
           <Input
             type="date"
+            className="w-full min-w-0 [-webkit-appearance:none] appearance-none text-left [&::-webkit-date-and-time-value]:text-left"
             value={repairLogForm.repair_date}
             onChange={(e) => setRepairLogForm((prev) => ({ ...prev, repair_date: e.target.value }))}
           />
         </div>
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-sm text-muted-foreground">Hours Used</label>
           <Input
             type="text"
@@ -2666,19 +2470,19 @@ export default function WorkOrderDetailPage() {
 
           {(canReadRepairLogs || canCreateRepairLogs) && (
             registerLayoutBlock("repair_logs", (
-            <article className="rounded-lg border border-border bg-white p-4 space-y-3">
+            <article className="min-w-0 rounded-lg border border-border bg-white p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-semibold">Repair Logs</h2>
                 <div className="flex flex-wrap items-center gap-2">
                   {loadingExtras && <span className="text-xs text-muted-foreground">Loading...</span>}
                   {canUpdateStatus &&
                     item.status_group !== "completed" && (
-                    <Button size="sm" variant="outline" onClick={completeJob} disabled={completingJob}>
+                    <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={completeJob} disabled={completingJob}>
                       {completingJob ? "Completing..." : "Complete Job"}
                     </Button>
                     )}
                   {canCreateRepairLogs && (
-                    <Button size="sm" onClick={openCreateRepairLogModal}>
+                    <Button size="sm" className="h-10 md:h-8" onClick={openCreateRepairLogModal}>
                       Add Repair Log
                     </Button>
                   )}
@@ -2703,12 +2507,12 @@ export default function WorkOrderDetailPage() {
                           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                             <p className="text-sm font-medium">{formatDateTime(log.repair_date)}</p>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Badge className="bg-slate-100 text-slate-700">{`${log.hours_used} hrs`}</Badge>
+                              <Badge className="bg-slate-100 text-slate-700">{`${log.hours_used} ${Number(log.hours_used) === 1 ? "hr" : "hrs"}`}</Badge>
                               <span>{log.created_by_name ?? log.created_by_user_id}</span>
                               {(canUpdateRepairLogs || canDeleteRepairLogs) && (
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-lg font-bold text-slate-500 hover:bg-slate-100">⋮</Button>
+                                    <Button variant="ghost" size="sm" className="h-10 w-10 md:h-7 md:w-7 p-0 text-lg font-bold text-slate-500 hover:bg-slate-100">⋮</Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
                                     {canUpdateRepairLogs && (
@@ -2722,7 +2526,7 @@ export default function WorkOrderDetailPage() {
                               )}
                             </div>
                           </div>
-                          <div className="text-sm leading-6">{markdownPlain(log.details, openFullscreenImage)}</div>
+                          <div className="text-sm leading-6 min-w-0 break-words [overflow-wrap:anywhere]">{markdownPlain(log.details, openFullscreenImage)}</div>
                         </div>
                       )}
                     </div>

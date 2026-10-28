@@ -71,6 +71,16 @@ describe("emailTextToHtml", () => {
   it("numbers ordered lists", () => {
     expect(emailTextToHtml("Steps:\n1. One\n2. Two")).toBe("<p>Steps:</p><ol><li><p>One</p></li><li><p>Two</p></li></ol>");
   });
+
+  it("renders checklist items as ☐/☑ text instead of literal [ ]/[x]", () => {
+    expect(emailTextToHtml("- [ ] Replace filter\n- [x] Test unit")).toBe("<p>☐ Replace filter<br>☑ Test unit</p>");
+    expect(emailTextToHtml("- [ ] Replace filter")).not.toContain("[ ]");
+  });
+
+  it("renders <u> underline as a real tag instead of literal &lt;u&gt;", () => {
+    expect(emailTextToHtml("Replace <u>main</u> board")).toBe("<p>Replace <u>main</u> board</p>");
+    expect(sanitizeEmailHtml(emailTextToHtml("Replace <u>main</u> board"))).toContain("<u>main</u>");
+  });
 });
 
 describe("sanitizeEmailHtml", () => {

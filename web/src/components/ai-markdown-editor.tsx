@@ -6,6 +6,7 @@ import { MDXEditor, type MDXEditorMethods } from "@mdxeditor/editor";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import { rehypeSanitizeAllowlist } from "@/lib/rehype-sanitize-allowlist";
 import { Check, PenLine, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -34,7 +35,6 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
   const editorRef = useRef<MDXEditorMethods | null>(null);
   const currentMarkdownRef = useRef(markdown);
   const [toolbarElement, setToolbarElement] = useState<HTMLElement | null>(null);
-  const [editorVersion, setEditorVersion] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [preview, setPreview] = useState("");
   const [open, setOpen] = useState(false);
@@ -53,7 +53,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
 
   useLayoutEffect(() => {
     setToolbarElement(editorContainerRef.current?.querySelector<HTMLElement>(".mdxeditor-toolbar") ?? null);
-  }, [editorVersion, plugins]);
+  }, [plugins]);
 
   const handleChange = (value: string) => {
     currentMarkdownRef.current = value;
@@ -94,8 +94,11 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
 
   const accept = () => {
     if (!preview.trim()) return;
-    handleChange(mode === "prompt" && replaceOnGenerate ? preview.trim() : prependMarkdown(preview, currentMarkdownRef.current));
-    setEditorVersion((value) => value + 1);
+    const value = mode === "prompt" && replaceOnGenerate ? preview.trim() : prependMarkdown(preview, currentMarkdownRef.current);
+    handleChange(value);
+    // Replace the content in place rather than remounting the editor (which
+    // would discard the Lexical undo history), so the user can still undo it.
+    editorRef.current?.setMarkdown(value);
     setOpen(false);
     setPrompt("");
     setPreview("");
@@ -110,7 +113,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div ref={editorContainerRef} className="rounded-md border border-input bg-white p-2">
+      <div ref={editorContainerRef} className="rounded-md border border-input bg-white p-2 [&_.mdxeditor-toolbar]:flex-wrap [&_.mdxeditor-toolbar]:overflow-x-visible">
         {canGenerate && toolbarElement && createPortal(
           <div className="order-first flex shrink-0 items-center gap-1">
             {onGenerate && (
@@ -118,7 +121,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                className="h-10 w-10 md:h-8 md:w-8 p-0 text-muted-foreground hover:text-foreground"
                 disabled={loading}
                 onClick={() => {
                   setMode("prompt");
@@ -137,7 +140,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                className="h-10 md:h-8 px-2 text-muted-foreground hover:text-foreground"
                 disabled={loading}
                 onClick={() => void directGenerate()}
                 aria-label="Direct Gen"
@@ -151,7 +154,6 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
         )}
         <MDXEditor
           ref={editorRef}
-          key={`markdown-editor-${editorVersion}`}
           markdown={markdown}
           contentEditableClassName={contentEditableClassName}
           onChange={handleChange}
@@ -194,7 +196,7 @@ export function AIMarkdownEditor({ markdown, onChange, onGenerate, onDirectGener
           {preview && (
             <div className="mt-3 rounded-md border border-border p-3">
               <div className="prose prose-sm max-w-none text-sm leading-6">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitizeAllowlist]}>
                   {preview}
                 </ReactMarkdown>
               </div>

@@ -66,6 +66,10 @@ function escapeHtml(value: string) {
 
 function formatInline(value: string, links: LinkToken[]) {
   let out = escapeHtml(value);
+  // Underline is stored as raw <u> HTML (markdown has no underline); re-emit it
+  // as a real tag so it renders instead of showing literal &lt;u&gt;. `u` is in
+  // the DOMPurify allowlist and the inner text was already escaped above.
+  out = out.replace(/&lt;u&gt;([\s\S]*?)&lt;\/u&gt;/gi, "<u>$1</u>");
   out = out.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?=[^*\w]|$)/g, "$1<em>$2</em>");
@@ -95,6 +99,7 @@ function extractLinks(text: string, links: LinkToken[]) {
 }
 
 const HR_LINE = /^\s*(?:([-*_])\s*\1\s*\1[\s\-*_]*|--)\s*$/;
+const CHECKLIST_LINE = /^\s*[-*+]\s+\[([ xX])\]\s+(.*)$/;
 const BULLET_LINE = /^\s*[-*+•·]\s+(.*)$/;
 const ORDERED_LINE = /^\s*\d+[.)]\s+(.*)$/;
 
@@ -123,6 +128,15 @@ function parseBlocks(text: string): Block[] {
       flushParagraph();
       flushList();
       blocks.push({ kind: "hr" });
+      continue;
+    }
+    // Checklists have no email equivalent; render them as ☐/☑ text lines (no
+    // bullet) so customers don't see literal "[ ]"/"[x]" markers.
+    const checklist = line.match(CHECKLIST_LINE);
+    if (checklist) {
+      flushList();
+      const mark = checklist[1].toLowerCase() === "x" ? "☑" : "☐";
+      paragraph.push(`${mark} ${checklist[2].trim()}`);
       continue;
     }
     const bullet = line.match(BULLET_LINE);
