@@ -12,6 +12,7 @@ const (
 	permRead             = "work_orders:read"
 	permUpdate           = "work_orders:update"
 	permStatusUpdate     = "work_orders_status:update"
+	permLocationUpdate   = "work_orders_location:update"
 	permSensitiveRead    = "work_orders_sensitive:read"
 	permRepairLogsRead   = "repair_logs:read"
 	permRepairLogsCreate = "repair_logs:create"
@@ -76,6 +77,7 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		h.SendCustomerEmail,
 	)
 	group.PATCH("/:reference_id/status", middleware.RequirePermission(permStatusUpdate), h.UpdateStatus)
+	group.PATCH("/:reference_id/location", requireLocationUpdatePermission(), h.UpdateLocation)
 	group.PATCH("/:reference_id/equipment", requireEquipmentUpdatePermission(), h.UpdateEquipment)
 	group.PATCH("/:reference_id/work-notes", middleware.RequirePermission(permUpdate), h.UpdateWorkNotes)
 	group.PATCH("/:reference_id/line-items", middleware.RequirePermission(permUpdate), h.UpdateLineItems)
@@ -103,6 +105,26 @@ func requireEquipmentUpdatePermission() gin.HandlerFunc {
 		}
 		for _, code := range claims.Scope {
 			if code == permUpdate || code == permStatusUpdate {
+				c.Next()
+				return
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+	}
+}
+
+// requireLocationUpdatePermission gates the narrow location-only route so a
+// user with either the broad work_orders:update or the dedicated
+// work_orders_location:update permission may change a job's location.
+func requireLocationUpdatePermission() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims, ok := middleware.Claims(c)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+			return
+		}
+		for _, code := range claims.Scope {
+			if code == permUpdate || code == permLocationUpdate {
 				c.Next()
 				return
 			}

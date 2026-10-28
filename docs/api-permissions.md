@@ -23,6 +23,7 @@
 - `DELETE /work-orders/:reference_id` -> `work_orders:create` (admin-only)
 - `GET /work-orders/:reference_id` -> `work_orders:read` (`work_orders_sensitive:read` controls visibility of customer/line-item/price data)
 - `PATCH /work-orders/:reference_id/status` -> `work_orders_status:update`
+- `PATCH /work-orders/:reference_id/location` -> `work_orders_location:update` or `work_orders:update` (location-only; body accepts only `location_id`)
 - `PATCH /work-orders/:reference_id/equipment` -> `work_orders:update`
 - `PATCH /work-orders/:reference_id/work-notes` -> `work_orders:update`
 - `PATCH /work-orders/:reference_id/line-items` -> `work_orders:update`

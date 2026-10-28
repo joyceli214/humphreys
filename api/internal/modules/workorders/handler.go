@@ -1,8 +1,11 @@
 package workorders
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +51,10 @@ type updateEquipmentRequest struct {
 
 type updateStatusRequest struct {
 	StatusID *int64 `json:"status_id"`
+}
+
+type updateLocationRequest struct {
+	LocationID *int64 `json:"location_id"`
 }
 
 type updateWorkNotesRequest struct {
@@ -688,6 +695,67 @@ func (h *Handler) UpdateStatus(c *gin.Context) {
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update status"})
+		return
+	}
+	if !hasPermission(c, permSensitiveRead) {
+		item = sanitizeWorkOrderDetail(item)
+	}
+	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
+	c.JSON(http.StatusOK, item)
+}
+
+// UpdateLocation changes only a work order's location. It is deliberately
+// strict: the body must contain nothing but "location_id" (null clears it) so a
+// location-only user cannot smuggle edits to other fields through this route.
+func (h *Handler) UpdateLocation(c *gin.Context) {
+	referenceID, err := strconv.Atoi(c.Param("reference_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid reference_id"})
+		return
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	// The location_id key must be present (explicit null clears it); reject
+	// empty bodies and {} so this route cannot be used as a silent no-op.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if _, ok := raw["location_id"]; !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "location_id is required"})
+		return
+	}
+
+	var req updateLocationRequest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	// Reject trailing data after the JSON object (e.g. two concatenated objects).
+	if decoder.More() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	item, err := h.service.UpdateLocation(c.Request.Context(), referenceID, req.LocationID)
+	if errors.Is(err, ErrWorkOrderNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+		return
+	}
+	if errors.Is(err, ErrLocationNotFound) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update work order"})
 		return
 	}
 	if !hasPermission(c, permSensitiveRead) {

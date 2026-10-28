@@ -361,6 +361,7 @@ export default function WorkOrderDetailPage() {
   const canEditDiscount = canEdit && hasPermission("work_orders_sensitive:update");
   const canAdminDeleteJob = hasPermission("work_orders:create");
   const canUpdateStatus = hasPermission("work_orders_status:update");
+  const canUpdateLocation = hasPermission("work_orders_location:update");
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
   const canReadRepairLogs = hasPermission("repair_logs:read");
   const canCreateRepairLogs = hasPermission("repair_logs:create");
@@ -978,6 +979,24 @@ export default function WorkOrderDetailPage() {
     } catch (err) {
       setSectionError(err instanceof Error ? err.message : "Failed to save status/location");
       alerts.error("Failed to save status/location", err instanceof Error ? err.message : "Request failed");
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const saveLocationOnly = async () => {
+    setSavingSection("equipment");
+    setSectionError("");
+    try {
+      const updated = await apiClient.updateWorkOrderLocation(parsedReferenceId, {
+        location_id: equipmentForm.location_id
+      });
+      setItem(updated);
+      setEditingSection(null);
+      alerts.success("Location updated");
+    } catch (err) {
+      setSectionError(err instanceof Error ? err.message : "Failed to save location");
+      alerts.error("Failed to save location", err instanceof Error ? err.message : "Request failed");
     } finally {
       setSavingSection(null);
     }
@@ -1681,11 +1700,12 @@ export default function WorkOrderDetailPage() {
     <article className="rounded-lg border border-border bg-white p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold">Equipment</h2>
-        {(canEdit || canUpdateStatus) && editingSection !== "equipment" && <Button variant="outline" size="sm" onClick={() => setEditingSection("equipment")}>Edit</Button>}
+        {(canEdit || canUpdateStatus || canUpdateLocation) && editingSection !== "equipment" && <Button variant="outline" size="sm" onClick={() => setEditingSection("equipment")}>Edit</Button>}
       </div>
 
       {editingSection === "equipment" ? (
         <div className="space-y-3">
+          {(canEdit || canUpdateStatus) && (
           <SingleSearchableDropdown
             label="Status"
             value={equipmentForm.status_id}
@@ -1695,6 +1715,7 @@ export default function WorkOrderDetailPage() {
             placeholder="Select status"
             onAddNew={canEdit && !isDropdownFrozen("work_order_statuses") ? (label) => apiClient.createWorkOrderStatus(label) : undefined}
           />
+          )}
           <SingleSearchableDropdown
             label="Location"
             value={equipmentForm.location_id}
@@ -1777,7 +1798,7 @@ export default function WorkOrderDetailPage() {
             </>
           ) : null}
           <div className="flex gap-2">
-            <Button size="sm" onClick={canEdit ? saveEquipment : saveStatusAndLocationOnly} disabled={savingSection === "equipment"}>{savingSection === "equipment" ? "Saving..." : "Save"}</Button>
+            <Button size="sm" onClick={canEdit ? saveEquipment : canUpdateStatus ? saveStatusAndLocationOnly : saveLocationOnly} disabled={savingSection === "equipment"}>{savingSection === "equipment" ? "Saving..." : "Save"}</Button>
             <Button size="sm" variant="outline" onClick={cancelEditing} disabled={savingSection === "equipment"}>Cancel</Button>
           </div>
         </div>
