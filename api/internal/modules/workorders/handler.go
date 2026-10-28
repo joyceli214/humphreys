@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/mail"
 	"strconv"
 	"strings"
 	"time"
 
 	"humphreys/api/internal/domain"
+	"humphreys/api/internal/emailphotos"
 	"humphreys/api/internal/mailer"
 	"humphreys/api/internal/middleware"
 	"humphreys/api/internal/modules/aisettings"
@@ -24,7 +24,8 @@ type Handler struct {
 	service        *Service
 	uploads        *uploads.Handler
 	aiSettings     *aisettings.Service
-	emailClient    *mailer.GraphClient
+	emailClient    mailer.Sender
+	emailPhotos    *emailphotos.Service
 	httpClient     *http.Client
 	aiSummaryCache *ttlcache.Cache[string, aiSummaryCacheItem]
 }
@@ -93,6 +94,12 @@ type sendCustomerEmailRequest struct {
 	To       string `json:"to"`
 	Subject  string `json:"subject"`
 	Body     string `json:"body"`
+	// BodyHTML is optional. When it has visible text it is sanitized and sent
+	// as the HTML body; Body stays the plain-text copy for older clients.
+	BodyHTML string `json:"body_html"`
+	// PhotoIDs are optional ids from GET /work-orders/:id/email-photos. Only
+	// photos stored on this work order are accepted; they are shrunk and attached.
+	PhotoIDs []string `json:"photo_ids"`
 }
 
 type createWorkOrderCustomerRequest struct {
@@ -211,6 +218,9 @@ func NewWithService(service *Service) *Handler {
 
 func (h *Handler) SetUploadsHandler(uploadHandler *uploads.Handler) {
 	h.uploads = uploadHandler
+	if uploadHandler != nil {
+		h.emailPhotos = emailphotos.NewService(uploadHandler)
+	}
 }
 
 func (h *Handler) ListWorkOrders(c *gin.Context) {
@@ -424,18 +434,18 @@ func (h *Handler) SendCustomerEmail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if strings.TrimSpace(req.To) != "" {
-		if _, err := mail.ParseAddress(strings.TrimSpace(req.To)); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": ErrInvalidEmailFormat.Error()})
+	msg, err = applyCustomerEmailOverrides(msg, req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.PhotoIDs) > 0 {
+		attachments, status, err := h.customerEmailAttachments(c.Request.Context(), item, req.PhotoIDs)
+		if err != nil {
+			c.JSON(status, gin.H{"error": err.Error()})
 			return
 		}
-		msg.To = strings.TrimSpace(req.To)
-	}
-	if strings.TrimSpace(req.Subject) != "" {
-		msg.Subject = strings.TrimSpace(req.Subject)
-	}
-	if strings.TrimSpace(req.Body) != "" {
-		msg.Body = strings.TrimSpace(req.Body)
+		msg.Attachments = attachments
 	}
 
 	if err := h.emailClient.Send(c.Request.Context(), msg); err != nil {

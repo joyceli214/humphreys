@@ -160,7 +160,9 @@ function formatTemplateValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(formatTemplateValue).filter(Boolean).join(", ");
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
   if (typeof value === "boolean") return value ? "Yes" : "No";
-  return stripMarkdownForEmail(String(value));
+  const text = stripMarkdownForEmail(String(value));
+  // Lists start on their own line so "Work done: {{work_done}}" renders as a heading + bullet list.
+  return /^(?:• |\d+\. )/.test(text) ? `\n${text}` : text;
 }
 
 function emailCustomerName(item: WorkOrderDetail) {
@@ -198,20 +200,21 @@ function emailJobDetails(item: WorkOrderDetail) {
 
 function stripMarkdownForEmail(value: string | null) {
   const text = normalizeMarkdownInput(value)
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
-    .replace(/<img\b[^>]*\balt=["']([^"']*)["'][^>]*>/gi, "$1")
+    // Photos are attached from the photo panel, so drop inline images (and their alt text) from the email text.
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
     .replace(/<img\b[^>]*>/gi, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/_([^_]+)_/g, "$1")
-    .replace(/~~([^~]+)~~/g, "$1")
+    // List markers first, so "* item" bullets are not mistaken for *italic* pairs across lines.
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s{0,3}>\s?/gm, "")
-    .replace(/^\s{0,3}[-*+]\s+/gm, "• ")
-    .replace(/^\s{0,3}(\d+)\.\s+/gm, "$1. ")
+    .replace(/^\s*[-*+]\s+/gm, "• ")
+    .replace(/^\s*(\d+)\.\s+/gm, "$1. ")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+    .replace(/__([^_\n]+)__/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/(^|[^\w])_([^_\n]+)_(?=[^\w]|$)/gm, "$1$2")
+    .replace(/~~([^~\n]+)~~/g, "$1")
     .replace(/<[^>]+>/g, "")
     .replace(/\\([\\`*_{}\[\]()#+\-.!>])/g, "$1")
     .replace(/\n{3,}/g, "\n\n")

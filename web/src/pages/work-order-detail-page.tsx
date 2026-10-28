@@ -1,7 +1,7 @@
 import { workOrderTotals } from "@/lib/work-order-totals";
 "use client";
 
-import { type CSSProperties, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type ReactNode, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { APIError, apiClient } from "@/lib/api/client";
 import type { EmailTemplate, LookupOption, PartsPurchaseRequest, RepairLog, WorkOrderDetail } from "@/lib/api/generated/types";
@@ -10,7 +10,7 @@ import { useAlerts } from "@/lib/alerts/alert-context";
 import { Badge } from "@/components/ui/badge";
 import { PartsRequestHistory, PartsRequestWarnings } from "@/components/parts-request-audit";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Copy, Mail, Share2 } from "lucide-react";
+import { ChevronDown, Copy, Mail, Paperclip, Share2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,6 +32,10 @@ import { cn } from "@/lib/utils";
 import { formatPhoneNumber, phoneDigits } from "@/lib/phone";
 import { markdownToPlainText, normalizeMarkdownInput } from "@/lib/markdown";
 import { DEFAULT_EMAIL_TEMPLATES, renderEmailTemplate, type CustomerEmailTemplateKey } from "@/lib/email-templates";
+import { emailHtmlToPlainText, emailTextToHtml, finalizeEmailHtml, sanitizeEmailHtml } from "@/lib/email-html";
+import { DEFAULT_EMAIL_PHOTO_LIMITS, extractPhotoUrls, summarizePhotoSelection, type EmailPhoto, type EmailPhotoLimits } from "@/lib/email-photos";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { EmailPhotoPanel } from "@/components/email-photo-panel";
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -56,6 +60,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { generateDropOffFormPdf, generatePickupFormPdf } from "@/lib/pdf/work-order-forms";
 import { DEFAULT_WORK_ORDER_LAYOUT, type WorkOrderLayoutBlockID, normalizeWorkOrderLayout } from "@/lib/work-order-layout";
+
+// The rich-text editor (TipTap) is only needed when the email dialog opens, so keep it out of the main bundle.
+const EmailRichTextEditor = lazy(() => import("@/components/email-rich-text-editor").then((module) => ({ default: module.EmailRichTextEditor })));
 
 function parseLocalDate(value: string) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -127,7 +134,7 @@ type CustomerEmailDraft = {
   template: CustomerEmailTemplate;
   to: string;
   subject: string;
-  body: string;
+  bodyHtml: string;
 };
 
 function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailTemplate, emailTemplate?: EmailTemplate): CustomerEmailDraft {
@@ -136,7 +143,7 @@ function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailT
     template,
     to: item.customer.email ?? "",
     subject: rendered.subject,
-    body: rendered.body
+    bodyHtml: sanitizeEmailHtml(emailTextToHtml(rendered.body))
   };
 }
 
@@ -594,6 +601,13 @@ export default function WorkOrderDetailPage() {
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[] | null>(null);
   const [customerEmailDraft, setCustomerEmailDraft] = useState<CustomerEmailDraft | null>(null);
   const [customerEmailDialogOpen, setCustomerEmailDialogOpen] = useState(false);
+  const [emailPhotos, setEmailPhotos] = useState<EmailPhoto[] | null>(null);
+  const [emailPhotosLoading, setEmailPhotosLoading] = useState(false);
+  const [emailPhotosError, setEmailPhotosError] = useState<string | null>(null);
+  const [emailPhotoLimits, setEmailPhotoLimits] = useState<EmailPhotoLimits>(DEFAULT_EMAIL_PHOTO_LIMITS);
+  const [selectedEmailPhotoIds, setSelectedEmailPhotoIds] = useState<string[]>([]);
+  const emailPhotoRequestRef = useRef(0);
+  const wideEmailLayout = useMediaQuery("(min-width: 900px)");
   const [completingJob, setCompletingJob] = useState(false);
   const [pickupStatusDialogOpen, setPickupStatusDialogOpen] = useState(false);
   const [pickupOtherStatusID, setPickupOtherStatusID] = useState<number | null>(null);
@@ -1314,8 +1328,29 @@ export default function WorkOrderDetailPage() {
     return res.items;
   };
 
+  const loadEmailPhotos = async () => {
+    const requestId = ++emailPhotoRequestRef.current;
+    setEmailPhotos(null);
+    setEmailPhotosError(null);
+    setEmailPhotosLoading(true);
+    try {
+      const res = await apiClient.listWorkOrderEmailPhotos(parsedReferenceId);
+      if (requestId !== emailPhotoRequestRef.current) return;
+      setEmailPhotos(res.items);
+      setEmailPhotoLimits({ maxPhotos: res.max_photos || DEFAULT_EMAIL_PHOTO_LIMITS.maxPhotos, maxTotalBytes: res.max_total_bytes || DEFAULT_EMAIL_PHOTO_LIMITS.maxTotalBytes });
+    } catch (err) {
+      if (requestId !== emailPhotoRequestRef.current) return;
+      setEmailPhotos([]);
+      setEmailPhotosError(err instanceof Error ? `Couldn't load photos: ${err.message}` : "Couldn't load photos.");
+    } finally {
+      if (requestId === emailPhotoRequestRef.current) setEmailPhotosLoading(false);
+    }
+  };
+
   const openCustomerEmailPreview = async (template: CustomerEmailTemplate) => {
     setOpeningCustomerEmail(template);
+    setSelectedEmailPhotoIds([]);
+    void loadEmailPhotos();
     try {
       const templates = await loadEmailTemplates();
       setCustomerEmailDraft(buildCustomerEmailDraft(item, template, templates.find((entry) => entry.key === template)));
@@ -1340,13 +1375,19 @@ export default function WorkOrderDetailPage() {
       return;
     }
     const subject = customerEmailDraft.subject.trim();
-    const body = customerEmailDraft.body.trim();
+    const bodyHtml = finalizeEmailHtml(customerEmailDraft.bodyHtml);
+    const body = emailHtmlToPlainText(bodyHtml);
     if (!subject) {
       alerts.error("Subject required", "Enter an email subject before sending.");
       return;
     }
     if (!body) {
       alerts.error("Email body required", "Enter an email message before sending.");
+      return;
+    }
+    const photoSummary = summarizePhotoSelection(emailPhotos, selectedEmailPhotoIds, emailPhotoLimits, emailPhotosLoading);
+    if (photoSummary.blockedReason) {
+      alerts.error("Can't send yet", photoSummary.blockedReason);
       return;
     }
 
@@ -1356,7 +1397,9 @@ export default function WorkOrderDetailPage() {
         template: customerEmailDraft.template,
         to: email,
         subject,
-        body
+        body,
+        body_html: bodyHtml,
+        ...(selectedEmailPhotoIds.length > 0 ? { photo_ids: selectedEmailPhotoIds } : {})
       });
       alerts.success(customerEmailDraft.template === "job_completed" ? "Job completed email sent" : "Job started email sent");
       setCustomerEmailDialogOpen(false);
@@ -1366,6 +1409,18 @@ export default function WorkOrderDetailPage() {
     } finally {
       setSendingCustomerEmail(null);
     }
+  };
+
+  const emailPhotoSummary = summarizePhotoSelection(emailPhotos, selectedEmailPhotoIds, emailPhotoLimits, emailPhotosLoading);
+  const emailPhotoPanelProps = {
+    photos: emailPhotos,
+    placeholderUrls: emailPhotos ? [] : extractPhotoUrls([item.problem_description, item.work_done, ...repairLogs.map((log) => log.details)]),
+    loading: emailPhotosLoading,
+    error: emailPhotosError,
+    limits: emailPhotoLimits,
+    selectedIds: selectedEmailPhotoIds,
+    onChange: setSelectedEmailPhotoIds,
+    disabled: sendingCustomerEmail !== null
   };
 
   const saveWorkNotes = async () => {
@@ -2134,39 +2189,76 @@ export default function WorkOrderDetailPage() {
             setCustomerEmailDialogOpen(open);
           }}
         >
-          <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-            <DialogTitle className="text-lg font-semibold">
-              {customerEmailDraft?.template === "job_completed" ? "Job Completed Email" : "Job Started Email"}
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground">
-              Review and edit the email before sending it to the customer.
-            </DialogDescription>
+          <DialogContent
+            className="flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 outline-none focus:outline-none sm:h-[92vh] sm:max-h-[92vh] sm:w-[92vw] sm:max-w-[1280px] sm:rounded-lg"
+            // Don't pre-select the To address (and pop the phone keyboard) when the dialog opens.
+            onOpenAutoFocus={(event) => event.preventDefault()}
+            onEscapeKeyDown={(event) => {
+              if (sendingCustomerEmail !== null) event.preventDefault();
+            }}
+          >
+            <div className="safe-area-top shrink-0 px-4 pb-2 pt-4 sm:px-6 sm:pt-6">
+              <DialogTitle className="text-lg font-semibold">
+                {customerEmailDraft?.template === "job_completed" ? "Job Completed Email" : "Job Started Email"}
+              </DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground">
+                Review and edit the email before sending it to the customer.
+              </DialogDescription>
+            </div>
             {customerEmailDraft && (
-              <div className="mt-4 space-y-3">
-                <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">To</label>
-                  <Input
-                    type="email"
-                    value={customerEmailDraft.to}
-                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, to: event.target.value } : prev)}
-                  />
+              <>
+                <div className="flex min-h-0 flex-1">
+                  <div className="min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto px-4 py-2 sm:px-6">
+                    <div>
+                      <label htmlFor="customer-email-to" className="mb-1 block text-sm text-muted-foreground">To</label>
+                      <Input
+                        id="customer-email-to"
+                        type="email"
+                        inputMode="email"
+                        value={customerEmailDraft.to}
+                        onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, to: event.target.value } : prev)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="customer-email-subject" className="mb-1 block text-sm text-muted-foreground">Subject</label>
+                      <Input
+                        id="customer-email-subject"
+                        value={customerEmailDraft.subject}
+                        onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, subject: event.target.value } : prev)}
+                      />
+                    </div>
+                    <div>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="text-sm text-muted-foreground">Message</span>
+                        {selectedEmailPhotoIds.length > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                            <Paperclip className="h-3 w-3" />
+                            Attached: {selectedEmailPhotoIds.length}
+                          </span>
+                        )}
+                      </div>
+                      <Suspense fallback={<div className="h-[50vh] min-h-[280px] rounded-md border border-input bg-white px-3 py-2 text-sm text-muted-foreground">Loading editor...</div>}>
+                        {/* Default height fills the dialog (92vh minus header, To/Subject and footer); drag the corner to resize. */}
+                        <EmailRichTextEditor
+                          className="h-[max(280px,calc(100dvh-330px))] sm:h-[max(280px,calc(92vh-340px))]"
+                          value={customerEmailDraft.bodyHtml}
+                          disabled={sendingCustomerEmail !== null}
+                          onChange={(html) => setCustomerEmailDraft((prev) => prev ? { ...prev, bodyHtml: html } : prev)}
+                        />
+                      </Suspense>
+                    </div>
+                    {!wideEmailLayout && (
+                      <div className="pb-2">
+                        <EmailPhotoPanel layout="stacked" {...emailPhotoPanelProps} />
+                      </div>
+                    )}
+                  </div>
+                  {wideEmailLayout && <EmailPhotoPanel layout="side" {...emailPhotoPanelProps} />}
                 </div>
-                <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">Subject</label>
-                  <Input
-                    value={customerEmailDraft.subject}
-                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, subject: event.target.value } : prev)}
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm text-muted-foreground">Message</label>
-                  <textarea
-                    className="min-h-[320px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    value={customerEmailDraft.body}
-                    onChange={(event) => setCustomerEmailDraft((prev) => prev ? { ...prev, body: event.target.value } : prev)}
-                  />
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
+                <div className="safe-area-bottom flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-4 pb-4 pt-3 sm:px-6">
+                  {emailPhotoSummary.blockedReason && !emailPhotosLoading && (
+                    <p role="alert" className="mr-auto min-w-0 flex-1 basis-60 text-sm text-destructive">{emailPhotoSummary.blockedReason}</p>
+                  )}
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -2177,11 +2269,15 @@ export default function WorkOrderDetailPage() {
                   >
                     Cancel
                   </Button>
-                  <Button onClick={() => void sendCustomerEmail()} disabled={sendingCustomerEmail !== null}>
-                    {sendingCustomerEmail ? "Sending..." : "Send Email"}
+                  <Button
+                    onClick={() => void sendCustomerEmail()}
+                    disabled={sendingCustomerEmail !== null || (emailPhotoSummary.blockedReason !== null && !emailPhotosLoading)}
+                    title={emailPhotoSummary.blockedReason ?? undefined}
+                  >
+                    {sendingCustomerEmail ? (selectedEmailPhotoIds.length > 0 ? "Sending with photos..." : "Sending...") : "Send Email"}
                   </Button>
                 </div>
-              </div>
+              </>
             )}
           </DialogContent>
         </Dialog>

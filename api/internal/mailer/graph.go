@@ -21,7 +21,32 @@ var ErrNotConfigured = errors.New("email sending is not configured")
 type Message struct {
 	To      string
 	Subject string
-	Body    string
+	// Body is plain text / light markdown. It is converted to HTML when BodyHTML is empty.
+	Body string
+	// BodyHTML, when set, is sanitized and sent as the HTML body as-is.
+	BodyHTML string
+	// Attachments are sent as real file attachments (draft + attach + send).
+	Attachments []Attachment
+}
+
+// Attachment is a file attached to an email.
+type Attachment struct {
+	Name        string
+	ContentType string
+	Data        []byte
+}
+
+// Sender sends an email. GraphClient implements it; tests use a fake.
+type Sender interface {
+	Send(ctx context.Context, msg Message) error
+}
+
+// htmlContent returns the HTML that is sent for the message.
+func (m Message) htmlContent() string {
+	if sanitized := SanitizeEmailHTML(m.BodyHTML); emailHTMLHasText(sanitized) {
+		return wrapEmailHTML(sanitized)
+	}
+	return markdownToEmailHTML(m.Body)
 }
 
 type GraphClient struct {
@@ -55,22 +80,12 @@ func (c *GraphClient) Send(ctx context.Context, msg Message) error {
 	if err != nil {
 		return err
 	}
+	if len(msg.Attachments) > 0 {
+		return c.sendWithAttachments(ctx, token, msg)
+	}
 
 	payload := map[string]any{
-		"message": map[string]any{
-			"subject": msg.Subject,
-			"body": map[string]string{
-				"contentType": "HTML",
-				"content":     markdownToEmailHTML(msg.Body),
-			},
-			"toRecipients": []map[string]any{
-				{
-					"emailAddress": map[string]string{
-						"address": msg.To,
-					},
-				},
-			},
-		},
+		"message":         graphMessage(msg),
 		"saveToSentItems": true,
 	}
 	body, err := json.Marshal(payload)
@@ -98,6 +113,23 @@ func (c *GraphClient) Send(ctx context.Context, msg Message) error {
 
 	responseBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 	return fmt.Errorf("microsoft graph sendMail failed: %s: %s", res.Status, strings.TrimSpace(string(responseBody)))
+}
+
+func graphMessage(msg Message) map[string]any {
+	return map[string]any{
+		"subject": msg.Subject,
+		"body": map[string]string{
+			"contentType": "HTML",
+			"content":     msg.htmlContent(),
+		},
+		"toRecipients": []map[string]any{
+			{
+				"emailAddress": map[string]string{
+					"address": msg.To,
+				},
+			},
+		},
+	}
 }
 
 func (c *GraphClient) accessToken(ctx context.Context) (string, error) {

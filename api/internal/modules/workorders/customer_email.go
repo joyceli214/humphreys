@@ -74,6 +74,27 @@ func buildCustomerEmailMessage(item domain.WorkOrderDetail, template string) (cu
 	}
 }
 
+// applyCustomerEmailOverrides applies the edits from the email dialog on top of
+// the default message built from the work order.
+func applyCustomerEmailOverrides(msg customerEmailMessage, req sendCustomerEmailRequest) (customerEmailMessage, error) {
+	if to := strings.TrimSpace(req.To); to != "" {
+		if _, err := mail.ParseAddress(to); err != nil {
+			return msg, ErrInvalidEmailFormat
+		}
+		msg.To = to
+	}
+	if subject := strings.TrimSpace(req.Subject); subject != "" {
+		msg.Subject = subject
+	}
+	if body := strings.TrimSpace(req.Body); body != "" {
+		msg.Body = body
+	}
+	if bodyHTML := strings.TrimSpace(req.BodyHTML); bodyHTML != "" && mailer.HasVisibleText(bodyHTML) {
+		msg.BodyHTML = mailer.SanitizeEmailHTML(bodyHTML)
+	}
+	return msg, nil
+}
+
 func emailCustomerName(item domain.WorkOrderDetail) string {
 	name := strings.TrimSpace(strings.Join([]string{stringValue(item.Customer.FirstName), stringValue(item.Customer.LastName)}, " "))
 	if name == "" {
