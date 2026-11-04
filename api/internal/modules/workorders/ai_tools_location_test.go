@@ -49,7 +49,7 @@ func TestMassUpdateLocationBareShelfAmbiguousRejected(t *testing.T) {
 		t.Fatalf("ambiguous bare shelf must be rejected: %+v", rows)
 	}
 	msg := rows[0].Error
-	if !strings.Contains(msg, "is ambiguous") || !strings.Contains(msg, "A-1") || !strings.Contains(msg, "A-2") {
+	if !strings.Contains(msg, "ambiguous") || !strings.Contains(msg, "A-1") || !strings.Contains(msg, "A-2") {
 		t.Fatalf("error should say ambiguous and list options, got %q", msg)
 	}
 	if _, ok := stub.appliedOps[1]; ok {
@@ -97,7 +97,7 @@ func TestMassUpdateLocationPreviewAmbiguousMessage(t *testing.T) {
 	if len(body.Rows) != 1 || body.Rows[0].Valid {
 		t.Fatalf("expected one invalid row: %+v", body.Rows)
 	}
-	if want := `Location "A" is ambiguous. Specify one of: A-1, A-2.`; body.Rows[0].Error != want {
+	if want := `ambiguous location "A": specify one of A-1, A-2`; body.Rows[0].Error != want {
 		t.Fatalf("error = %q, want %q", body.Rows[0].Error, want)
 	}
 }

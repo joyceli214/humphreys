@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,14 +38,8 @@ func (h *Handler) InterpretSearch(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "question is required"})
 		return
 	}
-	if utf8.RuneCountInString(question) > aiInterpretMaxQuestion {
+	if len(question) > aiInterpretMaxQuestion {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("question is too long (max %d characters)", aiInterpretMaxQuestion)})
-		return
-	}
-	// "31200", "job #31200", "jobs 31200, 31201": answer deterministically so
-	// job numbers match exactly instead of as fuzzy model/serial/text filters.
-	if f, ok := jobNumberInterpretFilters(question); ok {
-		c.JSON(http.StatusOK, aiInterpretResponse{Filters: f.toFilters(), Explanation: describeSearchFilters(f)})
 		return
 	}
 
@@ -139,9 +132,7 @@ func interpretSystemPrompt() string {
 		"Respond with STRICT JSON only (no prose, no markdown) of the form " +
 		`{"filters":{...},"explanation":"one short sentence describing how you understood the question"}. ` +
 		"Allowed filter keys (omit any you do not need; no other keys are allowed):\n" +
-		`- "job_ids": array of exact job numbers (integers), e.g. "job 31200" = [31200]; ALWAYS use this for job numbers, never "text", "model" or "serial"\n` +
-		`- "job_suffix": digits the job number ends with, e.g. "jobs ending in 200" = "200"\n` +
-		`- "text": free text matched against customer name, equipment, brand, model, serial\n` +
+		`- "text": free text matched against job number, customer name, equipment, brand, model, serial\n` +
 		`- "customer_name": part of the customer's name\n` +
 		`- "model": part of the model number\n` +
 		`- "serial": part of the serial number\n` +
@@ -180,7 +171,7 @@ func buildInterpretPrompt(question string, statuses []AIStatusOption, now time.T
 
 // describeSearchFilters is the fallback explanation when the model gives none.
 func describeSearchFilters(f aiResolvedSearchFilters) string {
-	parts := describeJobFilters(f)
+	parts := make([]string, 0)
 	add := func(label, v string) {
 		if v != "" {
 			parts = append(parts, fmt.Sprintf("%s %q", label, v))

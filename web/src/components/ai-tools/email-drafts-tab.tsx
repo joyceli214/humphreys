@@ -14,8 +14,6 @@ import {
 } from "@/lib/ai-tools/email-selection";
 import { cn } from "@/lib/utils";
 import { AI_TEXTAREA_CLASS, AIButton, AICard, AIErrorBox, errorMessage } from "@/components/ai-tools/ai-ui";
-import { AI_TEXT_MAX } from "@/lib/ai-tools/limits";
-import { CharCounterInput } from "@/components/ai-tools/char-counter-input";
 import { EmailDraftEditor, type EditableDraft } from "@/components/ai-tools/email-draft-editor";
 import { EmailJobSearch } from "@/components/ai-tools/email-job-search";
 import { EmailSelectedJobs } from "@/components/ai-tools/email-selected-jobs";
@@ -189,15 +187,13 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
           <label htmlFor="ai-email-notes" className="mb-1 block text-xs text-neutral-600">
             Extra notes for the AI (optional)
           </label>
-          <CharCounterInput
-            multiline
+          <textarea
             id="ai-email-notes"
-            limit={AI_TEXT_MAX}
             rows={3}
             className={`${AI_TEXTAREA_CLASS} resize-y`}
             placeholder="e.g. Output stage needs a new pair of transistors. Estimate $180 parts and labour."
             value={notes}
-            onValueChange={setNotes}
+            onChange={(event) => setNotes(event.target.value)}
             disabled={busy}
           />
         </Step>

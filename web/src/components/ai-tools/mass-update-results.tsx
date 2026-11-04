@@ -1,11 +1,6 @@
 import type { MassUpdateApplyResult } from "@/lib/ai-tools/types";
 import { AICard, AICardTitle } from "@/components/ai-tools/ai-ui";
 
-/** "1 job", "2 jobs". Pluralises the last word of `noun` with a trailing "s". */
-export function plural(count: number, noun: string) {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
 /** Per-job outcome of an apply call. Each job is its own transaction server-side. */
 export function MassUpdateResults({ results, onDismiss }: { results: MassUpdateApplyResult[]; onDismiss: () => void }) {
   const succeeded = results.filter((r) => r.success).length;
@@ -15,27 +10,21 @@ export function MassUpdateResults({ results, onDismiss }: { results: MassUpdateA
     <AICard>
       <div className="flex items-start justify-between gap-3">
         <AICardTitle>
-          Results: {plural(succeeded, "job")} updated
-          {failed > 0 && (
-            <span className="text-red-700">
-              , {plural(failed, "job")} could not be updated
-            </span>
-          )}
+          Applied: {succeeded} job{succeeded === 1 ? "" : "s"} updated
+          {failed > 0 && <span className="text-red-700">, {failed} failed</span>}
         </AICardTitle>
         <button type="button" className="text-xs text-neutral-500 hover:text-neutral-800" onClick={onDismiss}>
-          Close
+          Dismiss
         </button>
       </div>
       <ul className="mt-3 space-y-1.5 text-sm">
         {results.map((result) => (
           <li key={result.reference_id} className="flex flex-wrap items-baseline gap-x-2">
             <span className={result.success ? "font-semibold text-green-700" : "font-semibold text-red-700"}>
-              {result.success ? "✓" : "✕"} Job #{result.reference_id}
+              {result.success ? "✓" : "✕"} #{result.reference_id}
             </span>
             <span className="text-neutral-600">
-              {result.success
-                ? (result.applied ?? []).join("; ") || "Updated successfully."
-                : result.error || "This job could not be updated."}
+              {result.success ? (result.applied ?? []).join("; ") || "Updated" : result.error || "Failed"}
             </span>
           </li>
         ))}

@@ -66,7 +66,7 @@ func validateMassUpdateOps(ops []MassUpdateOp) error {
 			}
 		}
 	}
-	return validateWorkDoneOps(ops)
+	return nil
 }
 
 // aiToolsBodyLimit wraps the request body in http.MaxBytesReader so no
@@ -119,16 +119,6 @@ func (l *aiRateLimiter) allow(key string, now time.Time) bool {
 
 // allowAt is allow plus, when rejected, how long until a slot frees up.
 func (l *aiRateLimiter) allowAt(key string, now time.Time) (bool, time.Duration) {
-	return l.allowNAt(key, 1, now)
-}
-
-// allowNAt records n requests for key at now only if all n fit within the
-// limit (all-or-nothing): a rejected call charges no slots. When rejected it
-// also returns how long until enough slots free up. n <= 0 always passes.
-func (l *aiRateLimiter) allowNAt(key string, n int, now time.Time) (bool, time.Duration) {
-	if n <= 0 {
-		return true, 0
-	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -139,19 +129,11 @@ func (l *aiRateLimiter) allowNAt(key string, n int, now time.Time) (bool, time.D
 			kept = append(kept, t)
 		}
 	}
-	if len(kept)+n > l.limit {
+	if len(kept) >= l.limit {
 		l.hits[key] = kept
-		// The (len+n-limit)th oldest hit must expire before n slots are free.
-		idx := len(kept) + n - l.limit - 1
-		if idx >= len(kept) || n > l.limit {
-			return false, l.window
-		}
-		return false, kept[idx].Sub(cutoff)
+		return false, kept[0].Sub(cutoff)
 	}
-	for i := 0; i < n; i++ {
-		kept = append(kept, now)
-	}
-	l.hits[key] = kept
+	l.hits[key] = append(kept, now)
 	// Opportunistically drop idle users so the map cannot grow without bound.
 	if len(l.hits) > 1024 {
 		for k, ts := range l.hits {

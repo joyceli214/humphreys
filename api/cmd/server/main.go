@@ -70,7 +70,6 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
-	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.ErrorLogger())
 	r.Use(middleware.CORS(cfg.CORSOrigin))
 	r.Use(middleware.CSRFMiddleware(auth.CSRFExemptPaths()))

@@ -329,15 +329,6 @@ func (r *storeRepository) ApplyMassUpdateJob(ctx context.Context, referenceID in
 			entry.After = map[string]any{"location_id": *op.LocationID}
 			applied = append(applied, "Location updated")
 
-		case massOpGenerateWorkDone:
-			before, after, err := applyWorkDoneTx(ctx, tx, referenceID, op.WorkDoneText)
-			if err != nil {
-				return nil, err
-			}
-			entry.Before = before
-			entry.After = after
-			applied = append(applied, "Work Done updated")
-
 		default:
 			return nil, fmt.Errorf("unsupported operation %q", op.Op)
 		}

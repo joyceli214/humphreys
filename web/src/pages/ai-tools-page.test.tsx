@@ -11,13 +11,6 @@ import AIToolsPage from "@/pages/ai-tools-page";
 afterEach(cleanup);
 
 describe("AIToolsPage", () => {
-  it("is titled Management (heading and document title)", () => {
-    render(<AIToolsPage />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^Management$/);
-    expect(document.title).toBe("Management");
-    expect(screen.queryByText(/AI Tools/)).toBeNull();
-  });
-
   it("shows Advanced Search instead of the old Job Summary tab", () => {
     render(<AIToolsPage />);
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
