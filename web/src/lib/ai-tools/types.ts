@@ -8,7 +8,8 @@ export type MassUpdateOpType =
   | "add_line_item"
   | "remove_line_item"
   | "set_status"
-  | "set_location";
+  | "set_location"
+  | "generate_work_done";
 
 export type MassUpdateOp = {
   reference_id: number;
@@ -22,6 +23,8 @@ export type MassUpdateOp = {
   quantity_text?: string;
   status_name?: string;
   location_name?: string;
+  /** generate_work_done: the text generated at preview, saved as-is on apply. */
+  work_done_text?: string;
 };
 
 export type MassUpdatePreviewRow = {
@@ -34,8 +37,18 @@ export type MassUpdatePreviewRow = {
   lower_than_before: boolean;
   valid: boolean;
   error?: string;
+  /** Change to the job total in dollars (positive = total goes up). Treated as 0 when missing. */
+  amount_delta?: number;
   /** The job's updated_at when previewed (null if never set); sent back on apply. */
   updated_at: string | null;
+  /** generate_work_done rows: the job already has Work Done text, so applying replaces it. */
+  has_existing_work_done?: boolean;
+  /** That existing Work Done embeds images (they are removed when replaced). */
+  existing_work_done_has_images?: boolean;
+  /** Whether the row starts ticked. False for valid rows that would replace existing Work Done. */
+  default_selected?: boolean;
+  /** Non-blocking notice shown with the row. */
+  warning?: string;
 };
 
 /** reference_id -> updated_at from the preview. Jobs missing here are rejected on apply. */
@@ -44,6 +57,8 @@ export type MassUpdateExpectedUpdatedAt = Record<number, string | null>;
 export type MassUpdatePreviewResponse = {
   rows: MassUpdatePreviewRow[];
   model: string;
+  /** Summary of partial failures (e.g. some Work Done generations failed); absent when all previewed. */
+  message?: string;
 };
 
 export type MassUpdateApplyResult = {
@@ -55,6 +70,18 @@ export type MassUpdateApplyResult = {
 
 export type MassUpdateApplyResponse = {
   results: MassUpdateApplyResult[];
+};
+
+/** Typical line item from past jobs (GET /ai-tools/line-item-catalog). */
+export type LineItemCatalogItem = {
+  name: string;
+  unit_price: number;
+  quantity_text: string;
+  notes?: string;
+};
+
+export type LineItemCatalogResponse = {
+  items: LineItemCatalogItem[];
 };
 
 export type StaleBucket = "unhandled" | "finished_not_picked_up";
@@ -112,6 +139,10 @@ export type AISearchGroupBy = "none" | "customer" | "model" | "serial";
 
 /** Whitelisted filter object shared by /search/interpret and /search. */
 export type AISearchFilters = {
+  /** Exact job numbers (reference_id), max 50. */
+  job_ids?: number[];
+  /** Job number (reference_id) ends with these digits. */
+  job_suffix?: string;
   text?: string;
   customer_name?: string;
   model?: string;

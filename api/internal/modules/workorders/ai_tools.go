@@ -23,6 +23,7 @@ const (
 	massOpRemoveLineItem    = "remove_line_item"
 	massOpSetStatus         = "set_status"
 	massOpSetLocation       = "set_location"
+	massOpGenerateWorkDone  = "generate_work_done"
 )
 
 // massUpdateJobCap bounds how many distinct jobs a single request may touch.
@@ -46,6 +47,9 @@ type MassUpdateOp struct {
 	QuantityText  *string  `json:"quantity_text,omitempty"`
 	StatusName    *string  `json:"status_name,omitempty"`
 	LocationName  *string  `json:"location_name,omitempty"`
+	// WorkDoneText is filled by the server on preview (generated from repair
+	// logs) and echoed back by the client on apply; apply never calls the LLM.
+	WorkDoneText *string `json:"work_done_text,omitempty"`
 }
 
 // massUpdateResolvedOp is an op whose status/location names have been resolved to
@@ -62,6 +66,12 @@ type massUpdateResolvedOp struct {
 	QuantityText  *string
 	StatusID      *int64
 	LocationID    *int64
+	WorkDoneText  *string
+
+	// PreviousWorkDone is the job's Work Done when the op was validated, used
+	// after apply to delete images the new text no longer references (the
+	// stale-version check guarantees it is what the apply replaced).
+	PreviousWorkDone *string
 }
 
 // AIStatusOption is a work order status available for mass updates.
@@ -109,9 +119,15 @@ func RegisterAIToolsRoutes(authed *gin.RouterGroup, h *Handler) {
 	// share one per-user rate limit (checked after the permission gate).
 	group := authed.Group(aiToolsRoutePrefix, aiToolsBodyLimit())
 	perm := middleware.RequirePermission(permUpdate)
-	llm := newAIRateLimiter(aiToolsLLMRateLimit, aiToolsLLMRateWindow).middleware()
+	// The handler keeps the limiter so Mass Update preview can charge one extra
+	// slot per generated Work Done (each is its own LLM call).
+	if h.aiLimiter == nil {
+		h.aiLimiter = newAIRateLimiter(aiToolsLLMRateLimit, aiToolsLLMRateWindow)
+	}
+	llm := h.aiLimiter.middleware()
 	group.POST("/mass-update/preview", perm, llm, h.MassUpdatePreview)
 	group.POST("/mass-update/apply", perm, h.MassUpdateApply)
+	group.GET("/line-item-catalog", perm, h.LineItemCatalogList)
 	group.POST("/search/interpret", perm, llm, h.InterpretSearch)
 	group.POST("/search", perm, h.AdvancedSearch)
 	// Job summary is no longer shown in the AI Tools UI (replaced by Advanced

@@ -26,6 +26,7 @@ import type {
   EmailDraftType,
   JobSummaryResponse,
   JobSummaryStaleResponse,
+  LineItemCatalogResponse,
   MassUpdateApplyResponse,
   MassUpdateExpectedUpdatedAt,
   MassUpdateOp,
@@ -661,6 +662,10 @@ export class APIClient {
       method: "POST",
       body: JSON.stringify({ operations, expected_updated_at: expectedUpdatedAt })
     });
+  }
+
+  getAILineItemCatalog() {
+    return this.request<LineItemCatalogResponse>("/ai-tools/line-item-catalog");
   }
 
   getAIStaleJobs() {

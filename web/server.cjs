@@ -27,6 +27,30 @@ const MIME_TYPES = {
   ".woff2": "font/woff2"
 };
 
+// Anti-clickjacking: only same-origin pages may frame us (the app frames
+// /ai-tools itself, so SAMEORIGIN / 'self' keeps that working).
+const FRAME_OPTIONS = "SAMEORIGIN";
+const FRAME_ANCESTORS = "frame-ancestors 'self'";
+
+function setSecurityHeaders(res) {
+  res.setHeader("X-Frame-Options", FRAME_OPTIONS);
+  res.setHeader("Content-Security-Policy", FRAME_ANCESTORS);
+}
+
+// Upstream headers are passed to writeHead, which overrides setHeader values,
+// so enforce the same framing policy on proxied responses too.
+function withSecurityHeaders(upstreamHeaders) {
+  const headers = { ...upstreamHeaders };
+  headers["x-frame-options"] = FRAME_OPTIONS;
+  const csp = headers["content-security-policy"];
+  if (!csp) {
+    headers["content-security-policy"] = FRAME_ANCESTORS;
+  } else if (!/frame-ancestors/i.test(String(csp))) {
+    headers["content-security-policy"] = `${csp}; ${FRAME_ANCESTORS}`;
+  }
+  return headers;
+}
+
 function sendNotFound(res) {
   res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify({ error: "not found" }));
@@ -71,7 +95,7 @@ function proxyAPI(req, res, pathname, search) {
       headers
     },
     (proxyRes) => {
-      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      res.writeHead(proxyRes.statusCode || 502, withSecurityHeaders(proxyRes.headers));
       proxyRes.pipe(res);
     }
   );
@@ -86,6 +110,7 @@ function proxyAPI(req, res, pathname, search) {
 }
 
 const server = http.createServer((req, res) => {
+  setSecurityHeaders(res);
   const method = (req.method || "GET").toUpperCase();
   const rawUrl = req.url || "/";
   const url = new URL(rawUrl, "http://localhost");

@@ -1,4 +1,6 @@
+import { SEARCH_QUESTION_MAX } from "@/lib/ai-tools/limits";
 import { AI_TEXTAREA_CLASS, AIButton, AICard, AIPill } from "@/components/ai-tools/ai-ui";
+import { CharCounterInput } from "@/components/ai-tools/char-counter-input";
 
 type Props = {
   question: string;
@@ -15,13 +17,15 @@ export function SearchQuestionCard({ question, onQuestionChange, onInterpret, in
       <label htmlFor="ai-search-question" className="block text-sm font-semibold text-neutral-800">
         What are you looking for?
       </label>
-      <textarea
+      <CharCounterInput
+        multiline
         id="ai-search-question"
+        limit={SEARCH_QUESTION_MAX}
         rows={2}
         className={`${AI_TEXTAREA_CLASS} mt-2 resize-y`}
         placeholder="Ask in plain English, e.g. customers with more than 2 units, or warranty jobs on Marantz receivers"
         value={question}
-        onChange={(event) => onQuestionChange(event.target.value)}
+        onValueChange={onQuestionChange}
         onKeyDown={(event) => {
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && question.trim()) {
             event.preventDefault();

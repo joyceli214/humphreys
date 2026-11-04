@@ -31,6 +31,12 @@ type Handler struct {
 	emailPhotos    *emailphotos.Service
 	httpClient     *http.Client
 	aiSummaryCache *ttlcache.Cache[string, aiSummaryCacheItem]
+	// aiLimiter is the shared per-user AI Tools LLM limiter (set by
+	// RegisterAIToolsRoutes).
+	aiLimiter *aiRateLimiter
+	// workDoneGenerator overrides the Mass Update batch Work Done generator in
+	// tests; nil uses generateWorkDoneTextBatch.
+	workDoneGenerator func(ctx context.Context, settings aisettings.Settings, referenceID int) (string, error)
 }
 
 type updateEquipmentRequest struct {

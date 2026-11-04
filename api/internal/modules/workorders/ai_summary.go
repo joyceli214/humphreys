@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"humphreys/api/internal/domain"
 	"humphreys/api/internal/middleware"
@@ -202,23 +204,18 @@ func (h *Handler) GenerateAIWorkDoneFromRepairLogs(c *gin.Context) {
 		return
 	}
 
-	_, err = h.service.GetWorkOrderDetail(c.Request.Context(), referenceID)
-	if errors.Is(err, ErrWorkOrderNotFound) {
+	workDone, model, err := h.generateWorkDoneText(c, settings, referenceID)
+	switch {
+	case errors.Is(err, ErrWorkOrderNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
 		return
-	}
-	if err != nil {
+	case errors.Is(err, errWorkDoneFetchWorkOrder):
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch work order"})
 		return
-	}
-	repairLogs, err := h.service.ListRepairLogs(c.Request.Context(), referenceID)
-	if err != nil {
+	case errors.Is(err, errWorkDoneFetchRepairLogs):
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch repair logs"})
 		return
-	}
-
-	workDone, model, err := h.generateOpenRouterSummaryOnce(c, settings, buildWorkDoneFromRepairLogsPrompt(settings.WorkDonePrompt, repairLogs))
-	if err != nil {
+	case err != nil:
 		log.Printf("[ai] work-done: %v", redactAIError(err.Error(), settings.OpenRouterAPIKey))
 		c.JSON(http.StatusBadGateway, gin.H{"error": redactAIError(aiErrorMessage(err), settings.OpenRouterAPIKey)})
 		return
@@ -412,7 +409,12 @@ func parseOpenRouterRetryAfter(value string, now time.Time) *time.Duration {
 }
 
 func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int) (string, string, error) {
-	ctx := c.Request.Context()
+	return h.generateOpenRouterTextCtx(c.Request.Context(), settings, systemPrompt, prompt, maxTokens)
+}
+
+// generateOpenRouterTextCtx is generateOpenRouterTextOnce on an explicit
+// context: up to len(openRouterRetryBackoffs) retries, with the fallback model.
+func (h *Handler) generateOpenRouterTextCtx(ctx context.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int) (string, string, error) {
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", "", err
@@ -453,8 +455,22 @@ func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings
 	}
 }
 
+// openRouterAttemptTimeout bounds one interactive OpenRouter request.
+const openRouterAttemptTimeout = 45 * time.Second
+
 func (h *Handler) generateOpenRouterTextAttempt(ctx context.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int) (string, string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	return h.openRouterAttempt(ctx, settings, systemPrompt, prompt, maxTokens, openRouterAttemptTimeout, true)
+}
+
+// generateOpenRouterTextSingle makes exactly one OpenRouter request: no
+// retries and no fallback model. Used for batch work (Mass Update Work Done)
+// where one slow job must not multiply the time and spend.
+func (h *Handler) generateOpenRouterTextSingle(ctx context.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int, timeout time.Duration) (string, string, error) {
+	return h.openRouterAttempt(ctx, settings, systemPrompt, prompt, maxTokens, timeout, false)
+}
+
+func (h *Handler) openRouterAttempt(ctx context.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int, timeout time.Duration, allowFallback bool) (string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	payload := openRouterChatRequest{
 		Reasoning: &openRouterReasoning{Exclude: true},
@@ -473,7 +489,7 @@ func (h *Handler) generateOpenRouterTextAttempt(ctx context.Context, settings ai
 		Temperature: 0.2,
 		MaxTokens:   maxTokens,
 	}
-	if fallback := openRouterFallbackModel(); fallback != "" && fallback != settings.OpenRouterModel {
+	if fallback := openRouterFallbackModel(); allowFallback && fallback != "" && fallback != settings.OpenRouterModel {
 		payload.Models = []string{settings.OpenRouterModel, fallback}
 	}
 
@@ -497,7 +513,7 @@ func (h *Handler) generateOpenRouterTextAttempt(ctx context.Context, settings ai
 
 	// Copy the shared client so email retains its original timeout and transport.
 	client := *h.httpClient
-	client.Timeout = 45 * time.Second
+	client.Timeout = timeout
 	res, err := client.Do(req)
 	if err != nil {
 		return "", "", err
@@ -753,9 +769,27 @@ func summarizeRepairLogs(logs []domain.RepairLog) string {
 		if details == "" {
 			details = "updated repair notes"
 		}
+		details = truncateRunes(details, repairLogDetailsMaxChars)
 		entries = append(entries, fmt.Sprintf("%s did: %s", tech, details))
 	}
-	return strings.Join(entries, " | ")
+	return truncateRunes(strings.Join(entries, " | "), repairLogsSummaryMaxChars)
+}
+
+const (
+	// repairLogDetailsMaxChars caps one repair log's Details sent to the LLM.
+	repairLogDetailsMaxChars = 3000
+	// repairLogsSummaryMaxChars caps the whole per-job repair log summary.
+	repairLogsSummaryMaxChars = 8000
+)
+
+// truncateRunes returns s cut to at most max runes; a cut string keeps
+// max-1 runes plus a trailing "…" so the result is still max runes or fewer.
+func truncateRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	return strings.TrimRightFunc(string(r[:max-1]), unicode.IsSpace) + "…"
 }
 
 func summarizePartsRequests(parts []domain.PartsPurchaseRequest) string {
