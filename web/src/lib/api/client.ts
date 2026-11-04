@@ -18,6 +18,19 @@ import type {
 } from "@/lib/api/generated/types";
 import type { WorkOrderLayout } from "@/lib/work-order-layout";
 import type { EmailPhoto } from "@/lib/email-photos";
+import type {
+  AISearchFilters,
+  AISearchInterpretResponse,
+  AISearchResponse,
+  EmailDraftResponse,
+  EmailDraftType,
+  JobSummaryResponse,
+  JobSummaryStaleResponse,
+  MassUpdateApplyResponse,
+  MassUpdateExpectedUpdatedAt,
+  MassUpdateOp,
+  MassUpdatePreviewResponse
+} from "@/lib/ai-tools/types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -632,6 +645,50 @@ export class APIClient {
   }) {
     return this.request<AISettings>("/ai-settings", {
       method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  previewAIMassUpdate(instruction: string) {
+    return this.request<MassUpdatePreviewResponse>("/ai-tools/mass-update/preview", {
+      method: "POST",
+      body: JSON.stringify({ instruction })
+    });
+  }
+
+  applyAIMassUpdate(operations: MassUpdateOp[], expectedUpdatedAt: MassUpdateExpectedUpdatedAt) {
+    return this.request<MassUpdateApplyResponse>("/ai-tools/mass-update/apply", {
+      method: "POST",
+      body: JSON.stringify({ operations, expected_updated_at: expectedUpdatedAt })
+    });
+  }
+
+  getAIStaleJobs() {
+    return this.request<JobSummaryStaleResponse>("/ai-tools/job-summary/stale");
+  }
+
+  generateAIJobSummary() {
+    return this.request<JobSummaryResponse>("/ai-tools/job-summary", { method: "POST" });
+  }
+
+  interpretAISearch(question: string) {
+    return this.request<AISearchInterpretResponse>("/ai-tools/search/interpret", {
+      method: "POST",
+      body: JSON.stringify({ question })
+    });
+  }
+
+  runAISearch(filters: AISearchFilters) {
+    return this.request<AISearchResponse>("/ai-tools/search", {
+      method: "POST",
+      body: JSON.stringify({ filters })
+    });
+  }
+
+  /** Pass work_order_ids (1..10 jobs, same customer); work_order_id is the legacy single-job form. */
+  draftAICustomerEmail(payload: { work_order_id?: number; work_order_ids?: number[]; type: EmailDraftType; notes: string }) {
+    return this.request<EmailDraftResponse>("/ai-tools/email-draft", {
+      method: "POST",
       body: JSON.stringify(payload)
     });
   }

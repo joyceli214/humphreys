@@ -14,6 +14,9 @@ import DropdownManagementPage from "@/pages/dropdown-management-page";
 import EmailTemplatesPage from "@/pages/email-templates-page";
 import AISettingsPage from "@/pages/ai-settings-page";
 import WorkOrderLayoutPage from "@/pages/work-order-layout-page";
+import AIToolsPage from "@/pages/ai-tools-page";
+import { AIToolsGuard } from "@/components/ai-tools/ai-tools-guard";
+import { AI_TOOLS_PATH } from "@/lib/ai-tools/access";
 
 function HomeRedirect() {
   const { loading, scope } = useAuth();
@@ -112,6 +115,14 @@ export default function App() {
           <ProtectedShell>
             <AISettingsPage />
           </ProtectedShell>
+        }
+      />
+      <Route
+        path={AI_TOOLS_PATH}
+        element={
+          <AIToolsGuard>
+            <AIToolsPage />
+          </AIToolsGuard>
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />

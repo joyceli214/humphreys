@@ -87,6 +87,7 @@ func main() {
 	aisettings.RegisterRoutes(authed, aiSettingsHandler)
 	emailtemplates.RegisterRoutes(authed, emailTemplatesHandler)
 	workorders.RegisterRoutes(authed, workOrdersHandler)
+	workorders.RegisterAIToolsRoutes(authed, workOrdersHandler)
 	uploads.RegisterRoutes(authed, uploadsHandler)
 	userpreferences.RegisterRoutes(authed, userPreferencesHandler)
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"humphreys/api/internal/domain"
 
@@ -38,6 +39,11 @@ type Repository interface {
 	DeletePartsPurchaseRequest(ctx context.Context, referenceID int, partsPurchaseRequestID int64, actorUserID string) error
 	PartsAuditForWorkOrder(ctx context.Context, referenceID int, partsID *int64) ([]PartsAuditEntry, error)
 	GetDashboardData(ctx context.Context, input DashboardQueryInput) (domain.DashboardData, error)
+	AIStatuses(ctx context.Context) ([]AIStatusOption, error)
+	AILocations(ctx context.Context) ([]AILocationOption, error)
+	AIStaleCandidates(ctx context.Context) ([]AIStaleCandidate, error)
+	AISearch(ctx context.Context, filters aiResolvedSearchFilters) ([]AISearchRow, int, error)
+	ApplyMassUpdateJob(ctx context.Context, referenceID int, expectedUpdatedAt *time.Time, ops []massUpdateResolvedOp, userID string) ([]string, error)
 }
 
 type storeRepository struct {
