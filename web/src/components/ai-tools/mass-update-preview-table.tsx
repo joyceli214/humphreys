@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { MassUpdatePreviewRow } from "@/lib/ai-tools/types";
+import { rowAmountLabel } from "@/lib/ai-tools/money";
 import { AIPill } from "@/components/ai-tools/ai-ui";
 
 const EMPTY = "—";
@@ -12,13 +13,43 @@ type Props = {
   disabled?: boolean;
 };
 
-/** Indexes of every row the server marked valid — the default selection. */
+/** Indexes of every row the server marked valid — what select-all can tick. */
 export function selectableRowIndexes(rows: MassUpdatePreviewRow[]): Set<number> {
   const out = new Set<number>();
   rows.forEach((row, index) => {
     if (row.valid) out.add(index);
   });
   return out;
+}
+
+/**
+ * Rows ticked when a preview first loads: valid rows, except those that would
+ * replace existing Work Done (the admin must tick those explicitly). Falls back
+ * to has_existing_work_done when the server omits default_selected.
+ */
+export function defaultSelectedRowIndexes(rows: MassUpdatePreviewRow[]): Set<number> {
+  const out = new Set<number>();
+  rows.forEach((row, index) => {
+    if (row.valid && (row.default_selected ?? !row.has_existing_work_done)) out.add(index);
+  });
+  return out;
+}
+
+const REPLACES_WORK_DONE = "Has existing Work Done; applying replaces it";
+
+/** Warning for a valid Work Done row that would overwrite existing text (and images). */
+function ExistingWorkDoneWarning({ row }: { row: MassUpdatePreviewRow }) {
+  if (!row.has_existing_work_done) return null;
+  return (
+    <div data-testid="work-done-replace-warning" className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+      <div className="font-semibold">{row.warning || REPLACES_WORK_DONE}</div>
+      {row.existing_work_done_has_images && (
+        <div data-testid="work-done-images-warning" className="mt-0.5">
+          The current Work Done contains images; they will be removed when it is replaced.
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function BeforeAfter({ before, after }: { before: string; after: string }) {
@@ -28,7 +59,7 @@ export function BeforeAfter({ before, after }: { before: string; after: string }
   if (after === EMPTY && before !== EMPTY) {
     return (
       <span>
-        <span className="text-red-700 line-through">{before}</span> <span className="text-neutral-500">→ removed</span>
+        <span className="text-red-700 line-through">{before}</span> <span className="text-neutral-500">→ Removed</span>
       </span>
     );
   }
@@ -38,6 +69,29 @@ export function BeforeAfter({ before, after }: { before: string; after: string }
       <span className="text-neutral-500"> → </span>
       <span className="font-semibold text-green-700">{after}</span>
     </span>
+  );
+}
+
+const TEXT_BLOCK = "max-h-40 overflow-y-auto whitespace-pre-wrap rounded border px-2 py-1.5 text-xs leading-relaxed";
+
+/** Generated Work Done: current and new text as readable, scrollable blocks. */
+export function WorkDoneBeforeAfter({ before, after }: { before: string; after: string }) {
+  const hasBefore = before.trim() !== "" && before !== EMPTY;
+  return (
+    <div className="grid min-w-[16rem] gap-2">
+      <div>
+        <div className="text-[11px] font-semibold text-neutral-500">Current</div>
+        <div data-testid="work-done-before" className={`${TEXT_BLOCK} border-[#efeae4] bg-[#faf8f6] text-neutral-600`}>
+          {hasBefore ? before : "No Work Done text yet."}
+        </div>
+      </div>
+      <div>
+        <div className="text-[11px] font-semibold text-green-700">Generated</div>
+        <div data-testid="work-done-after" className={`${TEXT_BLOCK} border-green-200 bg-green-50 text-neutral-800`}>
+          {after}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -78,12 +132,18 @@ export function MassUpdatePreviewTable({ rows, selected, onChange, disabled = fa
           <th className="px-3 py-2">Job</th>
           <th className="px-3 py-2">Customer</th>
           <th className="px-3 py-2">Field</th>
-          <th className="px-3 py-2">Before → After</th>
+          <th className="px-3 py-2">Current value → New value</th>
+          <th className="px-3 py-2 text-right">Amount</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row, index) => (
-          <tr key={`${row.reference_id}-${index}`} className="border-b border-[#efeae4] align-top" data-testid="preview-row">
+          <tr
+            key={`${row.reference_id}-${index}`}
+            className={`border-b border-[#efeae4] align-top ${row.valid ? "" : "bg-red-50"}`}
+            data-testid="preview-row"
+            data-error={row.valid ? undefined : "true"}
+          >
             <td className="px-3 py-2.5">
               <input
                 type="checkbox"
@@ -95,17 +155,25 @@ export function MassUpdatePreviewTable({ rows, selected, onChange, disabled = fa
               />
             </td>
             <td className="px-3 py-2.5 whitespace-nowrap">#{row.reference_id}</td>
-            <td className="px-3 py-2.5">{row.customer_name || "Unknown"}</td>
+            <td className="px-3 py-2.5">{row.customer_name || "Unknown customer"}</td>
             <td className="px-3 py-2.5">{row.field}</td>
             <td className="px-3 py-2.5">
-              {row.valid ? (
+              {row.valid && row.operation.op === "generate_work_done" ? (
+                <>
+                  <ExistingWorkDoneWarning row={row} />
+                  <WorkDoneBeforeAfter before={row.before} after={row.after} />
+                </>
+              ) : row.valid ? (
                 <span className="inline-flex flex-wrap items-center gap-2">
                   <BeforeAfter before={row.before} after={row.after} />
-                  {row.lower_than_before && <AIPill tone="amber">lower than before</AIPill>}
+                  {row.lower_than_before && <AIPill tone="amber">Lower than current value</AIPill>}
                 </span>
               ) : (
-                <span className="text-red-700">{row.error || "This change can't be applied."}</span>
+                <span className="font-medium text-red-700">{row.error || "This change cannot be applied."}</span>
               )}
+            </td>
+            <td data-testid="preview-amount" className="px-3 py-2.5 whitespace-nowrap text-right text-xs tabular-nums text-neutral-600">
+              {rowAmountLabel(row)}
             </td>
           </tr>
         ))}

@@ -123,4 +123,59 @@ describe("AdvancedSearchTab", () => {
     expect(alert).toHaveTextContent(/^AI proposed an unsupported filter field "email"$/);
     expect(within(alert).queryByText(/502/)).toBeNull();
   });
+
+  it("parses job numbers and the job ending into job_ids / job_suffix", async () => {
+    render(<AdvancedSearchTab />);
+    fireEvent.change(screen.getByLabelText("Job number(s)"), { target: { value: "31201, 31205 31201" } });
+    fireEvent.change(screen.getByLabelText("Job number ends with"), { target: { value: " 07 " } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await screen.findByText("0 jobs found");
+    expect(runAISearch).toHaveBeenCalledWith({ job_ids: [31201, 31205], job_suffix: "07", limit: 200 });
+  });
+
+  it("shows a clear error for invalid job numbers and blocks the search", () => {
+    render(<AdvancedSearchTab />);
+    fireEvent.change(screen.getByLabelText("Job number(s)"), { target: { value: "31201, abc" } });
+    expect(screen.getByText(/"abc" is not a job number/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Job number(s)")).toHaveAttribute("aria-invalid", "true");
+    const search = screen.getByRole("button", { name: "Search" });
+    expect(search).toBeDisabled();
+    fireEvent.submit(search.closest("form")!);
+    expect(runAISearch).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Job number(s)"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Job number ends with"), { target: { value: "1x" } });
+    expect(screen.getByText("Job number ending must contain digits only.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled();
+  });
+
+  it("shows job_ids from Interpret in the Job number(s) field", async () => {
+    interpretAISearch.mockResolvedValue({ filters: { job_ids: [31201, 31205] }, explanation: "Jobs 31201 and 31205.", model: "test" });
+    render(<AdvancedSearchTab />);
+    fireEvent.change(screen.getByLabelText("What are you looking for?"), { target: { value: "jobs 31201 31205" } });
+    fireEvent.click(screen.getByRole("button", { name: "Interpret" }));
+    await screen.findByText(/Jobs 31201 and 31205\./);
+    expect(screen.getByLabelText("Job number(s)")).toHaveValue("31201, 31205");
+  });
+
+  it("caps every text box at the server limit with a live counter", () => {
+    render(<AdvancedSearchTab />);
+    const question = screen.getByLabelText("What are you looking for?");
+    expect(question).toHaveAttribute("maxLength", "500");
+    expect(screen.getByText("0 / 500")).toBeInTheDocument();
+    fireEvent.change(question, { target: { value: "warranty jobs" } });
+    expect(screen.getByText("13 / 500")).toBeInTheDocument();
+
+    for (const label of ["Customer name", "Model number", "Serial number", "Brand", "Equipment", "Keyword (any field)"]) {
+      expect(screen.getByLabelText(label)).toHaveAttribute("maxLength", "200");
+    }
+    expect(screen.getAllByText("0 / 200")).toHaveLength(6);
+    fireEvent.change(screen.getByLabelText("Brand"), { target: { value: "Marantz" } });
+    expect(screen.getByText("7 / 200")).toBeInTheDocument();
+
+    expect(screen.getByLabelText("Job number ends with")).toHaveAttribute("maxLength", "10");
+    fireEvent.change(screen.getByLabelText("Job number ends with"), { target: { value: "123" } });
+    expect(screen.getByText("3 / 10")).toBeInTheDocument();
+    expect(screen.getByLabelText("Job number(s)")).toHaveAttribute("maxLength");
+  });
 });

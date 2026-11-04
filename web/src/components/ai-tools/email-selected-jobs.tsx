@@ -18,7 +18,7 @@ type Props = {
  */
 export function EmailSelectedJobs({ jobs, groups, customerKey, onCustomerChange, onRemove, disabled }: Props) {
   if (jobs.length === 0) {
-    return <p className="text-sm text-neutral-500">No jobs selected yet. Search above and press Add.</p>;
+    return <p className="text-sm text-neutral-500">No jobs selected yet. Search above and pick a job from the list.</p>;
   }
   const mixed = groups.length > 1;
 

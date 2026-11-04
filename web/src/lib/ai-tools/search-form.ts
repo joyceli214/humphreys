@@ -2,11 +2,15 @@
 // conversion to/from the API filter object (AISearchFilters).
 
 import type { AISearchFilters, AISearchGroupBy } from "@/lib/ai-tools/types";
+import { parseJobNumbers, validateJobSuffix } from "@/lib/ai-tools/job-numbers";
 
 /** "linked" = only warranty jobs, shown together with their original job. */
 export type SearchWarrantyChoice = "any" | "only" | "exclude" | "linked";
 
 export type SearchFormState = {
+  /** Raw "Job number(s)" input; parsed to job_ids. */
+  jobIds: string;
+  jobSuffix: string;
   text: string;
   customerName: string;
   model: string;
@@ -28,6 +32,8 @@ export type SearchFormState = {
 export const SEARCH_LIMIT = 200;
 
 export const EMPTY_SEARCH_FORM: SearchFormState = {
+  jobIds: "",
+  jobSuffix: "",
   text: "",
   customerName: "",
   model: "",
@@ -66,6 +72,10 @@ function positiveInt(raw: string): number {
 /** Builds the request filters, omitting empty fields. */
 export function formToFilters(form: SearchFormState): AISearchFilters {
   const filters: AISearchFilters = {};
+  const jobIds = parseJobNumbers(form.jobIds).ids;
+  if (jobIds.length > 0) filters.job_ids = jobIds;
+  const jobSuffix = form.jobSuffix.trim();
+  if (jobSuffix && !validateJobSuffix(jobSuffix)) filters.job_suffix = jobSuffix;
   const texts: Array<[keyof AISearchFilters, string]> = [
     ["text", form.text],
     ["customer_name", form.customerName],
@@ -101,6 +111,8 @@ export function filtersToForm(filters: AISearchFilters): SearchFormState {
   let warranty: SearchWarrantyChoice = filters.warranty ?? "any";
   if (filters.include_linked) warranty = "linked";
   return {
+    jobIds: (filters.job_ids ?? []).join(", "),
+    jobSuffix: filters.job_suffix ?? "",
     text: filters.text ?? "",
     customerName: filters.customer_name ?? "",
     model: filters.model ?? "",
@@ -124,4 +136,16 @@ export function extraFilterLabels(form: SearchFormState): string[] {
   if (form.minModelJobs > 0) labels.push(`models seen on at least ${form.minModelJobs} jobs`);
   if (form.minSerialJobs > 0) labels.push(`serials seen on at least ${form.minSerialJobs} jobs`);
   return labels;
+}
+
+export type SearchFormErrors = { jobIds: string; jobSuffix: string };
+
+/** Field errors that must be fixed before searching ("" when valid). */
+export function searchFormErrors(form: SearchFormState): SearchFormErrors {
+  return { jobIds: parseJobNumbers(form.jobIds).error, jobSuffix: validateJobSuffix(form.jobSuffix) };
+}
+
+export function hasSearchFormErrors(form: SearchFormState): boolean {
+  const errors = searchFormErrors(form);
+  return Boolean(errors.jobIds || errors.jobSuffix);
 }
