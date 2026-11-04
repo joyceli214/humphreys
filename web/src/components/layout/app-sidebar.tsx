@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth/auth-context";
 import { visibleNavEntries } from "@/lib/auth/authorization";
 import { AIToolsButton } from "@/components/ai-tools/ai-tools-button";
-import { canUseAITools } from "@/lib/ai-tools/access";
 
 const NAV_ICONS: Record<string, LucideIcon> = {
   "/dashboard": LayoutDashboard,
@@ -79,17 +78,13 @@ export function AppSidebar({ className, onNavigate }: { className?: string; onNa
 
   return (
     <aside className={cn("w-64 shrink-0 border-r border-border bg-white", className)}>
-      <div data-testid="sidebar-header" className="flex items-center justify-between gap-2 px-5 py-6 border-b border-border">
+      <div className="flex items-center justify-between gap-2 px-5 py-6 border-b border-border">
         <div className="min-w-0">
           <p className="text-xs uppercase tracking-wider text-muted-foreground">Admin Panel</p>
           <h1 className="text-lg font-semibold whitespace-nowrap">Control Center</h1>
         </div>
+        <AIToolsButton />
       </div>
-      {canUseAITools(scope) && (
-        <div data-testid="sidebar-management-row" className="border-b border-border px-3 py-2">
-          <AIToolsButton />
-        </div>
-      )}
       <nav className="p-3 space-y-1">
         {primaryLinks.map((link) => renderLink(link))}
         {groupedLinks.map((group) => {

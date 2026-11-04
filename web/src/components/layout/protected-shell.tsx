@@ -7,8 +7,6 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { firstReadableRoute, requiredReadPermissionForPath } from "@/lib/auth/authorization";
-import { canUseAITools } from "@/lib/ai-tools/access";
-import { ManagementPaneProvider, ManagementSplit } from "@/components/ai-tools/management-pane";
 
 export function ProtectedShell({ children }: { children: ReactNode }) {
   const { loading, user, scope, hasPermission } = useAuth();
@@ -34,18 +32,7 @@ export function ProtectedShell({ children }: { children: ReactNode }) {
     return null;
   }
 
-  const column = (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <Topbar onMenuToggle={() => setMobileMenuOpen(true)} />
-      <main className="safe-area-bottom min-w-0 overflow-x-hidden p-6">{children}</main>
-    </div>
-  );
-
-  // Owners/admins get the in-portal Management split pane: the sidebar stays
-  // left and the split is between portal content and the Management iframe.
-  const managementEnabled = canUseAITools(scope);
-
-  const layout = (
+  return (
     <div className="min-h-[100dvh] flex overflow-x-hidden bg-background">
       <AppSidebar className="hidden md:block" />
 
@@ -61,9 +48,10 @@ export function ProtectedShell({ children }: { children: ReactNode }) {
         </>
       )}
 
-      {managementEnabled ? <ManagementSplit>{column}</ManagementSplit> : column}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Topbar onMenuToggle={() => setMobileMenuOpen(true)} />
+        <main className="safe-area-bottom min-w-0 overflow-x-hidden p-6">{children}</main>
+      </div>
     </div>
   );
-
-  return managementEnabled ? <ManagementPaneProvider>{layout}</ManagementPaneProvider> : layout;
 }

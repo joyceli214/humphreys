@@ -4,7 +4,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AIToolsButton } from "@/components/ai-tools/ai-tools-button";
 import { AIToolsGuard } from "@/components/ai-tools/ai-tools-guard";
-import { ManagementPaneProvider, ManagementSplit } from "@/components/ai-tools/management-pane";
 import { AI_TOOLS_WINDOW_NAME, canUseAITools } from "@/lib/ai-tools/access";
 
 type MockAuth = { loading: boolean; user: { id: string } | null; scope: string[] };
@@ -40,11 +39,7 @@ describe("AIToolsButton", () => {
     const open = vi.spyOn(window, "open").mockReturnValue({ focus } as unknown as Window);
     render(<AIToolsButton />);
 
-    const button = screen.getByRole("button", { name: "Management" });
-    expect(button).toHaveTextContent(/^Management$/);
-    expect(button).toHaveAttribute("title", "Management");
-    expect(screen.queryByText("✦ AI")).not.toBeInTheDocument();
-    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Open AI Tools" }));
 
     expect(open).toHaveBeenCalledTimes(1);
     const [url, name, features] = open.mock.calls[0];
@@ -58,65 +53,13 @@ describe("AIToolsButton", () => {
   it("is hidden from staff", () => {
     auth.scope = STAFF_SCOPE;
     render(<AIToolsButton />);
-    expect(screen.queryByRole("button", { name: "Management" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open AI Tools" })).not.toBeInTheDocument();
   });
 
   it("is hidden when signed out", () => {
     auth = { loading: false, user: null, scope: [] };
     render(<AIToolsButton />);
-    expect(screen.queryByText("Management")).not.toBeInTheDocument();
-  });
-
-  it("has no aria-pressed outside a ManagementPaneProvider", () => {
-    render(<AIToolsButton />);
-    expect(screen.getByRole("button", { name: "Management" })).not.toHaveAttribute("aria-pressed");
-  });
-});
-
-describe("AIToolsButton inside ManagementPaneProvider", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-    Object.defineProperty(window, "innerWidth", { configurable: true, writable: true, value: 1400 });
-  });
-
-  function renderWithPane() {
-    return render(
-      <ManagementPaneProvider>
-        <AIToolsButton />
-        <ManagementSplit>
-          <p>Portal content</p>
-        </ManagementSplit>
-      </ManagementPaneProvider>
-    );
-  }
-
-  it("toggles the in-portal pane instead of opening a window", () => {
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
-    renderWithPane();
-
-    const button = screen.getByRole("button", { name: "Management" });
-    expect(button).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByTestId("management-pane")).not.toBeInTheDocument();
-
-    fireEvent.click(button);
-    expect(button).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("management-pane")).toBeInTheDocument();
-    const frame = screen.getByTestId("management-pane").querySelector("iframe");
-    expect(frame).toHaveAttribute("title", "Management");
-    expect(frame).toHaveAttribute("src", "/ai-tools");
-    expect(screen.getByText("Portal content")).toBeInTheDocument();
-
-    fireEvent.click(button);
-    expect(button).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByTestId("management-pane")).not.toBeInTheDocument();
-    expect(open).not.toHaveBeenCalled();
-  });
-
-  it("is hidden from staff", () => {
-    auth.scope = STAFF_SCOPE;
-    renderWithPane();
-    expect(screen.queryByRole("button", { name: "Management" })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("management-pane")).not.toBeInTheDocument();
+    expect(screen.queryByText("✦ AI")).not.toBeInTheDocument();
   });
 });
 

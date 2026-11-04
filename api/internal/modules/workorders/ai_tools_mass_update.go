@@ -32,32 +32,15 @@ type MassUpdatePreviewRow struct {
 	LowerThanBefore bool         `json:"lower_than_before"`
 	Valid           bool         `json:"valid"`
 	Error           string       `json:"error,omitempty"`
-	// AmountDelta is the change (in dollars, rounded to cents) this op makes to
-	// the job's total; 0 for invalid rows and non-money ops.
-	AmountDelta float64 `json:"amount_delta"`
 	// UpdatedAt is the job's work_orders.updated_at when previewed (null if the
 	// column is NULL). The client sends it back per job on apply so a job that
 	// changed since the preview is rejected instead of overwritten.
 	UpdatedAt *time.Time `json:"updated_at"`
-	// HasExistingWorkDone (generate_work_done rows) is true when the job's
-	// current Work Done is non-empty, so applying would replace it.
-	HasExistingWorkDone bool `json:"has_existing_work_done"`
-	// ExistingWorkDoneHasImages is true when that existing Work Done embeds
-	// images (applying replaces them and deletes removed managed images).
-	ExistingWorkDoneHasImages bool `json:"existing_work_done_has_images"`
-	// DefaultSelected is whether the client should check the row initially:
-	// valid rows are, except Work Done rows that would replace existing text.
-	DefaultSelected bool `json:"default_selected"`
-	// Warning is a non-blocking notice shown with the row.
-	Warning string `json:"warning,omitempty"`
 }
 
 type massUpdatePreviewResponse struct {
 	Rows  []MassUpdatePreviewRow `json:"rows"`
 	Model string                 `json:"model"`
-	// Message summarises partial failures (e.g. some Work Done generations
-	// failed or timed out); empty when everything previewed.
-	Message string `json:"message,omitempty"`
 }
 
 type massUpdateApplyRequest struct {
@@ -71,8 +54,8 @@ type massUpdateApplyRequest struct {
 var ErrMassUpdateStale = errors.New("work order changed since preview")
 
 const (
-	massUpdateStaleMessage          = "This job was changed after the preview was created. Preview again before applying."
-	massUpdateMissingVersionMessage = "This job's preview timestamp is missing. Preview again before applying."
+	massUpdateStaleMessage          = "job changed since preview; preview again before applying"
+	massUpdateMissingVersionMessage = "missing preview timestamp for this job; preview again before applying"
 )
 
 // MassUpdateApplyResult reports the outcome of one job's operations.
@@ -101,7 +84,7 @@ func (h *Handler) MassUpdatePreview(c *gin.Context) {
 	}
 	instruction := strings.TrimSpace(req.Instruction)
 	if instruction == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Describe what should change."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "describe what should change"})
 		return
 	}
 	if err := checkTextLength("instruction", instruction); err != nil {
@@ -111,34 +94,28 @@ func (h *Handler) MassUpdatePreview(c *gin.Context) {
 
 	settings, err := h.getAISettings(c)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load the AI settings."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load AI settings"})
 		return
 	}
 	if !settings.HasOpenRouterAPIKey && strings.TrimSpace(settings.OpenRouterAPIKey) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "AI is not set up yet. Add an OpenRouter API key in AI Settings."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "AI is not configured. Add an OpenRouter API key in AI Settings."})
 		return
 	}
 
 	statuses, err := h.service.repo.AIStatuses(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load the job statuses."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load statuses"})
 		return
 	}
 	locations, err := h.service.repo.AILocations(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load the locations."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load locations"})
 		return
 	}
 
-	// One deadline covers all LLM work of this preview (the instruction call
-	// and every Work Done job). DB reads below use the request context so the
-	// rows still build after the deadline.
-	llmCtx, cancel := context.WithTimeout(c.Request.Context(), massUpdatePreviewTimeout)
-	defer cancel()
-
 	systemPrompt := massUpdateSystemPrompt()
 	prompt := buildMassUpdatePrompt(instruction, statuses, locations)
-	text, model, err := h.generateOpenRouterTextCtx(llmCtx, settings, systemPrompt, prompt, 2000)
+	text, model, err := h.generateOpenRouterTextOnce(c, settings, systemPrompt, prompt, 2000)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": aiErrorMessage(err)})
 		return
@@ -150,31 +127,13 @@ func (h *Handler) MassUpdatePreview(c *gin.Context) {
 		return
 	}
 
-	// Validate caps before generating any Work Done so nothing over the cap
-	// spends LLM calls; Work Done text only ever comes from the repair logs.
-	ops := dedupeMassUpdateOps(clearLLMWorkDoneText(envelope.Operations))
-	if err := validateMassUpdateOps(ops); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "The AI's suggested changes could not be previewed: " + err.Error()})
-		return
-	}
-	var workDoneErrs map[int32]string
-	message := ""
-	if n := countWorkDoneOps(ops); n > 0 {
-		if !h.chargeWorkDoneRateLimit(c, n) {
-			return
-		}
-		workDoneErrs = h.fillGeneratedWorkDone(llmCtx, settings, ops)
-		message = workDonePreviewMessage(workDoneErrs, n, errors.Is(llmCtx.Err(), context.DeadlineExceeded))
-	}
-
-	rows, _, err := h.buildMassUpdateRows(c.Request.Context(), ops, statuses, locations)
+	rows, _, err := h.buildMassUpdateRows(c.Request.Context(), envelope.Operations, statuses, locations)
 	if err != nil {
 		// Over a cap: reject rather than silently dropping jobs the admin asked about.
-		c.JSON(http.StatusBadRequest, gin.H{"error": "The AI's suggested changes could not be previewed: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "AI proposed " + err.Error()})
 		return
 	}
-	applyWorkDoneGenErrors(rows, workDoneErrs)
-	c.JSON(http.StatusOK, massUpdatePreviewResponse{Rows: rows, Model: model, Message: message})
+	c.JSON(http.StatusOK, massUpdatePreviewResponse{Rows: rows, Model: model})
 }
 
 // MassUpdateApply re-validates every operation server-side (it never trusts the
@@ -183,7 +142,7 @@ func (h *Handler) MassUpdatePreview(c *gin.Context) {
 func (h *Handler) MassUpdateApply(c *gin.Context) {
 	userID := aiToolsActor(c)
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "You are not signed in."})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
 		return
 	}
 
@@ -192,18 +151,18 @@ func (h *Handler) MassUpdateApply(c *gin.Context) {
 		return
 	}
 	if len(req.Operations) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "There are no changes to apply."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no changes to apply"})
 		return
 	}
 
 	statuses, err := h.service.repo.AIStatuses(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load the job statuses."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load statuses"})
 		return
 	}
 	locations, err := h.service.repo.AILocations(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load the locations."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load locations"})
 		return
 	}
 
@@ -241,28 +200,13 @@ func (h *Handler) MassUpdateApply(c *gin.Context) {
 		}
 		ops := resolvedByJob[ref]
 		if len(ops) == 0 {
-			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: "This job has no valid changes to apply."})
-			continue
-		}
-		// Work Done text gets the same image handling as UpdateWorkNotes, and
-		// images from other jobs are rejected (see prepareWorkDoneForApply).
-		store := h.workDoneImages()
-		ops, previousWorkDone, finalWorkDone, hasWorkDone, prepErr := prepareWorkDoneOps(c.Request.Context(), store, int(ref), userID, ops)
-		if prepErr != nil {
-			msg := "The Work Done images could not be processed."
-			if errors.Is(prepErr, errWorkDoneForeignImage) {
-				msg = workDoneForeignImageMessage
-			}
-			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: msg})
+			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: "no valid changes"})
 			continue
 		}
 		applied, applyErr := h.service.repo.ApplyMassUpdateJob(c.Request.Context(), int(ref), expected, ops, userID)
 		if applyErr != nil {
 			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: applyErrorMessage(applyErr)})
 			continue
-		}
-		if hasWorkDone && store != nil {
-			store.DeleteRemovedManagedImages(c.Request.Context(), previousWorkDone, finalWorkDone)
 		}
 		results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: true, Applied: applied})
 	}
@@ -277,13 +221,13 @@ func applyErrorMessage(err error) string {
 	case errors.Is(err, ErrInvalidLabourDiscount):
 		return err.Error()
 	case errors.Is(err, ErrWorkOrderNotFound):
-		return "Job not found."
+		return "job not found"
 	case errors.Is(err, ErrLineItemNotFound):
-		return "Line item not found."
+		return "line item not found"
 	case errors.Is(err, ErrLocationNotFound):
-		return "Location not found."
+		return "location not found"
 	default:
-		return "The changes could not be applied."
+		return "failed to apply changes"
 	}
 }
 
@@ -340,7 +284,7 @@ func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, s
 		detail := loadDetail(op.ReferenceID)
 		if detail == nil {
 			row.Field = massOpField(op.Op)
-			row.Error = fmt.Sprintf("Job #%d was not found.", op.ReferenceID)
+			row.Error = fmt.Sprintf("job #%d not found", op.ReferenceID)
 			rows = append(rows, row)
 			continue
 		}
@@ -353,7 +297,6 @@ func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, s
 		}
 		resolved, ok := applyOpToRow(&row, op, detail, statusByName, locationByName, overrideLabour)
 		row.Valid = ok
-		row.DefaultSelected = ok && !row.HasExistingWorkDone
 		rows = append(rows, row)
 		if ok {
 			resolvedByJob[op.ReferenceID] = append(resolvedByJob[op.ReferenceID], resolved)
@@ -403,7 +346,6 @@ func massUpdateOpKey(op MassUpdateOp) string {
 		strings.ToLower(strings.TrimSpace(op.Op)),
 		f(op.LabourTotal), s(op.DiscountType), f(op.DiscountValue), i(op.LineItemID),
 		f(op.UnitPrice), s(op.ItemName), s(op.QuantityText), s(op.StatusName), s(op.LocationName),
-		s(op.WorkDoneText),
 	}, "\x1f")
 }
 
@@ -423,8 +365,6 @@ func massOpField(op string) string {
 		return "Status"
 	case massOpSetLocation:
 		return "Location"
-	case massOpGenerateWorkDone:
-		return "Work done"
 	default:
 		return "Change"
 	}
@@ -439,25 +379,24 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 	switch op.Op {
 	case massOpSetLabourTotal:
 		if op.LabourTotal == nil || !isFiniteNonNegative(*op.LabourTotal) {
-			row.Error = "Labour total must be zero or more."
+			row.Error = "labour total must be zero or greater"
 			return resolved, false
 		}
 		current := float64Value(detail.LabourTotal)
 		row.Before = aiMoney(current)
 		row.After = aiMoney(*op.LabourTotal)
 		row.LowerThanBefore = *op.LabourTotal < current
-		row.AmountDelta = labourTotalDelta(current, *op.LabourTotal)
 		resolved.LabourTotal = op.LabourTotal
 		return resolved, true
 
 	case massOpSetLabourDiscount:
 		kind := strings.TrimSpace(strings.ToLower(stringValue(op.DiscountType)))
 		if kind != "percent" && kind != "amount" {
-			row.Error = `Discount type must be "percent" or "amount".`
+			row.Error = "discount type must be percent or amount"
 			return resolved, false
 		}
 		if op.DiscountValue == nil {
-			row.Error = "A discount value is required."
+			row.Error = "discount value is required"
 			return resolved, false
 		}
 		labour := detail.LabourTotal
@@ -470,30 +409,28 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 		}
 		row.Before = describeDiscount(detail.LabourDiscountType, detail.LabourDiscountValue)
 		row.After = describeDiscount(&kind, op.DiscountValue)
-		row.AmountDelta = labourDiscountDelta(detail, kind, *op.DiscountValue, float64Value(labour))
 		resolved.DiscountType = &kind
 		resolved.DiscountValue = op.DiscountValue
 		return resolved, true
 
 	case massOpSetLineItemPrice:
 		if op.LineItemID == nil || *op.LineItemID <= 0 {
-			row.Error = "A line item ID is required."
+			row.Error = "line_item_id is required"
 			return resolved, false
 		}
 		if op.UnitPrice == nil || !isFiniteNonNegative(*op.UnitPrice) {
-			row.Error = "Price must be zero or more."
+			row.Error = "price must be zero or greater"
 			return resolved, false
 		}
 		line, found := findLineItem(detail, *op.LineItemID)
 		if !found {
-			row.Error = fmt.Sprintf("Line item #%d was not found on this job.", *op.LineItemID)
+			row.Error = fmt.Sprintf("line item #%d not found on job", *op.LineItemID)
 			return resolved, false
 		}
 		row.Field = fmt.Sprintf("Line item %q price", stringValueOrDefault(line.ItemName, "item"))
 		row.Before = aiMoney(float64Value(line.UnitPrice))
 		row.After = aiMoney(*op.UnitPrice)
 		row.LowerThanBefore = *op.UnitPrice < float64Value(line.UnitPrice)
-		row.AmountDelta = lineItemPriceDelta(line, *op.UnitPrice)
 		resolved.LineItemID = op.LineItemID
 		resolved.UnitPrice = op.UnitPrice
 		return resolved, true
@@ -501,11 +438,11 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 	case massOpAddLineItem:
 		name := strings.TrimSpace(stringValue(op.ItemName))
 		if name == "" {
-			row.Error = "An item name is required."
+			row.Error = "item name is required"
 			return resolved, false
 		}
 		if op.UnitPrice != nil && !isFiniteNonNegative(*op.UnitPrice) {
-			row.Error = "Price must be zero or more."
+			row.Error = "price must be zero or greater"
 			return resolved, false
 		}
 		row.Before = "—"
@@ -514,7 +451,6 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 		} else {
 			row.After = name
 		}
-		row.AmountDelta = addLineItemDelta(op.UnitPrice, op.QuantityText)
 		resolved.ItemName = &name
 		resolved.UnitPrice = op.UnitPrice
 		resolved.QuantityText = op.QuantityText
@@ -522,29 +458,28 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 
 	case massOpRemoveLineItem:
 		if op.LineItemID == nil || *op.LineItemID <= 0 {
-			row.Error = "A line item ID is required."
+			row.Error = "line_item_id is required"
 			return resolved, false
 		}
 		line, found := findLineItem(detail, *op.LineItemID)
 		if !found {
-			row.Error = fmt.Sprintf("Line item #%d was not found on this job.", *op.LineItemID)
+			row.Error = fmt.Sprintf("line item #%d not found on job", *op.LineItemID)
 			return resolved, false
 		}
 		row.Before = fmt.Sprintf("%s @ %s", stringValueOrDefault(line.ItemName, "item"), aiMoney(float64Value(line.UnitPrice)))
 		row.After = "—"
-		row.AmountDelta = removeLineItemDelta(line)
 		resolved.LineItemID = op.LineItemID
 		return resolved, true
 
 	case massOpSetStatus:
 		name := strings.TrimSpace(stringValue(op.StatusName))
 		if name == "" {
-			row.Error = "A status name is required."
+			row.Error = "status name is required"
 			return resolved, false
 		}
 		match, ok := statusByName[normalizeLookupName(name)]
 		if !ok {
-			row.Error = fmt.Sprintf("Unknown status %q.", name)
+			row.Error = fmt.Sprintf("unknown status %q", name)
 			return resolved, false
 		}
 		row.Before = stringValueOrDefault(detail.StatusName, "—")
@@ -556,7 +491,7 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 	case massOpSetLocation:
 		name := strings.TrimSpace(stringValue(op.LocationName))
 		if name == "" {
-			row.Error = "A location name is required."
+			row.Error = "location name is required"
 			return resolved, false
 		}
 		match, errMsg := locationByName.resolve(name)
@@ -570,11 +505,8 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 		resolved.LocationID = &id
 		return resolved, true
 
-	case massOpGenerateWorkDone:
-		return applyWorkDoneOpToRow(row, op, detail, resolved)
-
 	default:
-		row.Error = fmt.Sprintf("Unsupported change type %q.", op.Op)
+		row.Error = fmt.Sprintf("unsupported operation %q", op.Op)
 		return resolved, false
 	}
 }
@@ -611,7 +543,7 @@ func (lk locationLookup) resolve(name string) (AILocationOption, string) {
 	candidates := lk.byShelf[key]
 	switch len(candidates) {
 	case 0:
-		return AILocationOption{}, fmt.Sprintf("Unknown location %q.", name)
+		return AILocationOption{}, fmt.Sprintf("unknown location %q", name)
 	case 1:
 		return candidates[0], ""
 	default:
@@ -619,7 +551,7 @@ func (lk locationLookup) resolve(name string) (AILocationOption, string) {
 		for i, c := range candidates {
 			labels[i] = c.Label()
 		}
-		return AILocationOption{}, fmt.Sprintf("Location %q is ambiguous. Specify one of: %s.", name, strings.Join(labels, ", "))
+		return AILocationOption{}, fmt.Sprintf("ambiguous location %q: specify one of %s", name, strings.Join(labels, ", "))
 	}
 }
 
@@ -701,10 +633,7 @@ func buildMassUpdatePrompt(instruction string, statuses []AIStatusOption, locati
 	b.WriteString("- remove_line_item: line_item_id (number)\n")
 	b.WriteString("- set_status: status_name (string, must match a status below)\n")
 	b.WriteString("- set_location: location_name (string, the full \"<shelf>-<floor>\" label exactly as listed below)\n")
-	b.WriteString("- generate_work_done: no extra fields (the server writes the Work Done text from the job's repair logs; use when asked to generate/write Work Done)\n")
 	b.WriteString("\nEvery operation MUST include reference_id (the job number) and op.\n")
-	b.WriteString("Example: \"generate work done for jobs 90001 and 90002\" -> " +
-		`{"operations":[{"reference_id":90001,"op":"generate_work_done"},{"reference_id":90002,"op":"generate_work_done"}]}` + "\n")
 
 	b.WriteString("\nValid status names:\n")
 	for _, s := range statuses {
@@ -718,6 +647,5 @@ func buildMassUpdatePrompt(instruction string, statuses []AIStatusOption, locati
 		b.WriteString(l.Label())
 		b.WriteString("\n")
 	}
-	writeCatalogPromptSection(&b)
 	return b.String()
 }

@@ -19,14 +19,14 @@ export default function AIToolsPage() {
   const [tab, setTab] = useState<TabKey>("mass-update");
 
   useEffect(() => {
-    document.title = "Management";
+    document.title = "✦ AI Tools";
   }, []);
 
   return (
     <div className="min-h-[100dvh] bg-[#faf7f4] text-neutral-800">
       <div className="mx-auto max-w-5xl px-7 py-6">
         <header>
-          <h1 className="text-xl font-semibold">Management</h1>
+          <h1 className="text-xl font-semibold">✦ AI Tools</h1>
           <p className="mt-0.5 text-sm text-neutral-500">Admin and owner only. The AI proposes, you approve.</p>
         </header>
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // Advanced Search: the admin types a plain-English question, the LLM turns it
@@ -39,8 +38,6 @@ const aiWarrantyPredicate = `wo.original_job_id IS NOT NULL OR LOWER(COALESCE(jt
 // LLM must emit, the shape returned by /search/interpret, and the shape
 // accepted by /search. Unknown fields are rejected wherever it is decoded.
 type AISearchFilters struct {
-	JobIDs        []int    `json:"job_ids,omitempty"`         // exact job numbers (reference_id), max 50
-	JobSuffix     string   `json:"job_suffix,omitempty"`      // job number ends with these digits
 	Text          string   `json:"text,omitempty"`            // job #, customer name, equipment, brand, model, serial
 	CustomerName  string   `json:"customer_name,omitempty"`   // customer display name (contains)
 	Model         string   `json:"model,omitempty"`           // model number (contains)
@@ -62,7 +59,7 @@ type AISearchFilters struct {
 
 // aiSearchFilterFields is the whitelist of JSON keys allowed in a filter object.
 var aiSearchFilterFields = map[string]bool{
-	"job_ids": true, "job_suffix": true, "text": true, "customer_name": true, "model": true, "serial": true, "brand": true,
+	"text": true, "customer_name": true, "model": true, "serial": true, "brand": true,
 	"equipment": true, "statuses": true, "warranty": true, "include_linked": true,
 	"min_units": true, "min_model_jobs": true, "min_serial_jobs": true,
 	"created_from": true, "created_to": true, "group_by": true, "limit": true, "offset": true,
@@ -71,8 +68,6 @@ var aiSearchFilterFields = map[string]bool{
 // aiResolvedSearchFilters is a validated, normalized filter set with status
 // names resolved to ids. Only this type reaches the SQL builder.
 type aiResolvedSearchFilters struct {
-	JobIDs        []int32
-	JobSuffix     string
 	Text          string
 	CustomerName  string
 	Model         string
@@ -125,7 +120,7 @@ type AISearchGroup struct {
 // cleanSearchText trims and collapses whitespace and enforces a length cap.
 func cleanSearchText(field, raw string) (string, error) {
 	s := strings.Join(strings.Fields(raw), " ")
-	if utf8.RuneCountInString(s) > aiSearchMaxText {
+	if len(s) > aiSearchMaxText {
 		return "", fmt.Errorf("%s is too long (max %d characters)", field, aiSearchMaxText)
 	}
 	return s, nil
@@ -154,12 +149,6 @@ func validMinCount(field string, v int) error {
 func normalizeSearchFilters(in AISearchFilters, statuses []AIStatusOption) (aiResolvedSearchFilters, error) {
 	var out aiResolvedSearchFilters
 	var err error
-	if out.JobIDs, err = cleanJobIDs(in.JobIDs, nil); err != nil {
-		return out, err
-	}
-	if out.JobSuffix, err = cleanJobSuffix(in.JobSuffix); err != nil {
-		return out, err
-	}
 	texts := []struct {
 		field string
 		src   string
@@ -265,7 +254,6 @@ func normalizeSearchFilters(in AISearchFilters, statuses []AIStatusOption) (aiRe
 // status names, defaults filled in) so the UI can show exactly what ran.
 func (f aiResolvedSearchFilters) toFilters() AISearchFilters {
 	return AISearchFilters{
-		JobIDs: jobIDsToInts(f.JobIDs), JobSuffix: f.JobSuffix,
 		Text: f.Text, CustomerName: f.CustomerName, Model: f.Model, Serial: f.Serial,
 		Brand: f.Brand, Equipment: f.Equipment, Statuses: f.StatusNames, Warranty: f.Warranty,
 		IncludeLinked: f.IncludeLinked, MinUnits: f.MinUnits, MinModelJobs: f.MinModelJobs,

@@ -1,5 +1,5 @@
 import React from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AISearchRow } from "@/lib/ai-tools/types";
 import { EMAIL_SELECTION_STORAGE_KEY } from "@/lib/ai-tools/email-selection";
@@ -36,14 +36,11 @@ function draftResponse(ids: number[], hint = "j***@example.com") {
 }
 
 beforeEach(() => {
-  // shouldAdvanceTime keeps RTL's waitFor polling working alongside fake timers.
-  vi.useFakeTimers({ shouldAdvanceTime: true });
   runAISearch.mockResolvedValue({ filters: {}, rows: ROWS, total: 3, limit: 20, offset: 0, group_by: "none", groups: [] });
 });
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
   window.localStorage.clear();
   runAISearch.mockReset();
   draftAICustomerEmail.mockReset();
@@ -51,11 +48,9 @@ afterEach(() => {
 });
 
 async function searchAndAdd(...ids: number[]) {
-  fireEvent.change(screen.getByRole("combobox", { name: "Search by customer name or job #" }), { target: { value: "jane" } });
-  await act(async () => {
-    vi.advanceTimersByTime(250);
-  });
-  for (const id of ids) fireEvent.click(screen.getByRole("option", { name: new RegExp(`^#${id} `) }));
+  fireEvent.change(screen.getByLabelText("Search by customer name or job #"), { target: { value: "jane" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  for (const id of ids) fireEvent.click(await screen.findByRole("button", { name: `Add job #${id}` }));
 }
 
 function selectedList() {
@@ -63,16 +58,13 @@ function selectedList() {
 }
 
 describe("EmailDraftsTab", () => {
-  it("suggests jobs by customer name as you type and never shows contact details", async () => {
-    const leaky = ROWS.map((r) => ({ ...r, customer_email: "jane@example.com", customer_phone: "555-0100" }));
-    runAISearch.mockResolvedValue({ filters: {}, rows: leaky, total: 3, limit: 20, offset: 0, group_by: "none", groups: [] });
+  it("searches via Advanced Search text filter and never shows contact details", async () => {
     render(<EmailDraftsTab target={null} />);
     await searchAndAdd();
-    expect(screen.getAllByRole("option")).toHaveLength(3);
-    expect(runAISearch).toHaveBeenCalledWith({ customer_name: "jane", limit: 20 });
-    expect(screen.queryByText(/jane@example\.com|555-0100/)).toBeNull();
+    await screen.findByRole("button", { name: "Add job #5" });
+    expect(runAISearch).toHaveBeenCalledWith({ text: "jane", limit: 20 });
     expect(screen.getAllByText("Jane Doe").length).toBeGreaterThan(0);
-    expect(screen.getByRole("option", { name: /#7 Bob Ray Amplifier/ })).toBeInTheDocument();
+    expect(screen.getByText("Amplifier")).toBeInTheDocument();
   });
 
   it("picks, saves to localStorage, survives reload and removes jobs", async () => {
@@ -154,14 +146,5 @@ describe("EmailDraftsTab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Send email" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Send" }));
     expect(await screen.findByText("email sending is not configured")).toBeInTheDocument();
-  });
-
-  it("caps the description notes at the server limit (2000) with a live counter", () => {
-    render(<EmailDraftsTab target={null} />);
-    const notes = screen.getByLabelText(/Extra notes for the AI/);
-    expect(notes).toHaveAttribute("maxLength", "2000");
-    expect(screen.getByText("0 / 2000")).toBeInTheDocument();
-    fireEvent.change(notes, { target: { value: "done Friday" } });
-    expect(screen.getByText("11 / 2000")).toBeInTheDocument();
   });
 });

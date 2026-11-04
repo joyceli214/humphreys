@@ -5,13 +5,10 @@ import {
   GROUP_BY_CHOICES,
   WARRANTY_CHOICES,
   extraFilterLabels,
-  searchFormErrors,
   type SearchFormState,
   type SearchWarrantyChoice
 } from "@/lib/ai-tools/search-form";
-import { SEARCH_JOB_IDS_INPUT_MAX, SEARCH_JOB_SUFFIX_MAX, SEARCH_TEXT_MAX } from "@/lib/ai-tools/limits";
 import { AIButton, AICard, AICardTitle } from "@/components/ai-tools/ai-ui";
-import { CharCounterInput } from "@/components/ai-tools/char-counter-input";
 import { SearchStatusPicker } from "@/components/ai-tools/search-status-picker";
 
 const INPUT_CLASS =
@@ -26,45 +23,25 @@ type Props = {
   disabled?: boolean;
 };
 
-function Field({ id, label, error, children }: { id: string; label: string; error?: string; children: ReactNode }) {
+function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return (
     <div>
       <label htmlFor={id} className="mb-1 block text-xs font-medium text-neutral-600">
         {label}
       </label>
       {children}
-      {error && (
-        <p id={`${id}-error`} className="mt-0.5 text-xs text-red-700">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
-
-type TextKey = "jobIds" | "jobSuffix" | "text" | "customerName" | "model" | "serial" | "brand" | "equipment";
 
 export function SearchFiltersCard({ form, onChange, statusOptions, onSearch, searching, disabled }: Props) {
   const off = searching || disabled;
   const set = <K extends keyof SearchFormState>(key: K, value: SearchFormState[K]) => onChange({ ...form, [key]: value });
   const extras = extraFilterLabels(form);
-  const errors = searchFormErrors(form);
-  const invalid = Boolean(errors.jobIds || errors.jobSuffix);
 
-  const text = (id: string, label: string, key: TextKey, limit = SEARCH_TEXT_MAX, error = "", placeholder?: string) => (
-    <Field id={id} label={label} error={error}>
-      <CharCounterInput
-        id={id}
-        limit={limit}
-        className={INPUT_CLASS}
-        value={form[key]}
-        disabled={off}
-        placeholder={placeholder}
-        inputMode={key === "jobSuffix" ? "numeric" : undefined}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : undefined}
-        onValueChange={(v) => set(key, v)}
-      />
+  const text = (id: string, label: string, key: "text" | "customerName" | "model" | "serial" | "brand" | "equipment") => (
+    <Field id={id} label={label}>
+      <input id={id} className={INPUT_CLASS} value={form[key]} disabled={off} onChange={(e) => set(key, e.target.value)} />
     </Field>
   );
 
@@ -73,19 +50,17 @@ export function SearchFiltersCard({ form, onChange, statusOptions, onSearch, sea
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!invalid) onSearch();
+          onSearch();
         }}
       >
         <AICardTitle>Adjustable filters</AICardTitle>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {text("ai-search-job-ids", "Job number(s)", "jobIds", SEARCH_JOB_IDS_INPUT_MAX, errors.jobIds, "e.g. 31201, 31205")}
-          {text("ai-search-job-suffix", "Job number ends with", "jobSuffix", SEARCH_JOB_SUFFIX_MAX, errors.jobSuffix, "e.g. 07")}
-          {text("ai-search-text", "Keyword (any field)", "text")}
           {text("ai-search-customer", "Customer name", "customerName")}
           {text("ai-search-model", "Model number", "model")}
           {text("ai-search-serial", "Serial number", "serial")}
           {text("ai-search-brand", "Brand", "brand")}
           {text("ai-search-equipment", "Equipment", "equipment")}
+          {text("ai-search-text", "Keyword (job #, any field)", "text")}
         </div>
 
         <div className="mt-3">
@@ -174,7 +149,7 @@ export function SearchFiltersCard({ form, onChange, statusOptions, onSearch, sea
         )}
 
         <div className="mt-4 flex items-center gap-2">
-          <AIButton type="submit" disabled={off || invalid}>
+          <AIButton type="submit" disabled={off}>
             {searching ? "Searching..." : "Search"}
           </AIButton>
           <AIButton variant="outline" disabled={off} onClick={() => onChange(EMPTY_SEARCH_FORM)}>

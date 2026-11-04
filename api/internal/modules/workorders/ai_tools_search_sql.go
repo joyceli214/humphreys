@@ -61,14 +61,6 @@ func buildAISearchSQL(f aiResolvedSearchFilters) (string, []any) {
 	a := &sqlArgs{}
 	clauses := make([]string, 0)
 
-	if len(f.JobIDs) > 0 {
-		clauses = append(clauses, "wo.reference_id = ANY("+a.add(f.JobIDs)+"::int[])")
-	}
-	if f.JobSuffix != "" {
-		// Digits only (validated), so no LIKE escaping is needed.
-		clauses = append(clauses, "wo.reference_id::text LIKE '%' || "+a.add(f.JobSuffix))
-	}
-
 	if f.Text != "" {
 		p := a.add(likeContains(f.Text))
 		clauses = append(clauses, "("+strings.Join([]string{

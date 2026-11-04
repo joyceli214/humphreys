@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api/client";
 import type { AISearchResponse } from "@/lib/ai-tools/types";
-import { EMPTY_SEARCH_FORM, filtersToForm, formToFilters, hasSearchFormErrors, type SearchFormState } from "@/lib/ai-tools/search-form";
+import { EMPTY_SEARCH_FORM, filtersToForm, formToFilters, type SearchFormState } from "@/lib/ai-tools/search-form";
 import { AIErrorBox, errorMessage } from "@/components/ai-tools/ai-ui";
 import { SearchQuestionCard } from "@/components/ai-tools/search-question-card";
 import { SearchFiltersCard } from "@/components/ai-tools/search-filters-card";
@@ -50,7 +50,6 @@ export function AdvancedSearchTab() {
   };
 
   const search = async () => {
-    if (hasSearchFormErrors(form)) return;
     setSearching(true);
     setError("");
     try {
