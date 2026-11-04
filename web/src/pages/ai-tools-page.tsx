@@ -1,0 +1,76 @@
+import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
+import { MassUpdateTab } from "@/components/ai-tools/mass-update-tab";
+import { AdvancedSearchTab } from "@/components/ai-tools/advanced-search-tab";
+import { EmailDraftsTab } from "@/components/ai-tools/email-drafts-tab";
+
+// The former "Job Summary" tab (components/ai-tools/job-summary-tab.tsx) is
+// intentionally kept in the repo, unused, for reuse on the dashboard later.
+
+type TabKey = "mass-update" | "advanced-search" | "email-drafts";
+
+const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: "mass-update", label: "Mass Update" },
+  { key: "advanced-search", label: "Advanced Search" },
+  { key: "email-drafts", label: "Customer Email Drafts" }
+];
+
+export default function AIToolsPage() {
+  const [tab, setTab] = useState<TabKey>("mass-update");
+
+  useEffect(() => {
+    document.title = "✦ AI Tools";
+  }, []);
+
+  return (
+    <div className="min-h-[100dvh] bg-[#faf7f4] text-neutral-800">
+      <div className="mx-auto max-w-5xl px-7 py-6">
+        <header>
+          <h1 className="text-xl font-semibold">✦ AI Tools</h1>
+          <p className="mt-0.5 text-sm text-neutral-500">Admin and owner only. The AI proposes, you approve.</p>
+        </header>
+
+        <div role="tablist" aria-label="AI tools" className="mt-4 flex gap-1 border-b border-[#e0d9d1]">
+          {TABS.map((entry) => {
+            const active = entry.key === tab;
+            return (
+              <button
+                key={entry.key}
+                type="button"
+                role="tab"
+                id={`ai-tab-${entry.key}`}
+                aria-selected={active}
+                aria-controls={`ai-panel-${entry.key}`}
+                onClick={() => setTab(entry.key)}
+                className={cn(
+                  "-mb-px border-b-2 px-3.5 py-2 text-sm",
+                  active ? "border-[#c2571a] font-semibold text-neutral-900" : "border-transparent text-neutral-500 hover:text-neutral-800"
+                )}
+              >
+                {entry.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Panels stay mounted so switching tabs keeps in-progress work. */}
+        <div className="mt-4">
+          <section role="tabpanel" id="ai-panel-mass-update" aria-labelledby="ai-tab-mass-update" hidden={tab !== "mass-update"}>
+            <MassUpdateTab />
+          </section>
+          <section
+            role="tabpanel"
+            id="ai-panel-advanced-search"
+            aria-labelledby="ai-tab-advanced-search"
+            hidden={tab !== "advanced-search"}
+          >
+            <AdvancedSearchTab />
+          </section>
+          <section role="tabpanel" id="ai-panel-email-drafts" aria-labelledby="ai-tab-email-drafts" hidden={tab !== "email-drafts"}>
+            <EmailDraftsTab target={null} />
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}

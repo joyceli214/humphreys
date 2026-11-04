@@ -38,3 +38,11 @@
 - `POST /work-orders/:reference_id/parts-purchase-requests` -> `parts_purchase_requests:create`
 - `PATCH /work-orders/:reference_id/parts-purchase-requests/:parts_purchase_request_id` -> `parts_purchase_requests:update`
 - `DELETE /work-orders/:reference_id/parts-purchase-requests/:parts_purchase_request_id` -> `parts_purchase_requests:delete`
+
+- `POST /ai-tools/mass-update/preview` -> `work_orders:update` (owner/admin; LLM proposes, nothing written)
+- `POST /ai-tools/mass-update/apply` -> `work_orders:update` (owner/admin; re-validates every op server-side)
+- `POST /ai-tools/search/interpret` -> `work_orders:update` (owner/admin; LLM sees only the question + status names, returns validated filters, never executes)
+- `POST /ai-tools/search` -> `work_orders:update` (owner/admin; whitelisted filters, parameterized SQL, customer name only, no email/phone)
+- `GET /ai-tools/job-summary/stale` -> `work_orders:update` (owner/admin; customer name only, no email/phone; not shown in AI Tools UI, kept for dashboard reuse)
+- `POST /ai-tools/job-summary` -> `work_orders:update` (owner/admin; customer name only, no email/phone; not shown in AI Tools UI, kept for dashboard reuse)
+- `POST /ai-tools/email-draft` -> `work_orders:update` (owner/admin; drafts only, never sends). Accepts `work_order_id` (legacy) or `work_order_ids` (1..10 jobs, same customer; mixed customers -> 400). Returns only a masked `recipient_hint` (e.g. `j***@gmail.com`) and `has_recipient_email`, never the full address. The AI Tools tab sends through `POST /work-orders/:reference_id/customer-email` with an empty `to`, so the recipient is looked up from the customer record server-side.

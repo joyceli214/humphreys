@@ -35,6 +35,7 @@ import { DEFAULT_EMAIL_TEMPLATES, renderEmailTemplate, type CustomerEmailTemplat
 import { emailHtmlToPlainText, emailTextToHtml, finalizeEmailHtml, sanitizeEmailHtml } from "@/lib/email-html";
 import { DEFAULT_EMAIL_PHOTO_LIMITS, extractPhotoUrls, summarizePhotoSelection, type EmailPhoto, type EmailPhotoLimits } from "@/lib/email-photos";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { AI_EMAIL_DRAFT_QUERY_PARAM, takeAIEmailDraft, type AIEmailDraftHandoff } from "@/lib/ai-tools/email-handoff";
 import { EmailPhotoPanel } from "@/components/email-photo-panel";
 import "@mdxeditor/editor/style.css";
 import { workNotesEditorContentClassName, workNotesEditorPlugins } from "@/components/work-notes-editor-config";
@@ -125,6 +126,15 @@ function buildCustomerEmailDraft(item: WorkOrderDetail, template: CustomerEmailT
     to: item.customer.email ?? "",
     subject: rendered.subject,
     bodyHtml: sanitizeEmailHtml(emailTextToHtml(rendered.body))
+  };
+}
+
+function customerEmailDraftFromAI(item: WorkOrderDetail, aiDraft: AIEmailDraftHandoff): CustomerEmailDraft {
+  return {
+    template: aiDraft.template,
+    to: item.customer.email ?? "",
+    subject: aiDraft.subject,
+    bodyHtml: sanitizeEmailHtml(emailTextToHtml(aiDraft.body))
   };
 }
 
@@ -411,6 +421,7 @@ export default function WorkOrderDetailPage() {
   const [emailPhotoLimits, setEmailPhotoLimits] = useState<EmailPhotoLimits>(DEFAULT_EMAIL_PHOTO_LIMITS);
   const [selectedEmailPhotoIds, setSelectedEmailPhotoIds] = useState<string[]>([]);
   const emailPhotoRequestRef = useRef(0);
+  const loadEmailPhotosRef = useRef<(() => Promise<void>) | null>(null);
   const wideEmailLayout = useMediaQuery("(min-width: 900px)");
   const [completingJob, setCompletingJob] = useState(false);
   const [pickupStatusDialogOpen, setPickupStatusDialogOpen] = useState(false);
@@ -721,6 +732,23 @@ export default function WorkOrderDetailPage() {
     if (aiSummaryLoadedReference === item.reference_id) return;
     void generateAISummary();
   }, [item, canViewSensitive, aiSummaryLoadedReference, generateAISummary]);
+
+  // Arriving from the AI Tools window (?ai_email=1): open the Email Customer
+  // dialog with the AI draft prefilled. The draft is consumed once.
+  useEffect(() => {
+    if (!item || !canViewSensitive) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get(AI_EMAIL_DRAFT_QUERY_PARAM) !== "1") return;
+    params.delete(AI_EMAIL_DRAFT_QUERY_PARAM);
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : "" }, { replace: true });
+    const aiDraft = takeAIEmailDraft(item.reference_id);
+    if (!aiDraft) return;
+    setSelectedEmailPhotoIds([]);
+    void loadEmailPhotosRef.current?.();
+    setCustomerEmailDraft(customerEmailDraftFromAI(item, aiDraft));
+    setCustomerEmailDialogOpen(true);
+  }, [item, canViewSensitive, location.pathname, location.search, navigate]);
 
   if (!hasPermission("work_orders:read")) {
     return null;
@@ -1168,11 +1196,20 @@ export default function WorkOrderDetailPage() {
       if (requestId === emailPhotoRequestRef.current) setEmailPhotosLoading(false);
     }
   };
+  loadEmailPhotosRef.current = loadEmailPhotos;
 
   const openCustomerEmailPreview = async (template: CustomerEmailTemplate) => {
     setOpeningCustomerEmail(template);
     setSelectedEmailPhotoIds([]);
     void loadEmailPhotos();
+    // A draft handed over from the AI Tools window takes precedence over the template.
+    const aiDraft = takeAIEmailDraft(item.reference_id);
+    if (aiDraft) {
+      setCustomerEmailDraft(customerEmailDraftFromAI(item, { ...aiDraft, template }));
+      setOpeningCustomerEmail(null);
+      setCustomerEmailDialogOpen(true);
+      return;
+    }
     try {
       const templates = await loadEmailTemplates();
       setCustomerEmailDraft(buildCustomerEmailDraft(item, template, templates.find((entry) => entry.key === template)));

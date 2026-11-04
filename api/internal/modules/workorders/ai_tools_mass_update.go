@@ -1,0 +1,560 @@
+package workorders
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"net/http"
+	"strings"
+
+	"humphreys/api/internal/domain"
+
+	"github.com/gin-gonic/gin"
+)
+
+type massUpdatePreviewRequest struct {
+	Instruction string `json:"instruction"`
+}
+
+// MassUpdatePreviewRow is one proposed change rendered as before -> after. The
+// client echoes Operation back to the apply endpoint for the rows the admin
+// keeps checked. Only CustomerName (never email/phone) is exposed.
+type MassUpdatePreviewRow struct {
+	Operation       MassUpdateOp `json:"operation"`
+	ReferenceID     int32        `json:"reference_id"`
+	CustomerName    string       `json:"customer_name"`
+	Field           string       `json:"field"`
+	Before          string       `json:"before"`
+	After           string       `json:"after"`
+	LowerThanBefore bool         `json:"lower_than_before"`
+	Valid           bool         `json:"valid"`
+	Error           string       `json:"error,omitempty"`
+}
+
+type massUpdatePreviewResponse struct {
+	Rows      []MassUpdatePreviewRow `json:"rows"`
+	Truncated bool                   `json:"truncated"`
+	Model     string                 `json:"model"`
+}
+
+type massUpdateApplyRequest struct {
+	Operations []MassUpdateOp `json:"operations"`
+}
+
+// MassUpdateApplyResult reports the outcome of one job's operations.
+type MassUpdateApplyResult struct {
+	ReferenceID int32    `json:"reference_id"`
+	Success     bool     `json:"success"`
+	Applied     []string `json:"applied"`
+	Error       string   `json:"error,omitempty"`
+}
+
+type massUpdateApplyResponse struct {
+	Results []MassUpdateApplyResult `json:"results"`
+}
+
+type llmOperationsEnvelope struct {
+	Operations []MassUpdateOp `json:"operations"`
+}
+
+// MassUpdatePreview turns a natural-language instruction into structured,
+// strictly validated operations and returns an exact before -> after preview.
+// Nothing is written to the database here.
+func (h *Handler) MassUpdatePreview(c *gin.Context) {
+	var req massUpdatePreviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	instruction := strings.TrimSpace(req.Instruction)
+	if instruction == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "describe what should change"})
+		return
+	}
+
+	settings, err := h.getAISettings(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load AI settings"})
+		return
+	}
+	if !settings.HasOpenRouterAPIKey && strings.TrimSpace(settings.OpenRouterAPIKey) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "AI is not configured. Add an OpenRouter API key in AI Settings."})
+		return
+	}
+
+	statuses, err := h.service.repo.AIStatuses(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load statuses"})
+		return
+	}
+	locations, err := h.service.repo.AILocations(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load locations"})
+		return
+	}
+
+	systemPrompt := massUpdateSystemPrompt()
+	prompt := buildMassUpdatePrompt(instruction, statuses, locations)
+	text, model, err := h.generateOpenRouterTextOnce(c, settings, systemPrompt, prompt, 2000)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": aiErrorMessage(err)})
+		return
+	}
+
+	var envelope llmOperationsEnvelope
+	if err := parseStrictLLMJSON(text, &envelope); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+
+	rows, _, truncated := h.buildMassUpdateRows(c.Request.Context(), envelope.Operations, statuses, locations)
+	c.JSON(http.StatusOK, massUpdatePreviewResponse{Rows: rows, Truncated: truncated, Model: model})
+}
+
+// MassUpdateApply re-validates every operation server-side (it never trusts the
+// client's preview), then applies each job in its own transaction so one
+// failure does not block the others. It returns per-job success/failure.
+func (h *Handler) MassUpdateApply(c *gin.Context) {
+	userID := aiToolsActor(c)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth context"})
+		return
+	}
+
+	var req massUpdateApplyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if len(req.Operations) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no changes to apply"})
+		return
+	}
+
+	statuses, err := h.service.repo.AIStatuses(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load statuses"})
+		return
+	}
+	locations, err := h.service.repo.AILocations(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load locations"})
+		return
+	}
+
+	rows, resolvedByJob, _ := h.buildMassUpdateRows(c.Request.Context(), req.Operations, statuses, locations)
+
+	// Preserve the order jobs first appear, and track the first validation error
+	// per job so an invalid op fails its whole job atomically.
+	order := make([]int32, 0)
+	seen := make(map[int32]bool)
+	firstError := make(map[int32]string)
+	for _, row := range rows {
+		if !seen[row.ReferenceID] {
+			seen[row.ReferenceID] = true
+			order = append(order, row.ReferenceID)
+		}
+		if !row.Valid && firstError[row.ReferenceID] == "" {
+			firstError[row.ReferenceID] = row.Error
+		}
+	}
+
+	results := make([]MassUpdateApplyResult, 0, len(order))
+	for _, ref := range order {
+		if msg := firstError[ref]; msg != "" {
+			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: msg})
+			continue
+		}
+		ops := resolvedByJob[ref]
+		if len(ops) == 0 {
+			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: "no valid changes"})
+			continue
+		}
+		applied, applyErr := h.service.repo.ApplyMassUpdateJob(c.Request.Context(), int(ref), ops, userID)
+		if applyErr != nil {
+			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: applyErrorMessage(applyErr)})
+			continue
+		}
+		results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: true, Applied: applied})
+	}
+
+	c.JSON(http.StatusOK, massUpdateApplyResponse{Results: results})
+}
+
+func applyErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrInvalidLabourDiscount):
+		return err.Error()
+	case errors.Is(err, ErrWorkOrderNotFound):
+		return "job not found"
+	case errors.Is(err, ErrLineItemNotFound):
+		return "line item not found"
+	case errors.Is(err, ErrLocationNotFound):
+		return "location not found"
+	default:
+		return "failed to apply changes"
+	}
+}
+
+// buildMassUpdateRows validates each op and renders a preview row. Valid rows
+// also yield resolved ops grouped by job for the apply path. Jobs beyond the
+// cap are dropped and truncated is set.
+func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, statuses []AIStatusOption, locations []AILocationOption) ([]MassUpdatePreviewRow, map[int32][]massUpdateResolvedOp, bool) {
+	statusByName := make(map[string]AIStatusOption, len(statuses))
+	for _, s := range statuses {
+		statusByName[normalizeLookupName(s.Name)] = s
+	}
+	locationByName := make(map[string]AILocationOption, len(locations))
+	for _, l := range locations {
+		locationByName[normalizeLookupName(l.Label())] = l
+		// Also allow matching on the bare shelf name.
+		if shelf := normalizeLookupName(l.Shelf); shelf != "" {
+			if _, exists := locationByName[shelf]; !exists {
+				locationByName[shelf] = l
+			}
+		}
+	}
+
+	// Last explicit labour-total change per job sets the labour used to validate
+	// an amount discount in the same batch.
+	labourOverride := make(map[int32]float64)
+	for _, op := range ops {
+		if op.Op == massOpSetLabourTotal && op.LabourTotal != nil {
+			labourOverride[op.ReferenceID] = *op.LabourTotal
+		}
+	}
+
+	detailCache := make(map[int32]*domain.WorkOrderDetail)
+	detailErr := make(map[int32]bool)
+	loadDetail := func(ref int32) *domain.WorkOrderDetail {
+		if d, ok := detailCache[ref]; ok {
+			return d
+		}
+		if detailErr[ref] {
+			return nil
+		}
+		detail, err := h.service.GetWorkOrderDetail(ctx, int(ref))
+		if err != nil {
+			detailErr[ref] = true
+			return nil
+		}
+		detailCache[ref] = &detail
+		return &detail
+	}
+
+	// Drop repeated identical ops (the LLM sometimes repeats itself) so e.g.
+	// "add Shipping $15" can never be added twice. Runs on preview and apply.
+	ops = dedupeMassUpdateOps(ops)
+
+	rows := make([]MassUpdatePreviewRow, 0, len(ops))
+	resolvedByJob := make(map[int32][]massUpdateResolvedOp)
+	jobsSeen := make(map[int32]bool)
+	truncated := false
+
+	for _, op := range ops {
+		// Enforce the job cap: allow ops for jobs already admitted, drop new jobs.
+		if !jobsSeen[op.ReferenceID] {
+			if len(jobsSeen) >= massUpdateJobCap {
+				truncated = true
+				continue
+			}
+			jobsSeen[op.ReferenceID] = true
+		}
+
+		row := MassUpdatePreviewRow{Operation: op, ReferenceID: op.ReferenceID}
+		detail := loadDetail(op.ReferenceID)
+		if detail == nil {
+			row.Field = massOpField(op.Op)
+			row.Error = fmt.Sprintf("job #%d not found", op.ReferenceID)
+			rows = append(rows, row)
+			continue
+		}
+		row.CustomerName = aiCustomerName(*detail)
+
+		var overrideLabour *float64
+		if v, ok := labourOverride[op.ReferenceID]; ok {
+			overrideLabour = &v
+		}
+		resolved, ok := applyOpToRow(&row, op, detail, statusByName, locationByName, overrideLabour)
+		row.Valid = ok
+		rows = append(rows, row)
+		if ok {
+			resolvedByJob[op.ReferenceID] = append(resolvedByJob[op.ReferenceID], resolved)
+		}
+	}
+
+	return rows, resolvedByJob, truncated
+}
+
+// dedupeMassUpdateOps keeps the first occurrence of each identical op (same job,
+// same op type, same values). Strings compare trimmed and case-insensitively.
+func dedupeMassUpdateOps(ops []MassUpdateOp) []MassUpdateOp {
+	seen := make(map[string]bool, len(ops))
+	out := make([]MassUpdateOp, 0, len(ops))
+	for _, op := range ops {
+		key := massUpdateOpKey(op)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, op)
+	}
+	return out
+}
+
+func massUpdateOpKey(op MassUpdateOp) string {
+	f := func(v *float64) string {
+		if v == nil {
+			return "-"
+		}
+		return fmt.Sprintf("%.4f", *v)
+	}
+	s := func(v *string) string {
+		if v == nil {
+			return "-"
+		}
+		return "=" + normalizeLookupName(*v)
+	}
+	i := func(v *int64) string {
+		if v == nil {
+			return "-"
+		}
+		return fmt.Sprintf("%d", *v)
+	}
+	return strings.Join([]string{
+		fmt.Sprintf("%d", op.ReferenceID),
+		strings.ToLower(strings.TrimSpace(op.Op)),
+		f(op.LabourTotal), s(op.DiscountType), f(op.DiscountValue), i(op.LineItemID),
+		f(op.UnitPrice), s(op.ItemName), s(op.QuantityText), s(op.StatusName), s(op.LocationName),
+	}, "\x1f")
+}
+
+func massOpField(op string) string {
+	switch op {
+	case massOpSetLabourTotal:
+		return "Labour total"
+	case massOpSetLabourDiscount:
+		return "Labour discount"
+	case massOpSetLineItemPrice:
+		return "Line item price"
+	case massOpAddLineItem:
+		return "Add line item"
+	case massOpRemoveLineItem:
+		return "Remove line item"
+	case massOpSetStatus:
+		return "Status"
+	case massOpSetLocation:
+		return "Location"
+	default:
+		return "Change"
+	}
+}
+
+// applyOpToRow validates one op against the job detail and fills in the preview
+// row's Field/Before/After. It returns the resolved op and whether it is valid.
+func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.WorkOrderDetail, statusByName map[string]AIStatusOption, locationByName map[string]AILocationOption, overrideLabour *float64) (massUpdateResolvedOp, bool) {
+	row.Field = massOpField(op.Op)
+	resolved := massUpdateResolvedOp{Op: op.Op}
+
+	switch op.Op {
+	case massOpSetLabourTotal:
+		if op.LabourTotal == nil || !isFiniteNonNegative(*op.LabourTotal) {
+			row.Error = "labour total must be zero or greater"
+			return resolved, false
+		}
+		current := float64Value(detail.LabourTotal)
+		row.Before = aiMoney(current)
+		row.After = aiMoney(*op.LabourTotal)
+		row.LowerThanBefore = *op.LabourTotal < current
+		resolved.LabourTotal = op.LabourTotal
+		return resolved, true
+
+	case massOpSetLabourDiscount:
+		kind := strings.TrimSpace(strings.ToLower(stringValue(op.DiscountType)))
+		if kind != "percent" && kind != "amount" {
+			row.Error = "discount type must be percent or amount"
+			return resolved, false
+		}
+		if op.DiscountValue == nil {
+			row.Error = "discount value is required"
+			return resolved, false
+		}
+		labour := detail.LabourTotal
+		if overrideLabour != nil {
+			labour = overrideLabour
+		}
+		if err := ValidateLabourDiscount(&kind, op.DiscountValue, labour); err != nil {
+			row.Error = err.Error()
+			return resolved, false
+		}
+		row.Before = describeDiscount(detail.LabourDiscountType, detail.LabourDiscountValue)
+		row.After = describeDiscount(&kind, op.DiscountValue)
+		resolved.DiscountType = &kind
+		resolved.DiscountValue = op.DiscountValue
+		return resolved, true
+
+	case massOpSetLineItemPrice:
+		if op.LineItemID == nil || *op.LineItemID <= 0 {
+			row.Error = "line_item_id is required"
+			return resolved, false
+		}
+		if op.UnitPrice == nil || !isFiniteNonNegative(*op.UnitPrice) {
+			row.Error = "price must be zero or greater"
+			return resolved, false
+		}
+		line, found := findLineItem(detail, *op.LineItemID)
+		if !found {
+			row.Error = fmt.Sprintf("line item #%d not found on job", *op.LineItemID)
+			return resolved, false
+		}
+		row.Field = fmt.Sprintf("Line item %q price", stringValueOrDefault(line.ItemName, "item"))
+		row.Before = aiMoney(float64Value(line.UnitPrice))
+		row.After = aiMoney(*op.UnitPrice)
+		row.LowerThanBefore = *op.UnitPrice < float64Value(line.UnitPrice)
+		resolved.LineItemID = op.LineItemID
+		resolved.UnitPrice = op.UnitPrice
+		return resolved, true
+
+	case massOpAddLineItem:
+		name := strings.TrimSpace(stringValue(op.ItemName))
+		if name == "" {
+			row.Error = "item name is required"
+			return resolved, false
+		}
+		if op.UnitPrice != nil && !isFiniteNonNegative(*op.UnitPrice) {
+			row.Error = "price must be zero or greater"
+			return resolved, false
+		}
+		row.Before = "—"
+		if op.UnitPrice != nil {
+			row.After = fmt.Sprintf("%s @ %s", name, aiMoney(*op.UnitPrice))
+		} else {
+			row.After = name
+		}
+		resolved.ItemName = &name
+		resolved.UnitPrice = op.UnitPrice
+		resolved.QuantityText = op.QuantityText
+		return resolved, true
+
+	case massOpRemoveLineItem:
+		if op.LineItemID == nil || *op.LineItemID <= 0 {
+			row.Error = "line_item_id is required"
+			return resolved, false
+		}
+		line, found := findLineItem(detail, *op.LineItemID)
+		if !found {
+			row.Error = fmt.Sprintf("line item #%d not found on job", *op.LineItemID)
+			return resolved, false
+		}
+		row.Before = fmt.Sprintf("%s @ %s", stringValueOrDefault(line.ItemName, "item"), aiMoney(float64Value(line.UnitPrice)))
+		row.After = "—"
+		resolved.LineItemID = op.LineItemID
+		return resolved, true
+
+	case massOpSetStatus:
+		name := strings.TrimSpace(stringValue(op.StatusName))
+		if name == "" {
+			row.Error = "status name is required"
+			return resolved, false
+		}
+		match, ok := statusByName[normalizeLookupName(name)]
+		if !ok {
+			row.Error = fmt.Sprintf("unknown status %q", name)
+			return resolved, false
+		}
+		row.Before = stringValueOrDefault(detail.StatusName, "—")
+		row.After = match.Name
+		id := match.ID
+		resolved.StatusID = &id
+		return resolved, true
+
+	case massOpSetLocation:
+		name := strings.TrimSpace(stringValue(op.LocationName))
+		if name == "" {
+			row.Error = "location name is required"
+			return resolved, false
+		}
+		match, ok := locationByName[normalizeLookupName(name)]
+		if !ok {
+			row.Error = fmt.Sprintf("unknown location %q", name)
+			return resolved, false
+		}
+		row.Before = aiLocationLabel(detail.LocationShelf, detail.LocationFloor)
+		row.After = match.Label()
+		id := match.ID
+		resolved.LocationID = &id
+		return resolved, true
+
+	default:
+		row.Error = fmt.Sprintf("unsupported operation %q", op.Op)
+		return resolved, false
+	}
+}
+
+func findLineItem(detail *domain.WorkOrderDetail, lineItemID int64) (domain.WorkOrderLineItem, bool) {
+	for _, li := range detail.LineItems {
+		if li.LineItemID == lineItemID {
+			return li, true
+		}
+	}
+	return domain.WorkOrderLineItem{}, false
+}
+
+func describeDiscount(kind *string, value *float64) string {
+	if kind == nil || value == nil {
+		return "none"
+	}
+	switch *kind {
+	case "percent":
+		return fmt.Sprintf("%.2f%%", *value)
+	case "amount":
+		return aiMoney(*value)
+	default:
+		return "none"
+	}
+}
+
+func isFiniteNonNegative(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v <= 9999999999.99
+}
+
+func massUpdateSystemPrompt() string {
+	return "You convert a shop manager's instruction into structured work-order edits. " +
+		"You never write to the database; you only propose edits that a human will review and approve. " +
+		"Respond with STRICT JSON only (no prose, no markdown fences). " +
+		"Only use the allowed operation types. If the instruction is ambiguous or references data you were not given, return an empty operations array."
+}
+
+// buildMassUpdatePrompt describes the allowed operations plus the valid status
+// names and location labels so the model resolves names it is allowed to use.
+func buildMassUpdatePrompt(instruction string, statuses []AIStatusOption, locations []AILocationOption) string {
+	var b strings.Builder
+	b.WriteString("Instruction:\n")
+	b.WriteString(instruction)
+	b.WriteString("\n\nReturn JSON of the form:\n")
+	b.WriteString(`{"operations":[{"reference_id":123,"op":"<op>", ...fields}]}` + "\n\n")
+	b.WriteString("Allowed op values and their fields:\n")
+	b.WriteString("- set_labour_total: labour_total (number)\n")
+	b.WriteString("- set_labour_discount: discount_type ('percent'|'amount'), discount_value (number)\n")
+	b.WriteString("- set_line_item_price: line_item_id (number), unit_price (number)\n")
+	b.WriteString("- add_line_item: item_name (string), unit_price (number, optional), quantity_text (string, optional)\n")
+	b.WriteString("- remove_line_item: line_item_id (number)\n")
+	b.WriteString("- set_status: status_name (string, must match a status below)\n")
+	b.WriteString("- set_location: location_name (string, must match a location below)\n")
+	b.WriteString("\nEvery operation MUST include reference_id (the job number) and op.\n")
+
+	b.WriteString("\nValid status names:\n")
+	for _, s := range statuses {
+		b.WriteString("- ")
+		b.WriteString(s.Name)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nValid location names:\n")
+	for _, l := range locations {
+		b.WriteString("- ")
+		b.WriteString(l.Label())
+		b.WriteString("\n")
+	}
+	return b.String()
+}
