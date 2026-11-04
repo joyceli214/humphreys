@@ -13,7 +13,8 @@ const ROWS: MassUpdatePreviewRow[] = [
     before: "$60.00",
     after: "$80.00",
     lower_than_before: false,
-    valid: true
+    valid: true,
+    updated_at: null
   },
   {
     operation: { reference_id: 31205, op: "set_labour_total", labour_total: 80 },
@@ -23,7 +24,8 @@ const ROWS: MassUpdatePreviewRow[] = [
     before: "$120.00",
     after: "$80.00",
     lower_than_before: true,
-    valid: true
+    valid: true,
+    updated_at: null
   },
   {
     operation: { reference_id: 31205, op: "add_line_item", item_name: "Shipping", unit_price: 15 },
@@ -33,7 +35,8 @@ const ROWS: MassUpdatePreviewRow[] = [
     before: "—",
     after: "Shipping @ $15.00",
     lower_than_before: false,
-    valid: true
+    valid: true,
+    updated_at: null
   },
   {
     operation: { reference_id: 31210, op: "set_status", status_name: "Teleported" },
@@ -44,7 +47,8 @@ const ROWS: MassUpdatePreviewRow[] = [
     after: "",
     lower_than_before: false,
     valid: false,
-    error: 'Unknown status "Teleported"'
+    error: 'Unknown status "Teleported"',
+    updated_at: null
   }
 ];
 

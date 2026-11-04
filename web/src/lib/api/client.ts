@@ -27,6 +27,7 @@ import type {
   JobSummaryResponse,
   JobSummaryStaleResponse,
   MassUpdateApplyResponse,
+  MassUpdateExpectedUpdatedAt,
   MassUpdateOp,
   MassUpdatePreviewResponse
 } from "@/lib/ai-tools/types";
@@ -655,10 +656,10 @@ export class APIClient {
     });
   }
 
-  applyAIMassUpdate(operations: MassUpdateOp[]) {
+  applyAIMassUpdate(operations: MassUpdateOp[], expectedUpdatedAt: MassUpdateExpectedUpdatedAt) {
     return this.request<MassUpdateApplyResponse>("/ai-tools/mass-update/apply", {
       method: "POST",
-      body: JSON.stringify({ operations })
+      body: JSON.stringify({ operations, expected_updated_at: expectedUpdatedAt })
     });
   }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"humphreys/api/internal/domain"
 	"humphreys/api/internal/middleware"
@@ -27,6 +28,8 @@ type aiToolsStub struct {
 	applyErr   map[int]error                  // per-reference apply failure
 	appliedOps map[int][]massUpdateResolvedOp // records what apply received
 	applyCalls []int
+	// appliedExpected records the expected updated_at apply received per job.
+	appliedExpected map[int]*time.Time
 
 	searchRows  []AISearchRow
 	searchTotal int
@@ -62,11 +65,15 @@ func (r *aiToolsStub) ListRepairLogs(_ context.Context, referenceID int) ([]doma
 	return r.repairLogs[referenceID], nil
 }
 
-func (r *aiToolsStub) ApplyMassUpdateJob(_ context.Context, referenceID int, ops []massUpdateResolvedOp, _ string) ([]string, error) {
+func (r *aiToolsStub) ApplyMassUpdateJob(_ context.Context, referenceID int, expectedUpdatedAt *time.Time, ops []massUpdateResolvedOp, _ string) ([]string, error) {
 	if r.appliedOps == nil {
 		r.appliedOps = map[int][]massUpdateResolvedOp{}
 	}
+	if r.appliedExpected == nil {
+		r.appliedExpected = map[int]*time.Time{}
+	}
 	r.appliedOps[referenceID] = ops
+	r.appliedExpected[referenceID] = expectedUpdatedAt
 	r.applyCalls = append(r.applyCalls, referenceID)
 	if err := r.applyErr[referenceID]; err != nil {
 		return nil, err

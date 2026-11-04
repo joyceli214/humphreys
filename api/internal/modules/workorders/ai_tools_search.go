@@ -14,7 +14,7 @@ import (
 const (
 	aiSearchDefaultLimit = 50
 	aiSearchMaxLimit     = 200
-	aiSearchMaxOffset    = 100000
+	aiSearchMaxOffset    = 10000
 	aiSearchMaxText      = 200
 	aiSearchMaxStatuses  = 20
 	aiSearchMaxMinCount  = 1000

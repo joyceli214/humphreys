@@ -68,8 +68,11 @@ func normalizeEmailDraftType(raw string) (string, bool) {
 // to the model.
 func (h *Handler) EmailDraft(c *gin.Context) {
 	var req emailDraftRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+	if !bindAIToolsJSON(c, &req) {
+		return
+	}
+	if err := checkTextLength("notes", strings.TrimSpace(req.Notes)); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	ids, err := emailDraftJobIDs(req.WorkOrderID, req.WorkOrderIDs)

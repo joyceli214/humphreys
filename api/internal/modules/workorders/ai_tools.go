@@ -26,6 +26,7 @@ const (
 )
 
 // massUpdateJobCap bounds how many distinct jobs a single request may touch.
+// Requests over the cap are rejected with 400 (see validateMassUpdateOps).
 const massUpdateJobCap = 50
 
 // aiSummaryJobCap bounds how many jobs are described to the LLM for the summary.
@@ -104,16 +105,20 @@ const aiToolsRoutePrefix = "/ai-tools"
 // which owners have and staff/workers do not — so staff receive a 403 and never
 // reach these handlers.
 func RegisterAIToolsRoutes(authed *gin.RouterGroup, h *Handler) {
-	group := authed.Group(aiToolsRoutePrefix)
-	group.POST("/mass-update/preview", middleware.RequirePermission(permUpdate), h.MassUpdatePreview)
-	group.POST("/mass-update/apply", middleware.RequirePermission(permUpdate), h.MassUpdateApply)
-	group.POST("/search/interpret", middleware.RequirePermission(permUpdate), h.InterpretSearch)
-	group.POST("/search", middleware.RequirePermission(permUpdate), h.AdvancedSearch)
+	// Every /ai-tools body is capped; endpoints that call the LLM additionally
+	// share one per-user rate limit (checked after the permission gate).
+	group := authed.Group(aiToolsRoutePrefix, aiToolsBodyLimit())
+	perm := middleware.RequirePermission(permUpdate)
+	llm := newAIRateLimiter(aiToolsLLMRateLimit, aiToolsLLMRateWindow).middleware()
+	group.POST("/mass-update/preview", perm, llm, h.MassUpdatePreview)
+	group.POST("/mass-update/apply", perm, h.MassUpdateApply)
+	group.POST("/search/interpret", perm, llm, h.InterpretSearch)
+	group.POST("/search", perm, h.AdvancedSearch)
 	// Job summary is no longer shown in the AI Tools UI (replaced by Advanced
 	// Search); the endpoints stay registered so the dashboard can reuse them.
-	group.POST("/job-summary", middleware.RequirePermission(permUpdate), h.JobSummary)
-	group.GET("/job-summary/stale", middleware.RequirePermission(permUpdate), h.JobSummaryStale)
-	group.POST("/email-draft", middleware.RequirePermission(permUpdate), h.EmailDraft)
+	group.POST("/job-summary", perm, llm, h.JobSummary)
+	group.GET("/job-summary/stale", perm, h.JobSummaryStale)
+	group.POST("/email-draft", perm, llm, h.EmailDraft)
 }
 
 // aiToolsActor returns the authenticated user id or "" when absent.

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { apiClient } from "@/lib/api/client";
-import type { MassUpdateApplyResult, MassUpdatePreviewResponse } from "@/lib/ai-tools/types";
-import { AI_TEXTAREA_CLASS, AIButton, AICard, AICardTitle, AIErrorBox, AINotice, AIPill, errorMessage } from "@/components/ai-tools/ai-ui";
+import type { MassUpdateApplyResult, MassUpdateExpectedUpdatedAt, MassUpdatePreviewResponse } from "@/lib/ai-tools/types";
+import { AI_TEXTAREA_CLASS, AIButton, AICard, AICardTitle, AIErrorBox, AIPill, errorMessage } from "@/components/ai-tools/ai-ui";
 import { MassUpdatePreviewTable, selectableRowIndexes } from "@/components/ai-tools/mass-update-preview-table";
 import { MassUpdateResults } from "@/components/ai-tools/mass-update-results";
 
@@ -37,12 +37,16 @@ export function MassUpdateTab() {
 
   const apply = async () => {
     if (!preview) return;
-    const operations = preview.rows.filter((row, index) => row.valid && selected.has(index)).map((row) => row.operation);
-    if (operations.length === 0) return;
+    const chosen = preview.rows.filter((row, index) => row.valid && selected.has(index));
+    if (chosen.length === 0) return;
+    const operations = chosen.map((row) => row.operation);
+    // The server rejects any job whose updated_at no longer matches the preview.
+    const expectedUpdatedAt: MassUpdateExpectedUpdatedAt = {};
+    for (const row of chosen) expectedUpdatedAt[row.reference_id] = row.updated_at ?? null;
     setApplying(true);
     setError("");
     try {
-      const res = await apiClient.applyAIMassUpdate(operations);
+      const res = await apiClient.applyAIMassUpdate(operations, expectedUpdatedAt);
       setResults(res.results);
       setPreview(null);
       setSelected(new Set());
@@ -96,11 +100,6 @@ export function MassUpdateTab() {
           <AICardTitle>
             Preview: {jobCount} job{jobCount === 1 ? "" : "s"}, {rows.length} change{rows.length === 1 ? "" : "s"}
           </AICardTitle>
-          {preview.truncated && (
-            <div className="mt-2">
-              <AINotice>Only the first 50 jobs are included. Run another update for the rest.</AINotice>
-            </div>
-          )}
           {invalidCount > 0 && (
             <p className="mt-2 text-xs text-red-700">
               {invalidCount} change{invalidCount === 1 ? "" : "s"} can't be applied and {invalidCount === 1 ? "is" : "are"} left unchecked.

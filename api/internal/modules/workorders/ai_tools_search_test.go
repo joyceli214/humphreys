@@ -33,6 +33,12 @@ func TestNormalizeSearchFilters(t *testing.T) {
 			}
 		}},
 		{name: "negative offset", in: AISearchFilters{Offset: -3}, wantErr: "offset"},
+		{name: "offset at cap", in: AISearchFilters{Offset: 10000}, check: func(t *testing.T, f aiResolvedSearchFilters) {
+			if f.Offset != 10000 {
+				t.Fatalf("offset = %d", f.Offset)
+			}
+		}},
+		{name: "offset over cap", in: AISearchFilters{Offset: 10001}, wantErr: "offset must be between 0 and 10000"},
 		{name: "status resolved case-insensitively", in: AISearchFilters{Statuses: []string{"finished", " Picked  Up "}}, check: func(t *testing.T, f aiResolvedSearchFilters) {
 			if len(f.StatusIDs) != 2 || f.StatusIDs[0] != 2 || f.StatusIDs[1] != 3 {
 				t.Fatalf("status ids = %v", f.StatusIDs)
@@ -188,4 +194,3 @@ func safeIndex(args []any, i int) any {
 	}
 	return nil
 }
-

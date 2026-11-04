@@ -30,8 +30,7 @@ type aiInterpretResponse struct {
 // review; it is never executed here and never used as anything but filters.
 func (h *Handler) InterpretSearch(c *gin.Context) {
 	var req aiInterpretRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+	if !bindAIToolsJSON(c, &req) {
 		return
 	}
 	question := strings.Join(strings.Fields(req.Question), " ")

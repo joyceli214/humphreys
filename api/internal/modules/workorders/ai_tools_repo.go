@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -140,87 +143,144 @@ func (r *storeRepository) AIStaleCandidates(ctx context.Context) ([]AIStaleCandi
 // the batch. Totals are recomputed when line items change and
 // status_updated_at advances on a status-group change. It returns a
 // human-readable description of each applied change.
-func (r *storeRepository) ApplyMassUpdateJob(ctx context.Context, referenceID int, ops []massUpdateResolvedOp, userID string) ([]string, error) {
+//
+// expectedUpdatedAt is the work order's updated_at as shown in the preview (nil
+// when it was NULL). The row is locked first and, if it no longer matches, the
+// job is rejected with ErrMassUpdateStale before anything is written.
+func (r *storeRepository) ApplyMassUpdateJob(ctx context.Context, referenceID int, expectedUpdatedAt *time.Time, ops []massUpdateResolvedOp, userID string) ([]string, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.work_orders WHERE reference_id = $1)`, referenceID).Scan(&exists); err != nil {
+	var unchanged bool
+	err = tx.QueryRow(ctx, `
+		SELECT updated_at IS NOT DISTINCT FROM $2::timestamptz
+		FROM public.work_orders
+		WHERE reference_id = $1
+		FOR UPDATE
+	`, referenceID, expectedUpdatedAt).Scan(&unchanged)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrWorkOrderNotFound
+	}
+	if err != nil {
 		return nil, err
 	}
-	if !exists {
-		return nil, ErrWorkOrderNotFound
+	if !unchanged {
+		return nil, ErrMassUpdateStale
 	}
 
 	applied := make([]string, 0, len(ops))
 	lineItemsChanged := false
 
 	for _, op := range ops {
+		entry := massUpdateAuditEntry{ReferenceID: referenceID, Op: op.Op}
 		switch op.Op {
 		case massOpSetLabourTotal:
 			if op.LabourTotal == nil {
 				continue
 			}
-			if _, err := tx.Exec(ctx, `UPDATE public.work_orders SET labour_total = $2, updated_at = now() WHERE reference_id = $1`, referenceID, round2(*op.LabourTotal)); err != nil {
+			var before *float64
+			if err := tx.QueryRow(ctx, `SELECT labour_total::double precision FROM public.work_orders WHERE reference_id = $1 FOR UPDATE`, referenceID).Scan(&before); err != nil {
 				return nil, err
 			}
-			applied = append(applied, fmt.Sprintf("Labour total set to %s", aiMoney(round2(*op.LabourTotal))))
+			after := round2(*op.LabourTotal)
+			if _, err := tx.Exec(ctx, `UPDATE public.work_orders SET labour_total = $2, updated_at = now() WHERE reference_id = $1`, referenceID, after); err != nil {
+				return nil, err
+			}
+			entry.Before = map[string]any{"labour_total": before}
+			entry.After = map[string]any{"labour_total": after}
+			applied = append(applied, fmt.Sprintf("Labour total set to %s", aiMoney(after)))
 
 		case massOpSetLabourDiscount:
-			if err := applyLabourDiscountTx(ctx, tx, referenceID, op.DiscountType, op.DiscountValue, userID); err != nil {
+			oldType, oldValue, newValue, err := applyLabourDiscountTx(ctx, tx, referenceID, op.DiscountType, op.DiscountValue, userID)
+			if err != nil {
 				return nil, err
 			}
+			entry.Before = map[string]any{"type": oldType, "value": oldValue}
+			entry.After = map[string]any{"type": op.DiscountType, "value": newValue}
 			applied = append(applied, fmt.Sprintf("Labour discount set to %s", describeDiscount(op.DiscountType, op.DiscountValue)))
 
 		case massOpSetLineItemPrice:
 			if op.LineItemID == nil || op.UnitPrice == nil {
 				continue
 			}
-			cmd, err := tx.Exec(ctx, `UPDATE public.work_order_line_items SET unit_price = $3 WHERE reference_id = $1 AND line_item_id = $2`, referenceID, *op.LineItemID, round2(*op.UnitPrice))
+			var quantity, oldLineTotal *string
+			var oldPrice *float64
+			err := tx.QueryRow(ctx, `SELECT quantity_text, unit_price::double precision, line_total_text FROM public.work_order_line_items WHERE reference_id = $1 AND line_item_id = $2 FOR UPDATE`, referenceID, *op.LineItemID).Scan(&quantity, &oldPrice, &oldLineTotal)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrLineItemNotFound
+			}
 			if err != nil {
 				return nil, err
 			}
-			if cmd.RowsAffected() == 0 {
-				return nil, ErrLineItemNotFound
-			}
-			lineItemsChanged = true
-			applied = append(applied, fmt.Sprintf("Line item #%d price set to %s", *op.LineItemID, aiMoney(round2(*op.UnitPrice))))
-
-		case massOpAddLineItem:
-			name := strings.TrimSpace(stringValue(op.ItemName))
-			var price any
-			if op.UnitPrice != nil {
-				price = round2(*op.UnitPrice)
+			price := round2(*op.UnitPrice)
+			// A non-numeric quantity keeps the existing line total, as the UI does.
+			newLineTotal := massUpdateLineTotalText(price, quantity)
+			if newLineTotal == nil {
+				newLineTotal = oldLineTotal
 			}
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO public.work_order_line_items(reference_id, item_name, unit_price, quantity_text)
-				VALUES ($1, $2, $3, $4)
-			`, referenceID, name, price, nullableString(op.QuantityText)); err != nil {
+				UPDATE public.work_order_line_items
+				SET unit_price = $3, line_total_text = $4
+				WHERE reference_id = $1 AND line_item_id = $2
+			`, referenceID, *op.LineItemID, price, newLineTotal); err != nil {
 				return nil, err
 			}
 			lineItemsChanged = true
+			entry.Before = map[string]any{"line_item_id": *op.LineItemID, "unit_price": oldPrice, "line_total_text": oldLineTotal}
+			entry.After = map[string]any{"line_item_id": *op.LineItemID, "unit_price": price, "line_total_text": newLineTotal}
+			applied = append(applied, fmt.Sprintf("Line item #%d price set to %s", *op.LineItemID, aiMoney(price)))
+
+		case massOpAddLineItem:
+			name := strings.TrimSpace(stringValue(op.ItemName))
+			var price *float64
+			var lineTotal *string
+			if op.UnitPrice != nil {
+				p := round2(*op.UnitPrice)
+				price = &p
+				lineTotal = massUpdateLineTotalText(p, op.QuantityText)
+			}
+			var newID int64
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO public.work_order_line_items(reference_id, item_name, unit_price, quantity_text, line_total_text)
+				VALUES ($1, $2, $3, $4, $5)
+				RETURNING line_item_id::bigint
+			`, referenceID, name, price, nullableString(op.QuantityText), lineTotal).Scan(&newID); err != nil {
+				return nil, err
+			}
+			lineItemsChanged = true
+			entry.After = map[string]any{"line_item_id": newID, "item_name": name, "unit_price": price, "quantity_text": nullableString(op.QuantityText), "line_total_text": lineTotal}
 			applied = append(applied, fmt.Sprintf("Added line item %q", name))
 
 		case massOpRemoveLineItem:
 			if op.LineItemID == nil {
 				continue
 			}
-			cmd, err := tx.Exec(ctx, `DELETE FROM public.work_order_line_items WHERE reference_id = $1 AND line_item_id = $2`, referenceID, *op.LineItemID)
+			var name, quantity, lineTotal *string
+			var price *float64
+			err := tx.QueryRow(ctx, `
+				DELETE FROM public.work_order_line_items WHERE reference_id = $1 AND line_item_id = $2
+				RETURNING item_name, unit_price::double precision, quantity_text, line_total_text
+			`, referenceID, *op.LineItemID).Scan(&name, &price, &quantity, &lineTotal)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrLineItemNotFound
+			}
 			if err != nil {
 				return nil, err
 			}
-			if cmd.RowsAffected() == 0 {
-				return nil, ErrLineItemNotFound
-			}
 			lineItemsChanged = true
+			entry.Before = map[string]any{"line_item_id": *op.LineItemID, "item_name": name, "unit_price": price, "quantity_text": quantity, "line_total_text": lineTotal}
 			applied = append(applied, fmt.Sprintf("Removed line item #%d", *op.LineItemID))
 
 		case massOpSetStatus:
 			if op.StatusID == nil {
 				continue
+			}
+			var before *int64
+			if err := tx.QueryRow(ctx, `SELECT status_id::bigint FROM public.work_orders WHERE reference_id = $1 FOR UPDATE`, referenceID).Scan(&before); err != nil {
+				return nil, err
 			}
 			if _, err := tx.Exec(ctx, `
 				UPDATE public.work_orders wo
@@ -243,11 +303,17 @@ func (r *storeRepository) ApplyMassUpdateJob(ctx context.Context, referenceID in
 			`, referenceID, *op.StatusID); err != nil {
 				return nil, err
 			}
+			entry.Before = map[string]any{"status_id": before}
+			entry.After = map[string]any{"status_id": *op.StatusID}
 			applied = append(applied, "Status updated")
 
 		case massOpSetLocation:
 			if op.LocationID == nil {
 				continue
+			}
+			var before *int64
+			if err := tx.QueryRow(ctx, `SELECT location_id::bigint FROM public.work_orders WHERE reference_id = $1 FOR UPDATE`, referenceID).Scan(&before); err != nil {
+				return nil, err
 			}
 			var active bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM public.locations WHERE location_id = $1 AND is_active = true)`, *op.LocationID).Scan(&active); err != nil {
@@ -259,10 +325,18 @@ func (r *storeRepository) ApplyMassUpdateJob(ctx context.Context, referenceID in
 			if _, err := tx.Exec(ctx, `UPDATE public.work_orders SET location_id = $2, updated_at = now() WHERE reference_id = $1`, referenceID, *op.LocationID); err != nil {
 				return nil, err
 			}
+			entry.Before = map[string]any{"location_id": before}
+			entry.After = map[string]any{"location_id": *op.LocationID}
 			applied = append(applied, "Location updated")
 
 		default:
 			return nil, fmt.Errorf("unsupported operation %q", op.Op)
+		}
+
+		// Written in the same tx as the change, like the labour discount audit,
+		// so an op is never applied without its audit row (or vice versa).
+		if err := insertMassUpdateAuditTx(ctx, tx, userID, entry); err != nil {
+			return nil, err
 		}
 	}
 
@@ -278,28 +352,70 @@ func (r *storeRepository) ApplyMassUpdateJob(ctx context.Context, referenceID in
 	return applied, nil
 }
 
+var decimalInputPattern = regexp.MustCompile(`^-?(?:\d+\.?\d*|\.\d+)$`)
+
+// massUpdateLineTotalText mirrors the work order page's calculateLineSubtotalText
+// (unit price x quantity, formatted with toFixed(2)) so recalculatePartsTotalTx,
+// which sums line_total_text, sees AI price changes. A blank quantity counts as 1;
+// a quantity the UI can't parse (e.g. "2 pcs") returns nil.
+func massUpdateLineTotalText(unitPrice float64, quantityText *string) *string {
+	qty := strings.TrimSpace(stringOrEmpty(quantityText))
+	if qty == "" {
+		qty = "1"
+	}
+	qty = strings.Replace(qty, ",", ".", 1)
+	if !decimalInputPattern.MatchString(qty) {
+		return nil
+	}
+	quantity, err := strconv.ParseFloat(qty, 64)
+	if err != nil {
+		return nil
+	}
+	out := strconv.FormatFloat(unitPrice*quantity, 'f', 2, 64)
+	return &out
+}
+
 // applyLabourDiscountTx mirrors UpdateLabourDiscount's validation + audit write,
-// scoped to the caller's transaction so a mass-update job stays atomic.
-func applyLabourDiscountTx(ctx context.Context, tx pgx.Tx, referenceID int, kind *string, value *float64, userID string) error {
+// scoped to the caller's transaction so a mass-update job stays atomic. It
+// returns the pre-change type/value and the stored (rounded) new value.
+func applyLabourDiscountTx(ctx context.Context, tx pgx.Tx, referenceID int, kind *string, value *float64, userID string) (*string, *float64, *float64, error) {
 	var oldType *string
 	var oldValue, labour *float64
 	err := tx.QueryRow(ctx, `SELECT labour_discount_type, labour_discount_value::double precision, labour_total::double precision FROM public.work_orders WHERE reference_id=$1 FOR UPDATE`, referenceID).Scan(&oldType, &oldValue, &labour)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrWorkOrderNotFound
+		return nil, nil, nil, ErrWorkOrderNotFound
 	}
 	if err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	if err := ValidateLabourDiscount(kind, value, labour); err != nil {
-		return err
+		return nil, nil, nil, err
 	}
 	if kind != nil && value != nil {
 		rounded := round2(*value)
 		value = &rounded
 	}
 	if _, err := tx.Exec(ctx, `UPDATE public.work_orders SET labour_discount_type=$2, labour_discount_value=$3, updated_at=now() WHERE reference_id=$1`, referenceID, kind, value); err != nil {
+		return nil, nil, nil, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO public.work_order_labour_discount_audit(reference_id,changed_by_user_id,old_type,old_value,new_type,new_value) VALUES($1,$2,$3,$4,$5,$6)`, referenceID, userID, oldType, oldValue, kind, value); err != nil {
+		return nil, nil, nil, err
+	}
+	return oldType, oldValue, value, nil
+}
+
+// insertMassUpdateAuditTx appends one row to the existing generic audit_logs
+// table (001_init) for an applied mass-update op. Every op, including the
+// labour discount (which also keeps its dedicated audit table), lands here so
+// the AI tool has one uniform trail of actor, job, op, before and after.
+func insertMassUpdateAuditTx(ctx context.Context, tx pgx.Tx, userID string, entry massUpdateAuditEntry) error {
+	metadata, err := massUpdateAuditMetadata(entry)
+	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO public.work_order_labour_discount_audit(reference_id,changed_by_user_id,old_type,old_value,new_type,new_value) VALUES($1,$2,$3,$4,$5,$6)`, referenceID, userID, oldType, oldValue, kind, value)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO public.audit_logs(actor_user_id, action, target_type, metadata_json)
+		VALUES (NULLIF($1, '')::uuid, $2, 'work_order', $3::jsonb)
+	`, userID, massUpdateAuditAction(entry.Op), string(metadata))
 	return err
 }

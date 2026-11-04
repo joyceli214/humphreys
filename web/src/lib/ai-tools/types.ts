@@ -34,11 +34,15 @@ export type MassUpdatePreviewRow = {
   lower_than_before: boolean;
   valid: boolean;
   error?: string;
+  /** The job's updated_at when previewed (null if never set); sent back on apply. */
+  updated_at: string | null;
 };
+
+/** reference_id -> updated_at from the preview. Jobs missing here are rejected on apply. */
+export type MassUpdateExpectedUpdatedAt = Record<number, string | null>;
 
 export type MassUpdatePreviewResponse = {
   rows: MassUpdatePreviewRow[];
-  truncated: boolean;
   model: string;
 };
 

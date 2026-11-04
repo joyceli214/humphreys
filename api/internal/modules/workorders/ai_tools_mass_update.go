@@ -2,11 +2,13 @@ package workorders
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"humphreys/api/internal/domain"
 
@@ -30,17 +32,31 @@ type MassUpdatePreviewRow struct {
 	LowerThanBefore bool         `json:"lower_than_before"`
 	Valid           bool         `json:"valid"`
 	Error           string       `json:"error,omitempty"`
+	// UpdatedAt is the job's work_orders.updated_at when previewed (null if the
+	// column is NULL). The client sends it back per job on apply so a job that
+	// changed since the preview is rejected instead of overwritten.
+	UpdatedAt *time.Time `json:"updated_at"`
 }
 
 type massUpdatePreviewResponse struct {
-	Rows      []MassUpdatePreviewRow `json:"rows"`
-	Truncated bool                   `json:"truncated"`
-	Model     string                 `json:"model"`
+	Rows  []MassUpdatePreviewRow `json:"rows"`
+	Model string                 `json:"model"`
 }
 
 type massUpdateApplyRequest struct {
 	Operations []MassUpdateOp `json:"operations"`
+	// ExpectedUpdatedAt maps reference_id to the updated_at from the preview. A
+	// null value means the job had no updated_at; a missing key rejects the job.
+	ExpectedUpdatedAt map[int32]*time.Time `json:"expected_updated_at"`
 }
+
+// ErrMassUpdateStale means the job was modified after the preview was built.
+var ErrMassUpdateStale = errors.New("work order changed since preview")
+
+const (
+	massUpdateStaleMessage          = "job changed since preview; preview again before applying"
+	massUpdateMissingVersionMessage = "missing preview timestamp for this job; preview again before applying"
+)
 
 // MassUpdateApplyResult reports the outcome of one job's operations.
 type MassUpdateApplyResult struct {
@@ -63,13 +79,16 @@ type llmOperationsEnvelope struct {
 // Nothing is written to the database here.
 func (h *Handler) MassUpdatePreview(c *gin.Context) {
 	var req massUpdatePreviewRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+	if !bindAIToolsJSON(c, &req) {
 		return
 	}
 	instruction := strings.TrimSpace(req.Instruction)
 	if instruction == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "describe what should change"})
+		return
+	}
+	if err := checkTextLength("instruction", instruction); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -108,8 +127,13 @@ func (h *Handler) MassUpdatePreview(c *gin.Context) {
 		return
 	}
 
-	rows, _, truncated := h.buildMassUpdateRows(c.Request.Context(), envelope.Operations, statuses, locations)
-	c.JSON(http.StatusOK, massUpdatePreviewResponse{Rows: rows, Truncated: truncated, Model: model})
+	rows, _, err := h.buildMassUpdateRows(c.Request.Context(), envelope.Operations, statuses, locations)
+	if err != nil {
+		// Over a cap: reject rather than silently dropping jobs the admin asked about.
+		c.JSON(http.StatusBadRequest, gin.H{"error": "AI proposed " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, massUpdatePreviewResponse{Rows: rows, Model: model})
 }
 
 // MassUpdateApply re-validates every operation server-side (it never trusts the
@@ -123,8 +147,7 @@ func (h *Handler) MassUpdateApply(c *gin.Context) {
 	}
 
 	var req massUpdateApplyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+	if !bindAIToolsJSON(c, &req) {
 		return
 	}
 	if len(req.Operations) == 0 {
@@ -143,7 +166,11 @@ func (h *Handler) MassUpdateApply(c *gin.Context) {
 		return
 	}
 
-	rows, resolvedByJob, _ := h.buildMassUpdateRows(c.Request.Context(), req.Operations, statuses, locations)
+	rows, resolvedByJob, err := h.buildMassUpdateRows(c.Request.Context(), req.Operations, statuses, locations)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Preserve the order jobs first appear, and track the first validation error
 	// per job so an invalid op fails its whole job atomically.
@@ -166,12 +193,17 @@ func (h *Handler) MassUpdateApply(c *gin.Context) {
 			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: msg})
 			continue
 		}
+		expected, ok := req.ExpectedUpdatedAt[ref]
+		if !ok {
+			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: massUpdateMissingVersionMessage})
+			continue
+		}
 		ops := resolvedByJob[ref]
 		if len(ops) == 0 {
 			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: "no valid changes"})
 			continue
 		}
-		applied, applyErr := h.service.repo.ApplyMassUpdateJob(c.Request.Context(), int(ref), ops, userID)
+		applied, applyErr := h.service.repo.ApplyMassUpdateJob(c.Request.Context(), int(ref), expected, ops, userID)
 		if applyErr != nil {
 			results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: false, Error: applyErrorMessage(applyErr)})
 			continue
@@ -184,6 +216,8 @@ func (h *Handler) MassUpdateApply(c *gin.Context) {
 
 func applyErrorMessage(err error) string {
 	switch {
+	case errors.Is(err, ErrMassUpdateStale):
+		return massUpdateStaleMessage
 	case errors.Is(err, ErrInvalidLabourDiscount):
 		return err.Error()
 	case errors.Is(err, ErrWorkOrderNotFound):
@@ -198,23 +232,22 @@ func applyErrorMessage(err error) string {
 }
 
 // buildMassUpdateRows validates each op and renders a preview row. Valid rows
-// also yield resolved ops grouped by job for the apply path. Jobs beyond the
-// cap are dropped and truncated is set.
-func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, statuses []AIStatusOption, locations []AILocationOption) ([]MassUpdatePreviewRow, map[int32][]massUpdateResolvedOp, bool) {
+// also yield resolved ops grouped by job for the apply path. A batch over the
+// job / op / text caps is rejected with an error before any job is loaded;
+// nothing is ever silently dropped.
+func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, statuses []AIStatusOption, locations []AILocationOption) ([]MassUpdatePreviewRow, map[int32][]massUpdateResolvedOp, error) {
+	// Drop repeated identical ops (the LLM sometimes repeats itself) so e.g.
+	// "add Shipping $15" can never be added twice. Runs on preview and apply.
+	ops = dedupeMassUpdateOps(ops)
+	if err := validateMassUpdateOps(ops); err != nil {
+		return nil, nil, err
+	}
+
 	statusByName := make(map[string]AIStatusOption, len(statuses))
 	for _, s := range statuses {
 		statusByName[normalizeLookupName(s.Name)] = s
 	}
-	locationByName := make(map[string]AILocationOption, len(locations))
-	for _, l := range locations {
-		locationByName[normalizeLookupName(l.Label())] = l
-		// Also allow matching on the bare shelf name.
-		if shelf := normalizeLookupName(l.Shelf); shelf != "" {
-			if _, exists := locationByName[shelf]; !exists {
-				locationByName[shelf] = l
-			}
-		}
-	}
+	locationByName := newLocationLookup(locations)
 
 	// Last explicit labour-total change per job sets the labour used to validate
 	// an amount discount in the same batch.
@@ -243,25 +276,10 @@ func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, s
 		return &detail
 	}
 
-	// Drop repeated identical ops (the LLM sometimes repeats itself) so e.g.
-	// "add Shipping $15" can never be added twice. Runs on preview and apply.
-	ops = dedupeMassUpdateOps(ops)
-
 	rows := make([]MassUpdatePreviewRow, 0, len(ops))
 	resolvedByJob := make(map[int32][]massUpdateResolvedOp)
-	jobsSeen := make(map[int32]bool)
-	truncated := false
 
 	for _, op := range ops {
-		// Enforce the job cap: allow ops for jobs already admitted, drop new jobs.
-		if !jobsSeen[op.ReferenceID] {
-			if len(jobsSeen) >= massUpdateJobCap {
-				truncated = true
-				continue
-			}
-			jobsSeen[op.ReferenceID] = true
-		}
-
 		row := MassUpdatePreviewRow{Operation: op, ReferenceID: op.ReferenceID}
 		detail := loadDetail(op.ReferenceID)
 		if detail == nil {
@@ -271,6 +289,7 @@ func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, s
 			continue
 		}
 		row.CustomerName = aiCustomerName(*detail)
+		row.UpdatedAt = detail.UpdatedAt
 
 		var overrideLabour *float64
 		if v, ok := labourOverride[op.ReferenceID]; ok {
@@ -284,7 +303,7 @@ func (h *Handler) buildMassUpdateRows(ctx context.Context, ops []MassUpdateOp, s
 		}
 	}
 
-	return rows, resolvedByJob, truncated
+	return rows, resolvedByJob, nil
 }
 
 // dedupeMassUpdateOps keeps the first occurrence of each identical op (same job,
@@ -353,7 +372,7 @@ func massOpField(op string) string {
 
 // applyOpToRow validates one op against the job detail and fills in the preview
 // row's Field/Before/After. It returns the resolved op and whether it is valid.
-func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.WorkOrderDetail, statusByName map[string]AIStatusOption, locationByName map[string]AILocationOption, overrideLabour *float64) (massUpdateResolvedOp, bool) {
+func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.WorkOrderDetail, statusByName map[string]AIStatusOption, locationByName locationLookup, overrideLabour *float64) (massUpdateResolvedOp, bool) {
 	row.Field = massOpField(op.Op)
 	resolved := massUpdateResolvedOp{Op: op.Op}
 
@@ -475,9 +494,9 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 			row.Error = "location name is required"
 			return resolved, false
 		}
-		match, ok := locationByName[normalizeLookupName(name)]
-		if !ok {
-			row.Error = fmt.Sprintf("unknown location %q", name)
+		match, errMsg := locationByName.resolve(name)
+		if errMsg != "" {
+			row.Error = errMsg
 			return resolved, false
 		}
 		row.Before = aiLocationLabel(detail.LocationShelf, detail.LocationFloor)
@@ -492,6 +511,50 @@ func applyOpToRow(row *MassUpdatePreviewRow, op MassUpdateOp, detail *domain.Wor
 	}
 }
 
+// locationLookup resolves a location name to a location. The full
+// "<shelf>-<floor>" label always matches; a bare shelf name is accepted only
+// when that shelf has exactly one floor, so it never silently picks a floor.
+type locationLookup struct {
+	byLabel map[string]AILocationOption
+	byShelf map[string][]AILocationOption
+}
+
+func newLocationLookup(locations []AILocationOption) locationLookup {
+	lk := locationLookup{
+		byLabel: make(map[string]AILocationOption, len(locations)),
+		byShelf: make(map[string][]AILocationOption),
+	}
+	for _, l := range locations {
+		lk.byLabel[normalizeLookupName(l.Label())] = l
+		if shelf := normalizeLookupName(l.Shelf); shelf != "" {
+			lk.byShelf[shelf] = append(lk.byShelf[shelf], l)
+		}
+	}
+	return lk
+}
+
+// resolve returns the matching location, or a user-facing error message when
+// the name is unknown or a bare shelf name matches more than one floor.
+func (lk locationLookup) resolve(name string) (AILocationOption, string) {
+	key := normalizeLookupName(name)
+	if match, ok := lk.byLabel[key]; ok {
+		return match, ""
+	}
+	candidates := lk.byShelf[key]
+	switch len(candidates) {
+	case 0:
+		return AILocationOption{}, fmt.Sprintf("unknown location %q", name)
+	case 1:
+		return candidates[0], ""
+	default:
+		labels := make([]string, len(candidates))
+		for i, c := range candidates {
+			labels[i] = c.Label()
+		}
+		return AILocationOption{}, fmt.Sprintf("ambiguous location %q: specify one of %s", name, strings.Join(labels, ", "))
+	}
+}
+
 func findLineItem(detail *domain.WorkOrderDetail, lineItemID int64) (domain.WorkOrderLineItem, bool) {
 	for _, li := range detail.LineItems {
 		if li.LineItemID == lineItemID {
@@ -499,6 +562,34 @@ func findLineItem(detail *domain.WorkOrderDetail, lineItemID int64) (domain.Work
 		}
 	}
 	return domain.WorkOrderLineItem{}, false
+}
+
+// massUpdateAuditEntry records one applied mass-update op: the job, the op, and
+// the field values captured inside the apply transaction before and after the
+// change. Before is nil for add_line_item; After is nil for remove_line_item.
+type massUpdateAuditEntry struct {
+	ReferenceID int
+	Op          string
+	Before      map[string]any
+	After       map[string]any
+}
+
+// massUpdateAuditAction is the audit_logs.action value for a mass-update op.
+func massUpdateAuditAction(op string) string {
+	return "work_order.ai_mass_update." + op
+}
+
+// massUpdateAuditMetadata renders the audit_logs.metadata_json payload. Work
+// order ids are integers, so reference_id lives here rather than in the UUID
+// target_id column.
+func massUpdateAuditMetadata(e massUpdateAuditEntry) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"source":       "ai_mass_update",
+		"reference_id": e.ReferenceID,
+		"op":           e.Op,
+		"before":       e.Before,
+		"after":        e.After,
+	})
 }
 
 func describeDiscount(kind *string, value *float64) string {
@@ -541,7 +632,7 @@ func buildMassUpdatePrompt(instruction string, statuses []AIStatusOption, locati
 	b.WriteString("- add_line_item: item_name (string), unit_price (number, optional), quantity_text (string, optional)\n")
 	b.WriteString("- remove_line_item: line_item_id (number)\n")
 	b.WriteString("- set_status: status_name (string, must match a status below)\n")
-	b.WriteString("- set_location: location_name (string, must match a location below)\n")
+	b.WriteString("- set_location: location_name (string, the full \"<shelf>-<floor>\" label exactly as listed below)\n")
 	b.WriteString("\nEvery operation MUST include reference_id (the job number) and op.\n")
 
 	b.WriteString("\nValid status names:\n")

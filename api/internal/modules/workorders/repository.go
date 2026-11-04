@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"humphreys/api/internal/domain"
 
@@ -42,7 +43,7 @@ type Repository interface {
 	AILocations(ctx context.Context) ([]AILocationOption, error)
 	AIStaleCandidates(ctx context.Context) ([]AIStaleCandidate, error)
 	AISearch(ctx context.Context, filters aiResolvedSearchFilters) ([]AISearchRow, int, error)
-	ApplyMassUpdateJob(ctx context.Context, referenceID int, ops []massUpdateResolvedOp, userID string) ([]string, error)
+	ApplyMassUpdateJob(ctx context.Context, referenceID int, expectedUpdatedAt *time.Time, ops []massUpdateResolvedOp, userID string) ([]string, error)
 }
 
 type storeRepository struct {

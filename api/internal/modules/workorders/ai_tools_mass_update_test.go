@@ -103,7 +103,7 @@ func TestMassUpdateApplyPartialFailure(t *testing.T) {
 		{"reference_id":1,"op":"set_labour_total","labour_total":100},
 		{"reference_id":2,"op":"set_labour_total","labour_total":100},
 		{"reference_id":3,"op":"set_labour_total","labour_total":100}
-	]}`
+	],"expected_updated_at":{"1":null,"2":null,"3":null}}`
 	resp := partsAuditRequest(t, router, http.MethodPost, "/ai-tools/mass-update/apply", payload, []string{permUpdate})
 	if resp.Code != http.StatusOK {
 		t.Fatalf("apply: got %d %s", resp.Code, resp.Body.String())
@@ -182,7 +182,7 @@ func TestMassUpdateApplyDedupesIdenticalOps(t *testing.T) {
 		{"reference_id":1,"op":"add_line_item","item_name":"Shipping","unit_price":15},
 		{"reference_id":1,"op":"set_labour_total","labour_total":100},
 		{"reference_id":1,"op":"set_labour_total","labour_total":100}
-	]}`
+	],"expected_updated_at":{"1":null}}`
 	resp := partsAuditRequest(t, router, http.MethodPost, "/ai-tools/mass-update/apply", payload, []string{permUpdate})
 	if resp.Code != http.StatusOK {
 		t.Fatalf("apply: got %d %s", resp.Code, resp.Body.String())

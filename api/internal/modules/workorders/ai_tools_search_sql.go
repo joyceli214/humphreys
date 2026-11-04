@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // aiSearchCustomerNameSQL renders the customer's display name (first + last,
@@ -201,11 +204,44 @@ func buildAISearchSQL(f aiResolvedSearchFilters) (string, []any) {
 	return query, a.args
 }
 
+// aiSearchTimeout bounds an Advanced Search query both server-side (statement
+// timeout) and client-side (context deadline) so a pathological filter
+// combination cannot tie up a connection.
+const (
+	aiSearchTimeout          = 10 * time.Second
+	aiSearchStatementTimeout = "SET LOCAL statement_timeout = '10s'"
+)
+
+// aiSearchDB is the subset of the pool AISearch needs (fakeable in tests).
+type aiSearchDB interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
 // AISearch executes validated Advanced Search filters. It returns the page of
 // rows plus the total number of matching jobs (0 when the page is empty).
 func (r *storeRepository) AISearch(ctx context.Context, f aiResolvedSearchFilters) ([]AISearchRow, int, error) {
+	return runAISearch(ctx, r.db, f)
+}
+
+// runAISearch runs the search read-only in its own transaction with a local
+// statement timeout, under a context deadline of the same length.
+func runAISearch(ctx context.Context, db aiSearchDB, f aiResolvedSearchFilters) ([]AISearchRow, int, error) {
+	ctx, cancel := context.WithTimeout(ctx, aiSearchTimeout)
+	defer cancel()
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Read-only: always roll back; nothing to commit.
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	if _, err := tx.Exec(ctx, aiSearchStatementTimeout); err != nil {
+		return nil, 0, err
+	}
+
 	query, args := buildAISearchSQL(f)
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
 	}
