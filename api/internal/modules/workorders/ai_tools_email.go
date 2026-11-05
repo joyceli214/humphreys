@@ -140,9 +140,10 @@ func (h *Handler) EmailDraft(c *gin.Context) {
 		RecipientHint:     hint,
 		HasRecipientEmail: hint != "",
 	}
-	// Same gate as POST /work-orders/:id/customer-email (the route already
-	// requires work_orders:update; checked again so the field can't leak if the
-	// route gate changes).
+	// Stricter than POST /work-orders/:id/customer-email: needs work_orders:update
+	// plus work_orders_sensitive:read (the route already requires update; checked
+	// again so the field can't leak if the route gate changes).
+	c.Header("Cache-Control", "no-store")
 	if hasPermission(c, permUpdate) && hasPermission(c, permSensitiveRead) {
 		resp.CustomerEmail, resp.CustomerEmailMixed = emailDraftRecipient(items)
 	}

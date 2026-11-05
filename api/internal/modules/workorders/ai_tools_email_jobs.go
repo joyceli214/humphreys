@@ -119,9 +119,13 @@ func emailDraftRecipient(items []domain.WorkOrderDetail) (string, bool) {
 	}
 	email := strings.TrimSpace(stringValue(items[0].Customer.Email))
 	if maskEmailHint(email) == "" {
-		email = ""
+		return "", mixed
 	}
-	return email, mixed
+	addr, err := mail.ParseAddress(email)
+	if err != nil || strings.ContainsAny(addr.Address, ",;\"<>() \t\r\n") || addr.Address != email {
+		return "", mixed
+	}
+	return addr.Address, mixed
 }
 
 // buildMultiJobEmailDraftPrompt describes every picked job (by job number and

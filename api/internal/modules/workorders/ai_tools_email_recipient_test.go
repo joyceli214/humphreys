@@ -166,4 +166,24 @@ func TestEmailDraftRecipientHelper(t *testing.T) {
 	if email, _ := emailDraftRecipient([]domain.WorkOrderDetail{invalid}); email != "" {
 		t.Errorf("invalid address should yield empty, got %q", email)
 	}
+
+	for _, bad := range []string{`"a,evil@y.com"@x.com`, "Jane <jane@example.com>", "a@b.com;c@d.com", "jane@example.com, bob@example.com"} {
+		tricky := jane1
+		tricky.Customer.Email = ptrStr(bad)
+		if email, _ := emailDraftRecipient([]domain.WorkOrderDetail{tricky}); email != "" {
+			t.Errorf("%q should yield empty, got %q", bad, email)
+		}
+	}
+}
+
+func TestEmailDraftResponseIsNoStore(t *testing.T) {
+	useMockLLM(t, mockLLMServer(t, multiDraftLLM))
+	router := aiToolsRouter(t, multiJobEmailStub())
+	resp := partsAuditRequest(t, router, http.MethodPost, "/ai-tools/email-draft", `{"work_order_ids":[5,6],"type":"progress_update"}`, ownerPerms)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("draft: got %d", resp.Code)
+	}
+	if got := resp.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
 }
