@@ -28,7 +28,7 @@ const WIDTH: Record<SlotKind, string> = {
   text: "w-32"
 };
 
-const INPUT_MODE: Partial<Record<SlotKind, "numeric" | "decimal">> = { money: "decimal", qty: "numeric", percent: "decimal" };
+const INPUT_MODE: Partial<Record<SlotKind, "numeric" | "decimal">> = { money: "decimal", qty: "decimal", percent: "decimal" };
 
 /** Small inline fill-in inputs for the active example; their values compose the instruction. */
 export function MassUpdateTemplateSlots({ templateId, values, onChange, onClose, statusOptions, catalogItems, suggestJobs = false, onJobSearchInput, disabled }: Props) {

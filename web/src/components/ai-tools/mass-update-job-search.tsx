@@ -27,11 +27,18 @@ export function MassUpdateJobSearch({ value, onChange, onInputChange, disabled =
   const [error, setError] = useState("");
   const [active, setActive] = useState(-1);
   const requestId = useRef(0);
+  /** Job IDs settled before the current in-progress suffix token (picks, pasted lists, parent updates). */
+  const confirmed = useRef(value);
+  /** Last value this input sent while typing, so the sync effect can tell it apart from parent updates. */
+  const typed = useRef<string | null>(null);
   const parsed = emailJobQuery(query);
   const searchKey = parsed ? JSON.stringify(parsed.filters) : "";
   const ids = idsFrom(value);
 
-  useEffect(() => setQuery(value), [value]);
+  useEffect(() => {
+    setQuery(value);
+    if (value !== typed.current) confirmed.current = value;
+  }, [value]);
 
   useEffect(() => {
     const id = ++requestId.current;
@@ -63,8 +70,11 @@ export function MassUpdateJobSearch({ value, onChange, onInputChange, disabled =
 
   const choose = (row: AISearchRow) => {
     const id = String(row.reference_id);
-    if (ids.includes(id)) return;
-    const next = [...ids, id].join(", ");
+    // A suffix search's typed digits are only a search term, not a job ID: build on the confirmed IDs instead.
+    const base = parsed?.filters.job_suffix ? idsFrom(confirmed.current) : ids;
+    if (base.includes(id)) return;
+    const next = [...base, id].join(", ");
+    confirmed.current = next;
     onChange(next);
     setQuery(next);
     setOpen(false);
@@ -111,7 +121,13 @@ export function MassUpdateJobSearch({ value, onChange, onInputChange, disabled =
           setQuery(text);
           setOpen(true);
           setActive(-1);
-          if (/^[\d\s,#]*$/.test(text)) onChange(text.replace(/#/g, ""));
+          if (/^[\d\s,#]*$/.test(text)) {
+            const next = text.replace(/#/g, "");
+            typed.current = next;
+            // A lone digit run is an in-progress suffix search; lists (or a cleared box) are confirmed as typed.
+            if (!emailJobQuery(text)?.filters.job_suffix) confirmed.current = next;
+            onChange(next);
+          }
         }}
         onKeyDown={onKeyDown}
       />

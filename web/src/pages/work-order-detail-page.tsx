@@ -35,6 +35,7 @@ import { DEFAULT_EMAIL_TEMPLATES, renderEmailTemplate, type CustomerEmailTemplat
 import { emailHtmlToPlainText, emailTextToHtml, finalizeEmailHtml, sanitizeEmailHtml } from "@/lib/email-html";
 import { DEFAULT_EMAIL_PHOTO_LIMITS, extractPhotoUrls, summarizePhotoSelection, type EmailPhoto, type EmailPhotoLimits } from "@/lib/email-photos";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { isPortalWorkOrderTwoColumn, usePortalWidth } from "@/components/layout/portal-width";
 import { AI_EMAIL_DRAFT_QUERY_PARAM, takeAIEmailDraft, type AIEmailDraftHandoff } from "@/lib/ai-tools/email-handoff";
 import { EmailPhotoPanel } from "@/components/email-photo-panel";
 import "@mdxeditor/editor/style.css";
@@ -425,6 +426,7 @@ export default function WorkOrderDetailPage() {
   const emailPhotoRequestRef = useRef(0);
   const loadEmailPhotosRef = useRef<(() => Promise<void>) | null>(null);
   const wideEmailLayout = useMediaQuery("(min-width: 900px)");
+  const workOrderTwoColumn = isPortalWorkOrderTwoColumn(usePortalWidth());
   const [completingJob, setCompletingJob] = useState(false);
   const [pickupStatusDialogOpen, setPickupStatusDialogOpen] = useState(false);
   const [pickupOtherStatusID, setPickupOtherStatusID] = useState<number | null>(null);
@@ -1969,13 +1971,18 @@ export default function WorkOrderDetailPage() {
   );
   const renderWorkOrderLayout = () => (
     <>
-      <div className="min-w-0 space-y-4 xl:hidden">
+      {/* Switch on the portal column width (shrinks beside docked Management), not the viewport. */}
+      <div data-testid="wo-layout-mobile" className={cn("min-w-0 space-y-4", workOrderTwoColumn && "hidden")}>
         {workOrderLayout.mobileOrder.map((blockID) =>
           registeredLayoutBlocks[blockID] ? <div key={blockID}>{registeredLayoutBlocks[blockID]}</div> : null
         )}
       </div>
       <div
-        className="hidden gap-4 items-start min-w-0 xl:grid xl:grid-cols-[minmax(0,var(--wo-left))_minmax(0,var(--wo-right))]"
+        data-testid="wo-layout-desktop"
+        className={cn(
+          "gap-4 items-start min-w-0 grid-cols-[minmax(0,var(--wo-left))_minmax(0,var(--wo-right))]",
+          workOrderTwoColumn ? "grid" : "hidden"
+        )}
         style={{
           "--wo-left": `${workOrderLayout.leftWidth}fr`,
           "--wo-right": `${workOrderLayout.rightWidth}fr`

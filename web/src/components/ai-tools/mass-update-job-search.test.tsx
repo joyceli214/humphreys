@@ -31,6 +31,33 @@ describe("MassUpdateJobSearch", () => {
     expect(screen.getByRole("combobox", { name: "Jobs" })).toHaveValue("29275");
   });
 
+  it("replaces the typed job-number suffix with the chosen job instead of keeping both", async () => {
+    vi.useFakeTimers();
+    const searchJobs = vi.fn().mockResolvedValue([job]);
+    render(<Harness searchJobs={searchJobs} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Jobs" }), { target: { value: "275" } });
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(searchJobs).toHaveBeenCalledWith({ job_suffix: "275", limit: 20 });
+    fireEvent.click(screen.getByRole("option", { name: /#29275 Alex Example/ }));
+    expect(screen.getByTestId("selected-jobs").textContent).toBe("29275");
+    expect(screen.getByRole("combobox", { name: "Jobs" })).toHaveValue("29275");
+  });
+
+  it("keeps earlier picks when a second job is chosen by suffix", async () => {
+    vi.useFakeTimers();
+    const other: AISearchRow = { ...job, reference_id: 31221, customer_name: "Sam Sample" };
+    const searchJobs = vi.fn().mockImplementation(async (filters: AISearchFilters) => (filters.job_suffix === "221" ? [other] : [job]));
+    render(<Harness searchJobs={searchJobs} />);
+    const input = screen.getByRole("combobox", { name: "Jobs" });
+    fireEvent.change(input, { target: { value: "275" } });
+    await act(async () => vi.advanceTimersByTime(250));
+    fireEvent.click(screen.getByRole("option", { name: /#29275/ }));
+    fireEvent.change(input, { target: { value: "221" } });
+    await act(async () => vi.advanceTimersByTime(250));
+    fireEvent.click(screen.getByRole("option", { name: /#31221/ }));
+    expect(screen.getByTestId("selected-jobs").textContent).toBe("29275, 31221");
+  });
+
   it("allows pasted job numbers without waiting for search", () => {
     const searchJobs = vi.fn().mockResolvedValue([]);
     render(<Harness searchJobs={searchJobs} />);
