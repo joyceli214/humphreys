@@ -1,6 +1,7 @@
 import { useId } from "react";
 import type { LineItemCatalogItem } from "@/lib/ai-tools/types";
 import { getTemplate, type SlotKind, type TemplateId, type TemplateValues } from "@/lib/ai-tools/mass-update-templates";
+import { MassUpdateJobSearch } from "@/components/ai-tools/mass-update-job-search";
 
 type Props = {
   templateId: TemplateId;
@@ -9,6 +10,8 @@ type Props = {
   onClose: () => void;
   statusOptions: string[];
   catalogItems: LineItemCatalogItem[];
+  suggestJobs?: boolean;
+  onJobSearchInput?: () => void;
   disabled?: boolean;
 };
 
@@ -28,7 +31,7 @@ const WIDTH: Record<SlotKind, string> = {
 const INPUT_MODE: Partial<Record<SlotKind, "numeric" | "decimal">> = { money: "decimal", qty: "numeric", percent: "decimal" };
 
 /** Small inline fill-in inputs for the active example; their values compose the instruction. */
-export function MassUpdateTemplateSlots({ templateId, values, onChange, onClose, statusOptions, catalogItems, disabled }: Props) {
+export function MassUpdateTemplateSlots({ templateId, values, onChange, onClose, statusOptions, catalogItems, suggestJobs = false, onJobSearchInput, disabled }: Props) {
   const baseId = useId();
   const template = getTemplate(templateId);
   const itemListId = `${baseId}-items`;
@@ -44,7 +47,9 @@ export function MassUpdateTemplateSlots({ templateId, values, onChange, onClose,
         const value = values[slot.key] ?? "";
         const set = (v: string) => onChange(slot.key, v);
         let control;
-        if (slot.kind === "status" && statusOptions.length > 0) {
+        if (slot.kind === "jobs" && suggestJobs) {
+          control = <MassUpdateJobSearch value={value} onChange={set} onInputChange={onJobSearchInput} disabled={disabled} />;
+        } else if (slot.kind === "status" && statusOptions.length > 0) {
           const options = value && !statusOptions.includes(value) ? [...statusOptions, value] : statusOptions;
           control = (
             <select id={id} value={value} disabled={disabled} onChange={(e) => set(e.target.value)} className={`${INPUT_CLASS} ${WIDTH.status}`}>
@@ -72,8 +77,8 @@ export function MassUpdateTemplateSlots({ templateId, values, onChange, onClose,
           );
         }
         return (
-          <div key={slot.key} className="flex items-center gap-1.5 max-[480px]:w-full">
-            <label htmlFor={id} className="shrink-0 text-xs font-medium text-neutral-600">
+          <div key={slot.key} className="flex min-w-0 items-start gap-1.5 max-[480px]:w-full">
+            <label htmlFor={slot.kind === "jobs" && suggestJobs ? undefined : id} className="shrink-0 pt-2 text-xs font-medium text-neutral-600">
               {slot.label}
             </label>
             {control}

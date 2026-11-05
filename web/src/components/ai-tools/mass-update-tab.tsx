@@ -37,6 +37,12 @@ export function MassUpdateTab() {
   const [template, setTemplate] = useState<ActiveTemplate | null>(null);
   const [statusOptions, setStatusOptions] = useState<string[]>([]);
   const [catalogItems, setCatalogItems] = useState<LineItemCatalogItem[]>([]);
+  const [preview, setPreview] = useState<MassUpdatePreviewResponse | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [previewing, setPreviewing] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState("");
+  const [results, setResults] = useState<MassUpdateApplyResult[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +60,14 @@ export function MassUpdateTab() {
   }, []);
 
   /** Shows the template's slots and composes the instruction from them. */
+  const invalidatePreview = () => {
+    setPreview(null);
+    setSelected(new Set());
+    setError("");
+  };
+
   const activate = (next: ActiveTemplate) => {
+    invalidatePreview();
     setTemplate(next);
     setInstruction(appendLine(next.prefix, composeTemplate(next.id, next.values)));
   };
@@ -76,15 +89,10 @@ export function MassUpdateTab() {
 
   /** Typing in the instruction box directly detaches the slots and keeps the text as typed. */
   const editInstruction = (text: string) => {
+    invalidatePreview();
     setTemplate(null);
     setInstruction(text);
   };
-  const [preview, setPreview] = useState<MassUpdatePreviewResponse | null>(null);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [previewing, setPreviewing] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [error, setError] = useState("");
-  const [results, setResults] = useState<MassUpdateApplyResult[] | null>(null);
 
   const runPreview = async () => {
     const text = instruction.trim();
@@ -179,6 +187,8 @@ export function MassUpdateTab() {
               onClose={() => setTemplate(null)}
               statusOptions={statusOptions}
               catalogItems={catalogItems}
+              suggestJobs={template.fromProfile}
+              onJobSearchInput={invalidatePreview}
               disabled={busy}
             />
           )}
