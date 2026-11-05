@@ -1,6 +1,6 @@
 import React from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AISearchResponse, AISearchRow } from "@/lib/ai-tools/types";
 import { SearchResults } from "@/components/ai-tools/search-results";
 
@@ -85,5 +85,50 @@ describe("SearchResults", () => {
     render(<SearchResults result={{ ...flat, rows: [], total: 0 }} />);
     expect(screen.getByText(/No jobs match these filters/)).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("never caps or clips the results: no max-height/overflow-hidden; wide tables scroll horizontally", () => {
+    const { container } = render(<SearchResults result={GROUPED} />);
+    for (const table of screen.getAllByRole("table")) {
+      expect(table.parentElement).toHaveClass("overflow-x-auto");
+      for (let el: HTMLElement | null = table; el && el !== container; el = el.parentElement) {
+        expect(el.className).not.toMatch(/\bmax-h-|\boverflow-hidden\b|\boverflow-y-(auto|scroll|hidden)\b|(?:^|\s)h-(?:\d|\[|screen)/);
+      }
+    }
+  });
+});
+
+describe("SearchResults job links", () => {
+  const originalParent = Object.getOwnPropertyDescriptor(window, "parent");
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalParent) Object.defineProperty(window, "parent", originalParent);
+  });
+
+  it("standalone: a plain click opens the job in a new tab", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(<SearchResults result={GROUPED} />);
+    const link = screen.getByRole("link", { name: "#101" });
+    expect(fireEvent.click(link)).toBe(false); // default prevented
+    expect(open).toHaveBeenCalledWith("/work-orders/101", "_blank");
+  });
+
+  it("embedded: a plain click posts to the parent portal and opens no tab", () => {
+    const parentPost = vi.fn();
+    const fakeParent = { location: { origin: window.location.origin }, closed: false, postMessage: parentPost };
+    Object.defineProperty(window, "parent", { configurable: true, get: () => fakeParent });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(<SearchResults result={GROUPED} />);
+    expect(fireEvent.click(screen.getByRole("link", { name: "#201" }))).toBe(false);
+    expect(parentPost).toHaveBeenCalledWith({ type: "humphreys-open-job", id: 201 }, window.location.origin);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("modified clicks are left to the browser", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(<SearchResults result={GROUPED} />);
+    expect(fireEvent.click(screen.getByRole("link", { name: "#101" }), { ctrlKey: true })).toBe(true);
+    expect(open).not.toHaveBeenCalled();
   });
 });

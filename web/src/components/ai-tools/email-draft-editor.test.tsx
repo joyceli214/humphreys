@@ -14,8 +14,7 @@ function renderEditor(onChange = vi.fn()) {
       onChange={onChange}
       recipientHint="j***@example.com"
       busy={false}
-      canOpenInEditor
-      onOpenInEditor={vi.fn()}
+      onOpenInEmailApp={vi.fn()}
       onRegenerate={vi.fn()}
       canRegenerate
     />
@@ -62,8 +61,7 @@ describe("EmailDraftEditor header", () => {
         onChange={vi.fn()}
         recipientHint=""
         busy={false}
-        canOpenInEditor={false}
-        onOpenInEditor={vi.fn()}
+        onOpenInEmailApp={vi.fn()}
         onRegenerate={vi.fn()}
         canRegenerate
         onSend={vi.fn()}
@@ -72,5 +70,47 @@ describe("EmailDraftEditor header", () => {
     );
     expect(screen.getByText("customer has no email on file")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send email" })).toBeDisabled();
+  });
+
+  it("replaces 'Open in Email Customer editor' with 'Open in email app'", () => {
+    const onOpen = vi.fn();
+    render(
+      <EmailDraftEditor
+        draft={{ subject: "S", body: "B" }}
+        onChange={vi.fn()}
+        recipientHint="j***@example.com"
+        busy={false}
+        onOpenInEmailApp={onOpen}
+        onRegenerate={vi.fn()}
+        canRegenerate
+        onSend={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("button", { name: /Email Customer editor/ })).toBeNull();
+    expect(screen.queryByText(/Email Customer editor/)).toBeNull();
+    const open = screen.getByRole("button", { name: "Open in email app" });
+    expect(open).toBeEnabled();
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.click(open);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Send email" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Nothing is sent until you press Send email and confirm. 'Open in email app' opens your device's email app with this draft; add photos there."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("disables 'Open in email app' for an incomplete draft and shows Copy draft only when given", () => {
+    const onCopy = vi.fn();
+    const props = { onChange: vi.fn(), recipientHint: "", busy: false, onOpenInEmailApp: vi.fn(), onRegenerate: vi.fn(), canRegenerate: true };
+    const { rerender } = render(<EmailDraftEditor {...props} draft={{ subject: "S", body: " " }} />);
+    expect(screen.getByRole("button", { name: "Open in email app" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Copy draft" })).toBeNull();
+
+    rerender(<EmailDraftEditor {...props} draft={{ subject: "S", body: "B" }} onCopyDraft={onCopy} emailAppNotes={<p>a note</p>} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy draft" }));
+    expect(onCopy).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("a note")).toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MassUpdatePreviewResponse } from "@/lib/ai-tools/types";
 
@@ -11,12 +11,16 @@ vi.mock("@/lib/api/client", () => ({
   apiClient: {
     previewAIMassUpdate: (...args: unknown[]) => previewAIMassUpdate(...args),
     applyAIMassUpdate: (...args: unknown[]) => applyAIMassUpdate(...args),
-    getAILineItemCatalog: (...args: unknown[]) => getAILineItemCatalog(...args)
+    getAILineItemCatalog: (...args: unknown[]) => getAILineItemCatalog(...args),
+    listWorkOrderStatuses: (...args: unknown[]) => listWorkOrderStatuses(...args)
   }
 }));
 
+const listWorkOrderStatuses = vi.fn();
+
 beforeEach(() => {
   getAILineItemCatalog.mockResolvedValue({ items: [{ name: "Belt Kit / Shipping", unit_price: 32, quantity_text: "1" }] });
+  listWorkOrderStatuses.mockResolvedValue({ items: [{ id: 1, label: "Ready for pickup" }, { id: 2, label: "In repair" }] });
 });
 
 import { MassUpdateTab } from "@/components/ai-tools/mass-update-tab";
@@ -191,23 +195,92 @@ describe("MassUpdateTab", () => {
     expect(screen.getByText("12 / 2000")).toBeInTheDocument();
   });
 
-  it("replaces the instruction with an example from the capabilities panel", () => {
+  it("shows fill-in slots (no sample numbers) when an example is clicked, replacing the instruction", () => {
     render(<MassUpdateTab />);
     const box = screen.getByLabelText("Describe the changes you want to make");
     fireEvent.change(box, { target: { value: "old text" } });
-    fireEvent.click(screen.getByRole("button", { name: "Give job 31199 a 10% labour discount." }));
-    expect(box).toHaveValue("Give job 31199 a 10% labour discount.");
+    expect(screen.queryByRole("group", { name: "Fill in the example" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Give a labour discount" }));
+    const slots = screen.getByRole("group", { name: "Fill in the example" });
+    expect(within(slots).getByLabelText("Jobs")).toHaveValue("");
+    expect(within(slots).getByLabelText("Discount %")).toHaveValue("");
+    expect(box).toHaveValue("Give jobs a labour discount.");
+    expect((box as HTMLTextAreaElement).value).not.toMatch(/\d|\[|_/);
   });
 
-  it("appends a catalog item to the instruction on a new line", async () => {
+  it("composes the instruction live as slots are filled", () => {
+    render(<MassUpdateTab />);
+    const box = screen.getByLabelText("Describe the changes you want to make");
+    fireEvent.click(screen.getByRole("button", { name: "Give a labour discount" }));
+    const slots = screen.getByRole("group", { name: "Fill in the example" });
+    fireEvent.change(within(slots).getByLabelText("Jobs"), { target: { value: "101, 102" } });
+    expect(box).toHaveValue("Give jobs 101 and 102 a labour discount.");
+    fireEvent.change(within(slots).getByLabelText("Discount %"), { target: { value: "15" } });
+    expect(box).toHaveValue("Give jobs 101 and 102 a 15% labour discount.");
+    expect(screen.getByRole("button", { name: "Preview changes" })).toBeEnabled();
+  });
+
+  it("offers loaded statuses as a pick list in the status slot", async () => {
+    render(<MassUpdateTab />);
+    const box = screen.getByLabelText("Describe the changes you want to make");
+    fireEvent.click(screen.getByRole("button", { name: "Set jobs to a status" }));
+    const slots = screen.getByRole("group", { name: "Fill in the example" });
+    await waitFor(() => expect(within(slots).getByRole("option", { name: "Ready for pickup" })).toBeInTheDocument());
+    const status = within(slots).getByLabelText("Status");
+    expect(status.tagName).toBe("SELECT");
+    fireEvent.change(within(slots).getByLabelText("Jobs"), { target: { value: "7" } });
+    fireEvent.change(status, { target: { value: "Ready for pickup" } });
+    expect(box).toHaveValue("Set job 7 to Ready for pickup.");
+  });
+
+  it("detaches the slots when the instruction is edited directly, keeping the text", () => {
+    render(<MassUpdateTab />);
+    const box = screen.getByLabelText("Describe the changes you want to make");
+    fireEvent.click(screen.getByRole("button", { name: "Generate Work Done for jobs" }));
+    fireEvent.change(screen.getByLabelText("Jobs"), { target: { value: "5" } });
+    fireEvent.change(box, { target: { value: "Generate Work Done for job 5 please." } });
+    expect(screen.queryByRole("group", { name: "Fill in the example" })).toBeNull();
+    expect(box).toHaveValue("Generate Work Done for job 5 please.");
+  });
+
+  it("catalog Insert opens the add-item template with the item slot prefilled from the catalog", async () => {
     render(<MassUpdateTab />);
     const box = screen.getByLabelText("Describe the changes you want to make");
     fireEvent.click(await screen.findByRole("button", { name: "Insert Belt Kit / Shipping" }));
-    expect(box).toHaveValue('Add "Belt Kit / Shipping" at $32.00 (qty 1) to job ');
+    const slots = screen.getByRole("group", { name: "Fill in the example" });
+    const item = within(slots).getByLabelText("Item");
+    expect(item).toHaveValue("Belt Kit / Shipping");
+    const listId = item.getAttribute("list");
+    expect(listId).toBeTruthy();
+    expect(document.getElementById(listId!)?.querySelector('option[value="Belt Kit / Shipping"]')).not.toBeNull();
+    expect(within(slots).getByLabelText("Price")).toHaveValue("32.00");
+    expect(within(slots).getByLabelText("Qty")).toHaveValue("1");
+    expect(within(slots).getByLabelText("Jobs")).toHaveValue("");
+    expect(box).toHaveValue('Add "Belt Kit / Shipping" at $32.00 (qty 1) to jobs.');
 
-    fireEvent.change(box, { target: { value: "Set job 31195 to Ready for pickup." } });
-    fireEvent.click(screen.getByRole("button", { name: "Insert Belt Kit / Shipping" }));
-    expect(box).toHaveValue('Set job 31195 to Ready for pickup.\nAdd "Belt Kit / Shipping" at $32.00 (qty 1) to job ');
+    fireEvent.change(within(slots).getByLabelText("Jobs"), { target: { value: "42" } });
+    expect(box).toHaveValue('Add "Belt Kit / Shipping" at $32.00 (qty 1) to job 42.');
+  });
+
+  it("catalog Insert keeps earlier typed text and composes the new line beneath it", async () => {
+    render(<MassUpdateTab />);
+    const box = screen.getByLabelText("Describe the changes you want to make");
+    fireEvent.change(box, { target: { value: "Move job 9 to location B." } });
+    fireEvent.click(await screen.findByRole("button", { name: "Insert Belt Kit / Shipping" }));
+    fireEvent.change(screen.getByLabelText("Jobs"), { target: { value: "9" } });
+    expect(box).toHaveValue('Move job 9 to location B.\nAdd "Belt Kit / Shipping" at $32.00 (qty 1) to job 9.');
+  });
+
+  it("fills the pane: no max-width centering, responsive grid columns", () => {
+    const { container } = render(<MassUpdateTab />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toMatch(/\bgrid\b/);
+    expect(root).toHaveClass("grid-cols-1", "w-full");
+    expect(root.className).toMatch(/\b(?:md|lg):grid-cols-/);
+    for (const el of Array.from(container.querySelectorAll<HTMLElement>("*"))) {
+      expect(el.getAttribute("class") ?? "").not.toMatch(/\bmax-w-|\bmx-auto\b/);
+    }
   });
 
   it("updates the money summary live as rows are toggled", async () => {
@@ -219,11 +292,13 @@ describe("MassUpdateTab", () => {
 
     // The invalid row (job 3) never counts.
     expect(await screen.findByTestId("money-net")).toHaveTextContent("Net change: +$16.00");
-    expect(screen.getByText("Job #2 (B): −$4.00")).toBeInTheDocument();
+    const moneyLines = () =>
+      Array.from(screen.getByTestId("money-net").parentElement!.querySelectorAll("li")).map((li) => li.textContent);
+    expect(moneyLines()).toContain("Job #2 (B): −$4.00");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select change 2 for job #2" }));
     expect(screen.getByTestId("money-net")).toHaveTextContent("Net change: +$20.00");
-    expect(screen.queryByText(/Job #2 \(B\)/)).not.toBeInTheDocument();
+    expect(moneyLines().some((line) => line?.startsWith("Job #2 (B)"))).toBe(false);
   });
 
   it("sends generated Work Done operations back unchanged, including the text", async () => {

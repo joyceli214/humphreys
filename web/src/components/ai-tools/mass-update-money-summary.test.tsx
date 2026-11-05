@@ -17,9 +17,10 @@ describe("MassUpdateMoneySummary", () => {
   it("shows the net change and a line per job", () => {
     render(<MassUpdateMoneySummary rows={ROWS} selected={new Set([0, 1, 2])} />);
     expect(screen.getByTestId("money-net")).toHaveTextContent("Net change: +$28.00");
-    expect(screen.getByText("Job #31152 (Paul): +$32.00")).toBeInTheDocument();
-    expect(screen.getByText("Job #31174 (Unknown customer): −$4.00")).toBeInTheDocument();
-    expect(screen.queryByText(/Job #31180/)).not.toBeInTheDocument();
+    const lines = screen.getAllByRole("listitem").map((li) => li.textContent);
+    expect(lines).toEqual(["Job #31152 (Paul): +$32.00", "Job #31174 (Unknown customer): −$4.00"]);
+    // Job numbers are links that open the job in the portal.
+    expect(screen.getByRole("link", { name: "#31152" })).toHaveAttribute("href", "/work-orders/31152");
   });
 
   it("explains when no selected change affects the price", () => {

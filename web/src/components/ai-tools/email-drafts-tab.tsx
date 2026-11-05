@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { apiClient } from "@/lib/api/client";
 import type { EmailDraftTarget, EmailDraftType } from "@/lib/ai-tools/types";
-import { openJobWithDraft, saveAIEmailDraft, templateForDraftType } from "@/lib/ai-tools/email-handoff";
+import { templateForDraftType } from "@/lib/ai-tools/email-handoff";
+import { buildMailto, draftClipboardText, mailtoNavigator } from "@/lib/mailto";
 import {
   EMAIL_MAX_JOBS,
   addSelectedJob,
@@ -29,7 +30,30 @@ const DRAFT_TYPES: Array<{ value: EmailDraftType; label: string }> = [
 ];
 
 /** What the current draft was generated for (from the server response). */
-type DraftMeta = { ids: number[]; type: EmailDraftType; recipientHint: string };
+type DraftMeta = {
+  ids: number[];
+  type: EmailDraftType;
+  recipientHint: string;
+  /** Full address for mailto:; "" when not on file or not permitted. Kept in memory only. */
+  customerEmail: string;
+  customerEmailMixed: boolean;
+};
+
+const NO_RECIPIENT_NOTE = "No email on file for this customer; add the recipient in your email app.";
+const MIXED_CUSTOMERS_NOTE = "These jobs belong to different customers; using the first customer's email.";
+const TOO_LONG_NOTE = "Draft is too long for the email app link; copied to clipboard";
+const COPIED_NOTE = "Draft copied to clipboard.";
+const COPY_FAILED_NOTE = "Couldn't copy the draft to the clipboard. Select the text above and copy it manually.";
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (!navigator.clipboard?.writeText) return false;
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
@@ -59,6 +83,7 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [sent, setSent] = useState(false);
+  const [clipboardNote, setClipboardNote] = useState("");
 
   useEffect(() => saveSelectedJobs(jobs), [jobs]);
 
@@ -87,11 +112,18 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
     setDrafting(true);
     setError("");
     setNote("");
+    setClipboardNote("");
     resetSendState();
     try {
       const res = await apiClient.draftAICustomerEmail({ work_order_ids: emailIds, type, notes: notes.trim() });
       setDraft({ subject: res.subject, body: res.body });
-      setMeta({ ids: res.work_order_ids?.length ? res.work_order_ids : emailIds, type: res.type ?? type, recipientHint: res.recipient_hint ?? "" });
+      setMeta({
+        ids: res.work_order_ids?.length ? res.work_order_ids : emailIds,
+        type: res.type ?? type,
+        recipientHint: res.recipient_hint ?? "",
+        customerEmail: res.customer_email?.trim() ?? "",
+        customerEmailMixed: res.customer_email_mixed === true
+      });
     } catch (err) {
       setError(errorMessage(err, "Could not draft the email."));
     } finally {
@@ -121,20 +153,25 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
     }
   };
 
-  const openInEditor = () => {
-    if (!draft || !meta || meta.ids.length !== 1) return;
-    const saved = saveAIEmailDraft({
-      referenceId: meta.ids[0],
-      template: templateForDraftType(meta.type),
-      subject: draft.subject.trim(),
-      body: draft.body.trim()
-    });
-    if (!saved) {
-      setError("Couldn't hand the draft over (browser storage is unavailable). Copy the text instead.");
-      return;
-    }
-    openJobWithDraft(meta.ids[0]);
-    setNote(`Opened job #${meta.ids[0]} in the portal window with this draft in the Email Customer editor.`);
+  const mailto = useMemo(
+    () => (draft ? buildMailto(meta?.customerEmail ?? "", draft.subject.trim(), draft.body.trim()) : null),
+    [draft, meta?.customerEmail]
+  );
+
+  const copyDraft = async (successNote: string) => {
+    if (!draft) return false;
+    const ok = await copyText(draftClipboardText(draft.subject.trim(), draft.body.trim()));
+    setClipboardNote(ok ? successNote : COPY_FAILED_NOTE);
+    return ok;
+  };
+
+  // Opens only on click. When the draft is too long for a mailto link, the link
+  // carries recipient + subject and the full draft goes to the clipboard.
+  const openInEmailApp = async () => {
+    if (!mailto) return;
+    setClipboardNote("");
+    if (mailto.tooLong) await copyDraft(TOO_LONG_NOTE);
+    mailtoNavigator.open(mailto.href);
   };
 
   let sendBlockedReason: string | undefined;
@@ -143,8 +180,9 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   else if (sent) sendBlockedReason = "This draft was sent. Regenerate to send another email.";
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <AICard className="space-y-4">
+    // Stacks on narrow panes; side by side from md up, giving the draft the larger share on wide panes.
+    <div className="grid w-full flex-1 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <AICard className="min-w-0 space-y-4">
         <Step n={1} title="Search jobs">
           <EmailJobSearch
             selectedIds={jobs.map((j) => j.referenceId)}
@@ -221,8 +259,17 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
         }}
         recipientHint={meta?.recipientHint ?? ""}
         busy={busy}
-        canOpenInEditor={meta?.ids.length === 1}
-        onOpenInEditor={openInEditor}
+        onOpenInEmailApp={() => void openInEmailApp()}
+        onCopyDraft={mailto?.tooLong ? () => void copyDraft(COPIED_NOTE) : undefined}
+        emailAppNotes={
+          meta && (
+            <div className="mt-2 space-y-1 text-sm text-neutral-600">
+              {!meta.customerEmail && <p>{NO_RECIPIENT_NOTE}</p>}
+              {meta.customerEmailMixed && <p>{MIXED_CUSTOMERS_NOTE}</p>}
+              {clipboardNote && <p role="status">{clipboardNote}</p>}
+            </div>
+          )
+        }
         onRegenerate={() => void runDraft()}
         canRegenerate={emailIds.length > 0}
         onSend={() => {

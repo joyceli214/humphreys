@@ -1,5 +1,6 @@
 import type { MassUpdateApplyResult } from "@/lib/ai-tools/types";
 import { AICard, AICardTitle } from "@/components/ai-tools/ai-ui";
+import { JobLink } from "@/components/ai-tools/job-link";
 
 /** "1 job", "2 jobs". Pluralises the last word of `noun` with a trailing "s". */
 export function plural(count: number, noun: string) {
@@ -30,7 +31,7 @@ export function MassUpdateResults({ results, onDismiss }: { results: MassUpdateA
         {results.map((result) => (
           <li key={result.reference_id} className="flex flex-wrap items-baseline gap-x-2">
             <span className={result.success ? "font-semibold text-green-700" : "font-semibold text-red-700"}>
-              {result.success ? "✓" : "✕"} Job #{result.reference_id}
+              {result.success ? "✓" : "✕"} Job <JobLink referenceId={result.reference_id} />
             </span>
             <span className="text-neutral-600">
               {result.success

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { MassUpdatePreviewRow } from "@/lib/ai-tools/types";
 import { rowAmountLabel } from "@/lib/ai-tools/money";
 import { AIPill } from "@/components/ai-tools/ai-ui";
+import { JobLink } from "@/components/ai-tools/job-link";
 
 const EMPTY = "—";
 
@@ -154,7 +155,9 @@ export function MassUpdatePreviewTable({ rows, selected, onChange, disabled = fa
                 onChange={() => toggleRow(index)}
               />
             </td>
-            <td className="px-3 py-2.5 whitespace-nowrap">#{row.reference_id}</td>
+            <td className="px-3 py-2.5 whitespace-nowrap">
+              <JobLink referenceId={row.reference_id} />
+            </td>
             <td className="px-3 py-2.5">{row.customer_name || "Unknown customer"}</td>
             <td className="px-3 py-2.5">{row.field}</td>
             <td className="px-3 py-2.5">

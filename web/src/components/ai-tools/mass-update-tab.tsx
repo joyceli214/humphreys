@@ -1,6 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiClient } from "@/lib/api/client";
-import type { MassUpdateApplyResult, MassUpdateExpectedUpdatedAt, MassUpdatePreviewResponse } from "@/lib/ai-tools/types";
+import type {
+  LineItemCatalogItem,
+  MassUpdateApplyResult,
+  MassUpdateExpectedUpdatedAt,
+  MassUpdatePreviewResponse
+} from "@/lib/ai-tools/types";
+import {
+  catalogTemplateValues,
+  composeTemplate,
+  emptyValues,
+  type TemplateId,
+  type TemplateValues
+} from "@/lib/ai-tools/mass-update-templates";
+import { MassUpdateTemplateSlots } from "@/components/ai-tools/mass-update-template-slots";
 import { AI_TEXT_MAX } from "@/lib/ai-tools/limits";
 import { AI_TEXTAREA_CLASS, AIButton, AICard, AICardTitle, AIErrorBox, AIPill, errorMessage } from "@/components/ai-tools/ai-ui";
 import { CharCounterInput } from "@/components/ai-tools/char-counter-input";
@@ -16,8 +29,56 @@ function appendLine(current: string, addition: string) {
   return joined.slice(0, AI_TEXT_MAX);
 }
 
+/** The example being filled in: its slot values plus any text kept above the composed line. */
+type ActiveTemplate = { id: TemplateId; values: TemplateValues; prefix: string };
+
 export function MassUpdateTab() {
   const [instruction, setInstruction] = useState("");
+  const [template, setTemplate] = useState<ActiveTemplate | null>(null);
+  const [statusOptions, setStatusOptions] = useState<string[]>([]);
+  const [catalogItems, setCatalogItems] = useState<LineItemCatalogItem[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .listWorkOrderStatuses()
+      .then((res) => {
+        if (!cancelled) setStatusOptions(res.items.map((item) => item.label));
+      })
+      .catch(() => {
+        // The status slot falls back to a plain text box.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Shows the template's slots and composes the instruction from them. */
+  const activate = (next: ActiveTemplate) => {
+    setTemplate(next);
+    setInstruction(appendLine(next.prefix, composeTemplate(next.id, next.values)));
+  };
+
+  const setSlot = (key: string, value: string) => {
+    if (!template) return;
+    const values = { ...template.values, [key]: value };
+    // Picking a catalog item in the add-item template fills in its typical price and qty when blank.
+    if (template.id === "add-item" && key === "item") {
+      const match = catalogItems.find((item) => item.name === value);
+      if (match) {
+        const prefill = catalogTemplateValues(match);
+        if (!values.price) values.price = prefill.price;
+        if (!values.qty) values.qty = prefill.qty;
+      }
+    }
+    activate({ ...template, values });
+  };
+
+  /** Typing in the instruction box directly detaches the slots and keeps the text as typed. */
+  const editInstruction = (text: string) => {
+    setTemplate(null);
+    setInstruction(text);
+  };
   const [preview, setPreview] = useState<MassUpdatePreviewResponse | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [previewing, setPreviewing] = useState(false);
@@ -83,44 +144,67 @@ export function MassUpdateTab() {
   const busy = previewing || applying;
 
   return (
-    <div className="space-y-4">
-      <MassUpdateCapabilities onExample={(text) => setInstruction(text.slice(0, AI_TEXT_MAX))} disabled={busy} />
+    // Stacks on narrow panes; from md up the instruction takes the wide column and the
+    // examples + catalog sit beside it. The preview always spans the full width.
+    <div className="grid w-full flex-1 grid-cols-1 content-start gap-4 md:grid-cols-[minmax(0,3fr)_minmax(16rem,2fr)] xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="min-w-0 md:col-start-2 md:row-start-1">
+        <MassUpdateCapabilities onExample={(id) => activate({ id, values: emptyValues(id), prefix: "" })} disabled={busy} />
+      </div>
 
-      <AICard>
-        <label htmlFor="ai-mass-update-instruction" className="block text-sm font-semibold text-neutral-800">
-          Describe the changes you want to make
-        </label>
-        <p id="ai-mass-update-help" className="mt-1 text-xs text-neutral-500">
-          Write in plain English and include the job numbers. You will see a preview of every change before anything is saved.
-        </p>
-        <CharCounterInput
-          multiline
-          id="ai-mass-update-instruction"
-          limit={AI_TEXT_MAX}
-          rows={3}
-          aria-describedby="ai-mass-update-help"
-          className={`${AI_TEXTAREA_CLASS} mt-2 resize-y`}
-          placeholder="For example: Set the labour total to $80 on jobs 31201 and 31205. Move job 31201 to Ready for Pickup on Shelf B."
-          value={instruction}
-          onValueChange={setInstruction}
-          disabled={previewing || applying}
+      <div className="min-w-0 space-y-4 md:col-start-1 md:row-span-2 md:row-start-1">
+        <AICard>
+          <label htmlFor="ai-mass-update-instruction" className="block text-sm font-semibold text-neutral-800">
+            Describe the changes you want to make
+          </label>
+          <p id="ai-mass-update-help" className="mt-1 text-xs text-neutral-500">
+            Write in plain English and include the job numbers. You will see a preview of every change before anything is saved.
+          </p>
+          {template && (
+            <MassUpdateTemplateSlots
+              templateId={template.id}
+              values={template.values}
+              onChange={setSlot}
+              onClose={() => setTemplate(null)}
+              statusOptions={statusOptions}
+              catalogItems={catalogItems}
+              disabled={busy}
+            />
+          )}
+          <CharCounterInput
+            multiline
+            id="ai-mass-update-instruction"
+            limit={AI_TEXT_MAX}
+            rows={4}
+            aria-describedby="ai-mass-update-help"
+            className={`${AI_TEXTAREA_CLASS} mt-2 resize-y`}
+            placeholder="For example: set the labour total on two jobs, or move a job to a new status. Pick an example to fill in the details."
+            value={instruction}
+            onValueChange={editInstruction}
+            disabled={previewing || applying}
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <AIButton onClick={() => void runPreview()} disabled={previewing || applying || !instruction.trim()}>
+              {previewing ? "Preparing preview..." : "Preview changes"}
+            </AIButton>
+            <AIPill>Nothing is saved until you apply</AIPill>
+          </div>
+        </AICard>
+
+        {error && <AIErrorBox>{error}</AIErrorBox>}
+
+        {results && <MassUpdateResults results={results} onDismiss={() => setResults(null)} />}
+      </div>
+
+      <div className="min-w-0 md:col-start-2 md:row-start-2">
+        <LineItemCatalog
+          onInsert={(item) => activate({ id: "add-item", values: catalogTemplateValues(item), prefix: instruction })}
+          onLoaded={setCatalogItems}
+          disabled={busy}
         />
-        <div className="mt-3 flex items-center gap-2">
-          <AIButton onClick={() => void runPreview()} disabled={previewing || applying || !instruction.trim()}>
-            {previewing ? "Preparing preview..." : "Preview changes"}
-          </AIButton>
-          <AIPill>Nothing is saved until you apply</AIPill>
-        </div>
-      </AICard>
-
-      <LineItemCatalog onInsert={(text) => setInstruction((current) => appendLine(current, text))} disabled={busy} />
-
-      {error && <AIErrorBox>{error}</AIErrorBox>}
-
-      {results && <MassUpdateResults results={results} onDismiss={() => setResults(null)} />}
+      </div>
 
       {preview && (
-        <AICard>
+        <AICard className="min-w-0 md:col-span-2">
           <AICardTitle>
             Preview: {plural(rows.length, "change")} across {plural(jobCount, "job")}
           </AICardTitle>

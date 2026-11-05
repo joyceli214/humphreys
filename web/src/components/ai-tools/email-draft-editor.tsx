@@ -10,9 +10,12 @@ type Props = {
   /** Masked address from the server (e.g. "j***@gmail.com"); "" when none on file. */
   recipientHint: string;
   busy: boolean;
-  /** Single-job handoff to the Email Customer dialog (for photo attachments). */
-  canOpenInEditor: boolean;
-  onOpenInEditor: () => void;
+  /** Opens the device's email app (mailto:) with the current draft. Click only. */
+  onOpenInEmailApp: () => void;
+  /** When set, shows a "Copy draft" button (used when the draft is too long for a mailto link). */
+  onCopyDraft?: () => void;
+  /** Notes about the email-app handoff (missing recipient, mixed customers, clipboard). */
+  emailAppNotes?: ReactNode;
   onRegenerate: () => void;
   canRegenerate: boolean;
   /** Undefined hides the Send button; a reason string disables it with a note. */
@@ -27,8 +30,9 @@ export function EmailDraftEditor({
   onChange,
   recipientHint,
   busy,
-  canOpenInEditor,
-  onOpenInEditor,
+  onOpenInEmailApp,
+  onCopyDraft,
+  emailAppNotes,
   onRegenerate,
   canRegenerate,
   onSend,
@@ -38,11 +42,11 @@ export function EmailDraftEditor({
   const complete = Boolean(draft?.subject.trim() && draft?.body.trim());
 
   return (
-    <AICard className="flex flex-col">
+    <AICard className="flex min-w-0 flex-col">
       <AICardTitle>Draft (editable)</AICardTitle>
       {draft ? (
         <>
-          <div className="mt-2 rounded-md border border-[#ddd5cc] bg-white">
+          <div className="mt-2 flex flex-1 flex-col rounded-md border border-[#ddd5cc] bg-white">
             <div className="space-y-1 border-b border-[#efeae4] px-3 py-2 text-sm text-neutral-500">
               <div>To: {recipientHint || <span className="text-red-700">customer has no email on file</span>}</div>
               <div className="flex items-start gap-1">
@@ -55,7 +59,7 @@ export function EmailDraftEditor({
             <textarea
               aria-label="Email body"
               rows={12}
-              className={`${AI_TEXTAREA_CLASS} resize-y border-0 focus:ring-0`}
+              className={`${AI_TEXTAREA_CLASS} min-h-[16rem] flex-1 resize-y border-0 focus:ring-0`}
               value={draft.body}
               onChange={(event) => onChange({ ...draft, body: event.target.value })}
               disabled={busy}
@@ -70,18 +74,24 @@ export function EmailDraftEditor({
             <AIButton variant="outline" onClick={onRegenerate} disabled={busy || !canRegenerate}>
               {busy ? "Drafting..." : "Regenerate"}
             </AIButton>
-            <AIButton variant="outline" onClick={onOpenInEditor} disabled={busy || !canOpenInEditor || !complete}>
-              Open in Email Customer editor
+            <AIButton variant="outline" onClick={onOpenInEmailApp} disabled={busy || !complete}>
+              Open in email app
             </AIButton>
+            {onCopyDraft && (
+              <AIButton variant="outline" onClick={onCopyDraft} disabled={busy || !complete}>
+                Copy draft
+              </AIButton>
+            )}
           </div>
           {sendBlockedReason && <p className="mt-2 text-sm text-neutral-600">{sendBlockedReason}</p>}
+          {emailAppNotes}
           {footer}
         </>
       ) : (
         <p className="mt-2 text-sm text-neutral-500">{busy ? "Drafting..." : "Select jobs and press Generate draft."}</p>
       )}
       <p className="mt-3 text-sm text-neutral-500">
-        Nothing is sent until you press Send email and confirm. Use the Email Customer editor (single job) to attach photos.
+        Nothing is sent until you press Send email and confirm. &apos;Open in email app&apos; opens your device&apos;s email app with this draft; add photos there.
       </p>
     </AICard>
   );

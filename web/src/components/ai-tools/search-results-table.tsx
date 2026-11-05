@@ -1,7 +1,6 @@
-import type { MouseEvent } from "react";
 import type { AISearchRow } from "@/lib/ai-tools/types";
-import { jobPath, openJobInPortal } from "@/lib/ai-tools/open-job";
 import { AIPill } from "@/components/ai-tools/ai-ui";
+import { JobLink } from "@/components/ai-tools/job-link";
 
 function formatDate(iso: string | null) {
   if (!iso) return "";
@@ -11,13 +10,6 @@ function formatDate(iso: string | null) {
 
 function equipmentLabel(row: AISearchRow) {
   return [row.brand_names.join(" / "), row.equipment_name].filter((part) => part && part.trim()).join(" ");
-}
-
-/** Plain clicks go to the opener (main portal) window; modified clicks keep browser behaviour. */
-function handleJobClick(event: MouseEvent<HTMLAnchorElement>, referenceId: number) {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  event.preventDefault();
-  openJobInPortal(referenceId);
 }
 
 function WarrantyCell({ row }: { row: AISearchRow }) {
@@ -54,15 +46,7 @@ export function SearchResultsTable({ rows }: { rows: AISearchRow[] }) {
         {rows.map((row) => (
           <tr key={row.reference_id} className="border-b border-[#efeae4]">
             <td className="px-2 py-2 whitespace-nowrap">
-              <a
-                href={jobPath(row.reference_id)}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(event) => handleJobClick(event, row.reference_id)}
-                className="hover:text-[#c2571a] hover:underline"
-              >
-                #{row.reference_id}
-              </a>
+              <JobLink referenceId={row.reference_id} />
             </td>
             <td className="px-2 py-2">{row.customer_name}</td>
             <td className="px-2 py-2">{equipmentLabel(row)}</td>

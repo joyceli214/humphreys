@@ -1,5 +1,6 @@
 import type { EmailDraftTarget, EmailDraftType, StaleJobRow } from "@/lib/ai-tools/types";
 import { AIButton } from "@/components/ai-tools/ai-ui";
+import { JobLink } from "@/components/ai-tools/job-link";
 
 /** Finished jobs get a pickup reminder; everything else a progress update. */
 export function draftTypeForRow(row: StaleJobRow): EmailDraftType {
@@ -36,14 +37,7 @@ export function StaleJobsTable({ rows, onDraftEmail }: { rows: StaleJobRow[]; on
         {rows.map((row) => (
           <tr key={row.reference_id} className="border-b border-[#efeae4]">
             <td className="px-2 py-2 whitespace-nowrap">
-              <a
-                href={`/work-orders/${row.reference_id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="hover:text-[#c2571a] hover:underline"
-              >
-                #{row.reference_id}
-              </a>
+              <JobLink referenceId={row.reference_id} />
             </td>
             <td className="px-2 py-2">{row.customer_name}</td>
             <td className="px-2 py-2">{row.status_name}</td>

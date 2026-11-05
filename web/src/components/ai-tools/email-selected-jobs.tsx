@@ -1,6 +1,7 @@
 import type { CustomerGroup, SelectedEmailJob } from "@/lib/ai-tools/email-selection";
 import { EMAIL_MAX_JOBS } from "@/lib/ai-tools/email-selection";
 import { AINotice } from "@/components/ai-tools/ai-ui";
+import { JobLink } from "@/components/ai-tools/job-link";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -36,7 +37,7 @@ export function EmailSelectedJobs({ jobs, groups, customerKey, onCustomerChange,
               )}
             >
               <span>
-                <span className="font-semibold">#{job.referenceId}</span> · {job.customerName}
+                <JobLink referenceId={job.referenceId} className="font-semibold" /> · {job.customerName}
                 {job.equipment && <> · {job.equipment}</>}
                 {job.status && <> · {job.status}</>}
               </span>
