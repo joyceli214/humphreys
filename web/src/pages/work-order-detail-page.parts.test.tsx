@@ -67,6 +67,34 @@ describe("parts request actions", () => {
     expect(screen.queryByRole("button", { name: "Cancel", exact: true })).toBeNull();
   });
 
+  it("opens a turntable profile item for review and saves only after its price is entered", async () => {
+    state.permissions.add("work_orders_sensitive:read");
+    state.permissions.add("work_orders:update");
+    const turntable = { ...detail, item_name: "Turntable" } as WorkOrderDetail;
+    vi.mocked(apiClient.getWorkOrderDetail).mockResolvedValue(turntable);
+    const update = vi.spyOn(apiClient, "updateWorkOrderLineItems").mockResolvedValue({
+      ...turntable,
+      line_items: [{ line_item_id: 9, item_name: "Cartridge", unit_price: 169.45, quantity_text: "1", line_total_text: "169.45" }]
+    });
+    openPage();
+    await screen.findAllByText("Payment Breakdown");
+
+    fireEvent.click(screen.getAllByText("Pick from product profile · Turntable")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Use Cartridge from Turntable" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Add Parts Item" })).toBeDisabled();
+    expect(update).not.toHaveBeenCalled();
+
+    const priceLabel = within(dialog).getByText("Unit Price");
+    const priceInput = priceLabel.parentElement?.querySelector("input");
+    expect(priceInput).not.toBeNull();
+    fireEvent.change(priceInput!, { target: { value: "169.45" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add Parts Item" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(123, {
+      line_items: [expect.objectContaining({ item_name: "Cartridge", unit_price: 169.45, quantity_text: "1" })]
+    }));
+  });
+
   it("approve permission works without sensitive read and sends the original version", async () => {
     state.permissions.add("parts_purchase_requests:approve");
     openPage();

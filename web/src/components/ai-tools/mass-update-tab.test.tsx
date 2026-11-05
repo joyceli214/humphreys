@@ -263,6 +263,31 @@ describe("MassUpdateTab", () => {
     expect(box).toHaveValue('Add "Belt Kit / Shipping" at $32.00 (qty 1) to job 42.');
   });
 
+  it("keeps variable-price profile items out of preview until jobs and price are confirmed", async () => {
+    render(<MassUpdateTab />);
+    fireEvent.click(screen.getByText("Pick from product profile"));
+    fireEvent.change(screen.getByLabelText("Product profile"), { target: { value: "turntable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Insert Cartridge from Turntable" }));
+
+    const slots = screen.getByRole("group", { name: "Fill in the example" });
+    expect(within(slots).getByLabelText("Item")).toHaveValue("Cartridge");
+    expect(within(slots).getByLabelText("Price")).toHaveValue("");
+    expect(within(slots).getByLabelText("Qty")).toHaveValue("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    expect(screen.getByText("Enter the job numbers before previewing this profile item.")).toBeInTheDocument();
+    expect(previewAIMassUpdate).not.toHaveBeenCalled();
+
+    fireEvent.change(within(slots).getByLabelText("Jobs"), { target: { value: "29275" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    expect(screen.getByText("Enter a valid unit price and quantity before previewing this profile item.")).toBeInTheDocument();
+    expect(previewAIMassUpdate).not.toHaveBeenCalled();
+
+    fireEvent.change(within(slots).getByLabelText("Price"), { target: { value: "169.45" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    await waitFor(() => expect(previewAIMassUpdate).toHaveBeenCalledWith('Add "Cartridge" at $169.45 (qty 1) to job 29275.'));
+  });
+
   it("catalog Insert keeps earlier typed text and composes the new line beneath it", async () => {
     render(<MassUpdateTab />);
     const box = screen.getByLabelText("Describe the changes you want to make");

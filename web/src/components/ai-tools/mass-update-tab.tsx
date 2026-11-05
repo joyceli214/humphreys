@@ -30,7 +30,7 @@ function appendLine(current: string, addition: string) {
 }
 
 /** The example being filled in: its slot values plus any text kept above the composed line. */
-type ActiveTemplate = { id: TemplateId; values: TemplateValues; prefix: string };
+type ActiveTemplate = { id: TemplateId; values: TemplateValues; prefix: string; fromProfile?: boolean };
 
 export function MassUpdateTab() {
   const [instruction, setInstruction] = useState("");
@@ -63,7 +63,7 @@ export function MassUpdateTab() {
     if (!template) return;
     const values = { ...template.values, [key]: value };
     // Picking a catalog item in the add-item template fills in its typical price and qty when blank.
-    if (template.id === "add-item" && key === "item") {
+    if (template.id === "add-item" && key === "item" && !template.fromProfile) {
       const match = catalogItems.find((item) => item.name === value);
       if (match) {
         const prefill = catalogTemplateValues(match);
@@ -88,6 +88,18 @@ export function MassUpdateTab() {
 
   const runPreview = async () => {
     const text = instruction.trim();
+    if (template?.id === "add-item" && template.fromProfile) {
+      if (!template.values.jobs?.trim()) {
+        setError("Enter the job numbers before previewing this profile item.");
+        return;
+      }
+      const price = Number((template.values.price ?? "").trim().replace(/^\$/, ""));
+      const qty = Number((template.values.qty ?? "").trim());
+      if (!template.values.price?.trim() || !template.values.qty?.trim() || !Number.isFinite(price) || price < 0 || !Number.isFinite(qty) || qty <= 0) {
+        setError("Enter a valid unit price and quantity before previewing this profile item.");
+        return;
+      }
+    }
     if (!text) {
       setError("Please describe the changes you want to make.");
       return;
@@ -198,6 +210,12 @@ export function MassUpdateTab() {
       <div className="min-w-0 md:col-start-2 md:row-start-2">
         <LineItemCatalog
           onInsert={(item) => activate({ id: "add-item", values: catalogTemplateValues(item), prefix: instruction })}
+          onPickProfile={(item) => activate({
+            id: "add-item",
+            values: { item: item.name, price: item.price ?? "", qty: item.quantity ?? "", jobs: "" },
+            prefix: instruction,
+            fromProfile: true
+          })}
           onLoaded={setCatalogItems}
           disabled={busy}
         />

@@ -42,6 +42,8 @@ import { workNotesEditorContentClassName, workNotesEditorPlugins } from "@/compo
 import { MarkdownContent, type ImageClickHandler } from "@/components/markdown-card";
 import { generateDropOffFormPdf, generatePickupFormPdf } from "@/lib/pdf/work-order-forms";
 import { DEFAULT_WORK_ORDER_LAYOUT, type WorkOrderLayoutBlockID, normalizeWorkOrderLayout } from "@/lib/work-order-layout";
+import { BillingProfilePicker } from "@/components/billing-profile-picker";
+import type { BillingProfileItem } from "@/lib/billing-profiles";
 
 // The rich-text editor (TipTap) is only needed when the email dialog opens, so keep it out of the main bundle.
 const EmailRichTextEditor = lazy(() => import("@/components/email-rich-text-editor").then((module) => ({ default: module.EmailRichTextEditor })));
@@ -503,6 +505,7 @@ export default function WorkOrderDetailPage() {
   const [lineItemsForm, setLineItemsForm] = useState<LineItemForm[]>([]);
   const [lineItemModalOpen, setLineItemModalOpen] = useState(false);
   const [lineItemModalMode, setLineItemModalMode] = useState<LineItemModalMode>("create");
+  const [lineItemFromProfile, setLineItemFromProfile] = useState(false);
   const [lineItemEditIndex, setLineItemEditIndex] = useState<number | null>(null);
   const [lineItemDraft, setLineItemDraft] = useState<LineItemForm>({
     line_item_id: null,
@@ -927,6 +930,7 @@ export default function WorkOrderDetailPage() {
   };
 
   const openCreateLineItemModal = () => {
+    setLineItemFromProfile(false);
     setLineItemModalMode("create");
     setLineItemEditIndex(null);
     setLineItemDraft(applyCalculatedLineSubtotal({
@@ -940,6 +944,7 @@ export default function WorkOrderDetailPage() {
   };
 
   const openEditLineItemModal = (line: LineItemForm, index: number) => {
+    setLineItemFromProfile(false);
     setLineItemModalMode("edit");
     setLineItemEditIndex(index);
     setLineItemDraft(applyCalculatedLineSubtotal({
@@ -948,6 +953,20 @@ export default function WorkOrderDetailPage() {
       unit_price: line.unit_price,
       quantity_text: line.quantity_text,
       line_total_text: line.line_total_text
+    }));
+    setLineItemModalOpen(true);
+  };
+
+  const openProfileLineItemModal = (profileItem: BillingProfileItem) => {
+    setLineItemFromProfile(true);
+    setLineItemModalMode("create");
+    setLineItemEditIndex(null);
+    setLineItemDraft(applyCalculatedLineSubtotal({
+      line_item_id: null,
+      item_name: profileItem.name,
+      unit_price: profileItem.price ?? "",
+      quantity_text: profileItem.quantity ?? "",
+      line_total_text: ""
     }));
     setLineItemModalOpen(true);
   };
@@ -2295,6 +2314,14 @@ export default function WorkOrderDetailPage() {
               </div>
             </div>
 
+            {canEdit && (
+              <BillingProfilePicker
+                equipmentName={item.item_name}
+                onPick={openProfileLineItemModal}
+                disabled={savingSection === "line_items"}
+              />
+            )}
+
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Parts Items</p>
               <div className="overflow-x-auto">
@@ -2351,7 +2378,9 @@ export default function WorkOrderDetailPage() {
                 <DialogContent className="max-w-lg">
                   <DialogTitle className="text-lg font-semibold">{lineItemModalMode === "edit" ? "Edit Parts Item" : "New Parts Item"}</DialogTitle>
                   <DialogDescription className="text-sm text-muted-foreground">
-                    Update fields below and save to apply changes to this work order.
+                    {lineItemFromProfile
+                      ? "Review the suggested item, then confirm its unit price and quantity before saving."
+                      : "Update fields below and save to apply changes to this work order."}
                   </DialogDescription>
                   <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="sm:col-span-2">
@@ -2417,7 +2446,7 @@ export default function WorkOrderDetailPage() {
                     </div>
                     <div className="sm:col-span-2 flex flex-wrap justify-end gap-2">
                       <Button variant="outline" onClick={() => setLineItemModalOpen(false)} disabled={savingSection === "line_items"}>Cancel</Button>
-                      <Button onClick={() => void saveLineItemFromModal()} disabled={savingSection === "line_items"}>
+                      <Button onClick={() => void saveLineItemFromModal()} disabled={savingSection === "line_items" || (lineItemFromProfile && ((parseDecimalInput(lineItemDraft.unit_price) ?? -1) < 0 || (parseDecimalInput(lineItemDraft.quantity_text) ?? 0) <= 0))}>
                         {savingSection === "line_items" ? "Saving..." : lineItemModalMode === "edit" ? "Save Changes" : "Add Parts Item"}
                       </Button>
                     </div>
