@@ -17,6 +17,7 @@ vi.mock("@/lib/api/client", () => ({
 }));
 
 import { EmailDraftsTab } from "@/components/ai-tools/email-drafts-tab";
+import { mailtoNavigator } from "@/lib/mailto";
 
 function row(reference_id: number, customer_id: number, customer_name: string, equipment_name: string): AISearchRow {
   return {
@@ -28,11 +29,29 @@ function row(reference_id: number, customer_id: number, customer_name: string, e
 
 const ROWS = [row(5, 1, "Jane Doe", "Receiver"), row(6, 1, "Jane Doe", "Turntable"), row(7, 2, "Bob Ray", "Amplifier")];
 
-function draftResponse(ids: number[], hint = "j***@example.com") {
+function draftResponse(ids: number[], hint = "j***@example.com", extra: Record<string, unknown> = {}) {
   return {
     subject: "Update on your jobs", body: "Hi Jane", type: "progress_update", model: "m",
-    work_order_ids: ids, customer_name: "Jane Doe", recipient_hint: hint, has_recipient_email: hint !== ""
+    work_order_ids: ids, customer_name: "Jane Doe", recipient_hint: hint, has_recipient_email: hint !== "",
+    ...extra
   };
+}
+
+const EMPTY_RECIPIENT_NOTE = "No email on file for this customer; add the recipient in your email app.";
+const TOO_LONG_NOTE = "Draft is too long for the email app link; copied to clipboard";
+const MIXED_NOTE = "These jobs belong to different customers; using the first customer's email.";
+
+function mockClipboard(writeText = vi.fn().mockResolvedValue(undefined)) {
+  Object.defineProperty(window.navigator, "clipboard", { value: { writeText }, configurable: true });
+  return writeText;
+}
+
+async function generateDraft(response: ReturnType<typeof draftResponse>, ...ids: number[]) {
+  render(<EmailDraftsTab target={null} />);
+  await searchAndAdd(...ids);
+  draftAICustomerEmail.mockResolvedValue(response);
+  fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+  return screen.findByRole("button", { name: "Open in email app" });
 }
 
 beforeEach(() => {
@@ -156,6 +175,75 @@ describe("EmailDraftsTab", () => {
     expect(await screen.findByText("email sending is not configured")).toBeInTheDocument();
   });
 
+  describe("Open in email app", () => {
+    let openSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      openSpy = vi.spyOn(mailtoNavigator, "open").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      openSpy.mockRestore();
+    });
+
+    it("replaces the old editor handoff button and opens a mailto link only on click", async () => {
+      const open = await generateDraft(draftResponse([5, 6], "j***@example.com", { customer_email: "jane@example.com" }), 5, 6);
+      expect(screen.queryByRole("button", { name: /Email Customer editor/ })).toBeNull();
+      expect(openSpy).not.toHaveBeenCalled();
+
+      // The edited body is what goes into the link.
+      fireEvent.change(screen.getByLabelText("Email body"), { target: { value: "Hi Jane,\nParts & labour: $180\n— Humphreys" } });
+      fireEvent.click(open);
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(openSpy).toHaveBeenCalledWith(
+        "mailto:jane@example.com?subject=Update%20on%20your%20jobs&body=Hi%20Jane%2C%0D%0AParts%20%26%20labour%3A%20%24180%0D%0A%E2%80%94%20Humphreys"
+      );
+      expect(screen.queryByText(EMPTY_RECIPIENT_NOTE)).toBeNull();
+      expect(screen.queryByText(MIXED_NOTE)).toBeNull();
+      expect(sendWorkOrderCustomerEmail).not.toHaveBeenCalled();
+      // Send email + confirm are still there.
+      expect(screen.getByRole("button", { name: "Send email" })).toBeEnabled();
+    });
+
+    it("uses an empty recipient with a note when customer_email is absent (no sensitive permission)", async () => {
+      const open = await generateDraft(draftResponse([5]), 5);
+      expect(screen.getByText(EMPTY_RECIPIENT_NOTE)).toBeInTheDocument();
+      fireEvent.click(open);
+      expect(openSpy).toHaveBeenCalledWith("mailto:?subject=Update%20on%20your%20jobs&body=Hi%20Jane");
+    });
+
+    it("shows the mixed-customers note when the server flags it", async () => {
+      await generateDraft(draftResponse([5], "j***@example.com", { customer_email: "jane@example.com", customer_email_mixed: true }), 5);
+      expect(screen.getByText(MIXED_NOTE)).toBeInTheDocument();
+    });
+
+    it("copies the full draft to the clipboard when the link would be too long, without truncating", async () => {
+      const writeText = mockClipboard();
+      const open = await generateDraft(draftResponse([5], "j***@example.com", { customer_email: "jane@example.com" }), 5);
+      const longBody = "Line of the estimate.\n".repeat(120).trim();
+      fireEvent.change(screen.getByLabelText("Email body"), { target: { value: longBody } });
+      expect(screen.getByRole("button", { name: "Copy draft" })).toBeInTheDocument();
+
+      fireEvent.click(open);
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(`Subject: Update on your jobs\n\n${longBody}`));
+      expect(await screen.findByText(TOO_LONG_NOTE)).toBeInTheDocument();
+      expect(openSpy).toHaveBeenCalledWith("mailto:jane@example.com?subject=Update%20on%20your%20jobs");
+      // The editor keeps the full body.
+      expect(screen.getByLabelText("Email body")).toHaveValue(longBody);
+
+      writeText.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Copy draft" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(`Subject: Update on your jobs\n\n${longBody}`));
+    });
+
+    it("says so when the clipboard is unavailable", async () => {
+      mockClipboard(vi.fn().mockRejectedValue(new Error("denied")));
+      const open = await generateDraft(draftResponse([5], "j***@example.com", { customer_email: "jane@example.com" }), 5);
+      fireEvent.change(screen.getByLabelText("Email body"), { target: { value: "x".repeat(2000) } });
+      fireEvent.click(open);
+      expect(await screen.findByText(/Couldn't copy the draft/)).toBeInTheDocument();
+      expect(screen.queryByText(TOO_LONG_NOTE)).toBeNull();
+    });
+  });
+
   it("caps the description notes at the server limit (2000) with a live counter", () => {
     render(<EmailDraftsTab target={null} />);
     const notes = screen.getByLabelText(/Extra notes for the AI/);
@@ -163,5 +251,15 @@ describe("EmailDraftsTab", () => {
     expect(screen.getByText("0 / 2000")).toBeInTheDocument();
     fireEvent.change(notes, { target: { value: "done Friday" } });
     expect(screen.getByText("11 / 2000")).toBeInTheDocument();
+  });
+
+  it("fills the pane: full-height responsive grid that stacks when narrow, no max-width centering", () => {
+    const { container } = render(<EmailDraftsTab target={null} />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass("grid", "w-full", "flex-1", "grid-cols-1");
+    expect(root.className).toMatch(/\b(?:md|lg):grid-cols-/);
+    for (const el of Array.from(container.querySelectorAll<HTMLElement>("*"))) {
+      expect(el.getAttribute("class") ?? "").not.toMatch(/\bmax-w-|\bmx-auto\b/);
+    }
   });
 });

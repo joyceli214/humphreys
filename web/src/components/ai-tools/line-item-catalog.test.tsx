@@ -8,7 +8,7 @@ vi.mock("@/lib/api/client", () => ({
   apiClient: { getAILineItemCatalog: (...args: unknown[]) => getAILineItemCatalog(...args) }
 }));
 
-import { LineItemCatalog, catalogInstruction } from "@/components/ai-tools/line-item-catalog";
+import { LineItemCatalog } from "@/components/ai-tools/line-item-catalog";
 
 const ITEMS = [
   { name: "Belt Kit / Shipping", unit_price: 32, quantity_text: "1" },
@@ -18,13 +18,6 @@ const ITEMS = [
 afterEach(() => {
   cleanup();
   getAILineItemCatalog.mockReset();
-});
-
-describe("catalogInstruction", () => {
-  it("builds an example instruction ending in 'to job '", () => {
-    expect(catalogInstruction(ITEMS[0])).toBe('Add "Belt Kit / Shipping" at $32.00 (qty 1) to job ');
-    expect(catalogInstruction(ITEMS[1])).toBe('Add "Audio Cable" at $1,250.50 (qty 1) to job ');
-  });
 });
 
 describe("LineItemCatalog", () => {
@@ -41,12 +34,20 @@ describe("LineItemCatalog", () => {
     expect(screen.getByText("Typical prices from past jobs. The AI uses these when you name an item without a price.")).toBeInTheDocument();
   });
 
-  it("calls onInsert with the example instruction for the row", async () => {
+  it("calls onInsert with the catalog item for the row", async () => {
     getAILineItemCatalog.mockResolvedValue({ items: ITEMS });
     const onInsert = vi.fn();
     render(<LineItemCatalog onInsert={onInsert} />);
     fireEvent.click(await screen.findByRole("button", { name: "Insert Belt Kit / Shipping" }));
-    expect(onInsert).toHaveBeenCalledWith('Add "Belt Kit / Shipping" at $32.00 (qty 1) to job ');
+    expect(onInsert).toHaveBeenCalledWith(ITEMS[0]);
+  });
+
+  it("reports the loaded items so the item slot can offer them", async () => {
+    getAILineItemCatalog.mockResolvedValue({ items: ITEMS });
+    const onLoaded = vi.fn();
+    render(<LineItemCatalog onInsert={() => {}} onLoaded={onLoaded} />);
+    await screen.findByRole("table");
+    expect(onLoaded).toHaveBeenCalledWith(ITEMS);
   });
 
   it("shows an error when the list cannot be loaded", async () => {

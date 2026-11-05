@@ -122,6 +122,13 @@ export type EmailDraftResponse = {
   /** Masked address, e.g. "j***@gmail.com"; "" when the customer has no email on file. */
   recipient_hint: string;
   has_recipient_email: boolean;
+  /**
+   * Full customer address, only present for callers who may send customer
+   * email (work_orders:update + work_orders_sensitive:read). Used for mailto:.
+   */
+  customer_email?: string;
+  /** True when the jobs span customers; customer_email is the first job's customer. */
+  customer_email_mixed?: boolean;
 };
 
 /** A job pre-selected when jumping from Job Summary to the email drafts tab. */

@@ -12,7 +12,7 @@ import {
 import { SEARCH_JOB_IDS_INPUT_MAX, SEARCH_JOB_SUFFIX_MAX, SEARCH_TEXT_MAX } from "@/lib/ai-tools/limits";
 import { AIButton, AICard, AICardTitle } from "@/components/ai-tools/ai-ui";
 import { CharCounterInput } from "@/components/ai-tools/char-counter-input";
-import { SearchStatusPicker } from "@/components/ai-tools/search-status-picker";
+import { StatusPickList } from "@/components/ai-tools/status-pick-list";
 
 const INPUT_CLASS =
   "h-9 w-full rounded-md border border-[#ddd5cc] bg-white px-2.5 text-sm text-neutral-800 outline-none focus:border-[#c2571a] focus:ring-1 focus:ring-[#c2571a] disabled:opacity-60";
@@ -89,8 +89,7 @@ export function SearchFiltersCard({ form, onChange, statusOptions, onSearch, sea
         </div>
 
         <div className="mt-3">
-          <span className="mb-1 block text-xs font-medium text-neutral-600">Status</span>
-          <SearchStatusPicker options={statusOptions} selected={form.statuses} onChange={(v) => set("statuses", v)} disabled={off} />
+          <StatusPickList options={statusOptions} selected={form.statuses} onChange={(v) => set("statuses", v)} disabled={off} />
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">

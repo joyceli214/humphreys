@@ -1,5 +1,6 @@
 import type { MassUpdatePreviewRow } from "@/lib/ai-tools/types";
 import { formatMoneyDelta, hasMoneyRows, summarizeMoney } from "@/lib/ai-tools/money";
+import { JobLink } from "@/components/ai-tools/job-link";
 
 type Props = {
   rows: MassUpdatePreviewRow[];
@@ -29,7 +30,7 @@ export function MassUpdateMoneySummary({ rows, selected }: Props) {
         <ul className="mt-1 space-y-0.5 text-sm text-neutral-700">
           {jobs.map((job) => (
             <li key={job.reference_id}>
-              Job #{job.reference_id} ({job.customer_name || "Unknown customer"}): {formatMoneyDelta(job.delta)}
+              Job <JobLink referenceId={job.reference_id} /> ({job.customer_name || "Unknown customer"}): {formatMoneyDelta(job.delta)}
             </li>
           ))}
         </ul>

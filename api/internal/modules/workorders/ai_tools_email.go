@@ -28,8 +28,11 @@ type emailDraftRequest struct {
 	Notes        string `json:"notes"`
 }
 
-// emailDraftResponse never carries the customer's full email: only a masked
-// hint ("j***@gmail.com") and whether one is on file.
+// emailDraftResponse carries a masked hint ("j***@gmail.com") and whether an
+// email is on file. The full CustomerEmail is included only for callers who may
+// also send customer email (work_orders:update + work_orders_sensitive:read) so
+// the UI can prefill a mailto: link. It is never logged, audited or sent to the
+// LLM.
 type emailDraftResponse struct {
 	Subject           string `json:"subject"`
 	Body              string `json:"body"`
@@ -39,6 +42,10 @@ type emailDraftResponse struct {
 	CustomerName      string `json:"customer_name"`
 	RecipientHint     string `json:"recipient_hint"`
 	HasRecipientEmail bool   `json:"has_recipient_email"`
+	CustomerEmail     string `json:"customer_email,omitempty"`
+	// CustomerEmailMixed is set when the jobs span customers; CustomerEmail is
+	// then the first job's customer.
+	CustomerEmailMixed bool `json:"customer_email_mixed,omitempty"`
 }
 
 type emailDraftLLMResponse struct {
@@ -123,7 +130,7 @@ func (h *Handler) EmailDraft(c *gin.Context) {
 	}
 
 	hint := maskEmailHint(stringValue(items[0].Customer.Email))
-	c.JSON(http.StatusOK, emailDraftResponse{
+	resp := emailDraftResponse{
 		Subject:           subject,
 		Body:              body,
 		Type:              draftType,
@@ -132,7 +139,14 @@ func (h *Handler) EmailDraft(c *gin.Context) {
 		CustomerName:      aiCustomerName(items[0]),
 		RecipientHint:     hint,
 		HasRecipientEmail: hint != "",
-	})
+	}
+	// Same gate as POST /work-orders/:id/customer-email (the route already
+	// requires work_orders:update; checked again so the field can't leak if the
+	// route gate changes).
+	if hasPermission(c, permUpdate) && hasPermission(c, permSensitiveRead) {
+		resp.CustomerEmail, resp.CustomerEmailMixed = emailDraftRecipient(items)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func respondEmailJobsError(c *gin.Context, err error) {

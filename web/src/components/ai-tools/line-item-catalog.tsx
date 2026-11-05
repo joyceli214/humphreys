@@ -1,26 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiClient } from "@/lib/api/client";
 import type { LineItemCatalogItem } from "@/lib/ai-tools/types";
 import { formatMoney } from "@/lib/ai-tools/money";
 import { AICard, AICardTitle, AIErrorBox } from "@/components/ai-tools/ai-ui";
 
-/** Example instruction for a catalog item, ending in "to job " so the user can type the number. */
-export function catalogInstruction(item: LineItemCatalogItem): string {
-  const qty = item.quantity_text.trim() || "1";
-  return `Add "${item.name}" at ${formatMoney(item.unit_price)} (qty ${qty}) to job `;
-}
-
 type State = { status: "loading" } | { status: "error" } | { status: "ready"; items: LineItemCatalogItem[] };
 
-/** Typical line item prices; "Insert" adds an example instruction for the row. */
-export function LineItemCatalog({ onInsert, disabled = false }: { onInsert: (text: string) => void; disabled?: boolean }) {
+type Props = {
+  /** Called with the row's item; the parent opens the add-item template with it prefilled. */
+  onInsert: (item: LineItemCatalogItem) => void;
+  /** Called once the list has loaded, so the item slot can offer the same names. */
+  onLoaded?: (items: LineItemCatalogItem[]) => void;
+  disabled?: boolean;
+};
+
+/** Typical line item prices; "Insert" opens the add-item template for the row. */
+export function LineItemCatalog({ onInsert, onLoaded, disabled = false }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
 
   useEffect(() => {
     let active = true;
     apiClient
       .getAILineItemCatalog()
-      .then((res) => active && setState({ status: "ready", items: res.items ?? [] }))
+      .then((res) => {
+        if (!active) return;
+        const items = res.items ?? [];
+        setState({ status: "ready", items });
+        onLoadedRef.current?.(items);
+      })
       .catch(() => active && setState({ status: "error" }));
     return () => {
       active = false;
@@ -69,7 +78,7 @@ export function LineItemCatalog({ onInsert, disabled = false }: { onInsert: (tex
                       type="button"
                       aria-label={`Insert ${item.name}`}
                       disabled={disabled}
-                      onClick={() => onInsert(catalogInstruction(item))}
+                      onClick={() => onInsert(item)}
                       className="text-xs font-semibold text-[#c2571a] hover:text-[#8a3d10] disabled:pointer-events-none disabled:opacity-50"
                     >
                       Insert

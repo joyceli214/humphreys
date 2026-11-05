@@ -56,7 +56,10 @@ describe("AdvancedSearchTab", () => {
     fireEvent.change(screen.getByLabelText("Serial number"), { target: { value: "ABC123" } });
     fireEvent.change(screen.getByLabelText("Brand"), { target: { value: "Marantz" } });
     fireEvent.change(screen.getByLabelText("Equipment"), { target: { value: "receiver" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Ready for Pickup" }));
+    fireEvent.click(screen.getByRole("button", { name: "Status: Any" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Ready for Pickup" }));
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search statuses" }), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Status: Ready for Pickup" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Warranty"), { target: { value: "only" } });
     fireEvent.change(screen.getByLabelText("Customers with at least N units"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("Created from"), { target: { value: "2026-01-01" } });

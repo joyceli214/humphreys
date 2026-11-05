@@ -8,7 +8,30 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { firstReadableRoute, requiredReadPermissionForPath } from "@/lib/auth/authorization";
 import { canUseAITools } from "@/lib/ai-tools/access";
-import { ManagementPaneProvider, ManagementSplit } from "@/components/ai-tools/management-pane";
+import { jobPath } from "@/lib/ai-tools/open-job";
+import { ManagementPaneProvider, ManagementSplit, useManagementDocked } from "@/components/ai-tools/management-pane";
+import { cn } from "@/lib/utils";
+
+/**
+ * Outer shell row. While the Management pane is docked the row is locked to
+ * the viewport so the portal column and the pane scroll independently (the
+ * document does not scroll); the sidebar then scrolls on its own too.
+ */
+function ShellRow({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
+  const docked = useManagementDocked();
+  return (
+    <div
+      data-testid="shell-row"
+      className={cn("flex overflow-x-hidden bg-background", docked ? "h-[100dvh] overflow-hidden" : "min-h-[100dvh]")}
+    >
+      {/* Stable wrapper so docking never remounts the sidebar; md:flex lets it stretch full height. */}
+      <div data-testid="shell-sidebar" className={cn("hidden shrink-0 md:flex", docked && "min-h-0 overflow-y-auto")}>
+        {sidebar}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 export function ProtectedShell({ children }: { children: ReactNode }) {
   const { loading, user, scope, hasPermission } = useAuth();
@@ -46,9 +69,7 @@ export function ProtectedShell({ children }: { children: ReactNode }) {
   const managementEnabled = canUseAITools(scope);
 
   const layout = (
-    <div className="min-h-[100dvh] flex overflow-x-hidden bg-background">
-      <AppSidebar className="hidden md:block" />
-
+    <ShellRow sidebar={<AppSidebar className="hidden md:block" />}>
       {mobileMenuOpen && (
         <>
           <button
@@ -62,8 +83,12 @@ export function ProtectedShell({ children }: { children: ReactNode }) {
       )}
 
       {managementEnabled ? <ManagementSplit>{column}</ManagementSplit> : column}
-    </div>
+    </ShellRow>
   );
 
-  return managementEnabled ? <ManagementPaneProvider>{layout}</ManagementPaneProvider> : layout;
+  return managementEnabled ? (
+    <ManagementPaneProvider onOpenJob={(id) => navigate(jobPath(id))}>{layout}</ManagementPaneProvider>
+  ) : (
+    layout
+  );
 }

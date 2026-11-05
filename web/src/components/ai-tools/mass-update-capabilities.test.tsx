@@ -24,15 +24,22 @@ describe("MassUpdateCapabilities", () => {
     expect(screen.getByText(/up to 10 jobs per request/i)).toBeInTheDocument();
   });
 
-  it("passes the example text when an example is clicked", () => {
+  it("passes the template id when an example is clicked", () => {
     const onExample = vi.fn();
     render(<MassUpdateCapabilities onExample={onExample} />);
-    fireEvent.click(screen.getByRole("button", { name: "Generate Work Done for jobs 31152 and 31153." }));
-    expect(onExample).toHaveBeenCalledWith("Generate Work Done for jobs 31152 and 31153.");
+    fireEvent.click(screen.getByRole("button", { name: "Generate Work Done for jobs" }));
+    expect(onExample).toHaveBeenCalledWith("work-done");
+  });
+
+  it("has no hard-coded job numbers or sample values in the example buttons", () => {
+    render(<MassUpdateCapabilities onExample={() => {}} />);
+    const buttons = screen.getAllByRole("button");
+    expect(buttons.length).toBeGreaterThanOrEqual(7);
+    for (const button of buttons) expect(button.textContent).not.toMatch(/\d/);
   });
 
   it("disables the examples when asked", () => {
     render(<MassUpdateCapabilities onExample={() => {}} disabled />);
-    expect(screen.getByRole("button", { name: "Set jobs 31195 and 31196 to Ready for pickup." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set jobs to a status" })).toBeDisabled();
   });
 });

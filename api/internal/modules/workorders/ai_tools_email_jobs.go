@@ -101,6 +101,29 @@ func maskEmailHint(raw string) string {
 	return email[:1] + "***" + email[at:]
 }
 
+// emailDraftRecipient returns the first job's customer email (trimmed; "" if
+// missing or not a plausible address) and whether the jobs span more than one
+// customer. Callers must gate it on permissions; never log or prompt with it.
+func emailDraftRecipient(items []domain.WorkOrderDetail) (string, bool) {
+	if len(items) == 0 {
+		return "", false
+	}
+	first := items[0].Customer.CustomerID
+	mixed := false
+	for _, item := range items[1:] {
+		cid := item.Customer.CustomerID
+		if (first == nil) != (cid == nil) || (first != nil && *cid != *first) {
+			mixed = true
+			break
+		}
+	}
+	email := strings.TrimSpace(stringValue(items[0].Customer.Email))
+	if maskEmailHint(email) == "" {
+		email = ""
+	}
+	return email, mixed
+}
+
 // buildMultiJobEmailDraftPrompt describes every picked job (by job number and
 // equipment) with its status, line items and repair logs. It passes the
 // customer's display name only — never their email or phone.
