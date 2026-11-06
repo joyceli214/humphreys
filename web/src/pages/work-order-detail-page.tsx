@@ -38,6 +38,7 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { isPortalWorkOrderTwoColumn, usePortalWidth } from "@/components/layout/portal-width";
 import { AI_EMAIL_DRAFT_QUERY_PARAM, takeAIEmailDraft, type AIEmailDraftHandoff } from "@/lib/ai-tools/email-handoff";
 import { EmailPhotoPanel } from "@/components/email-photo-panel";
+import { JobPhotosCard } from "@/components/job-photos-card";
 import "@mdxeditor/editor/style.css";
 import { workNotesEditorContentClassName, workNotesEditorPlugins } from "@/components/work-notes-editor-config";
 import { MarkdownContent, type ImageClickHandler } from "@/components/markdown-card";
@@ -1958,6 +1959,12 @@ export default function WorkOrderDetailPage() {
   );
 
   const registeredLayoutBlocks: Partial<Record<WorkOrderLayoutBlockID, ReactNode>> = {};
+  // Reload the job photo strip whenever the job text or its repair logs change.
+  const jobPhotosRefreshKey = [
+    item.updated_at ?? "",
+    ...repairLogs.map((log) => `${log.repair_log_id}:${log.updated_at ?? ""}`)
+  ].join("|");
+
   const registerLayoutBlock = (id: WorkOrderLayoutBlockID, node: ReactNode) => {
     registeredLayoutBlocks[id] = node;
     return null;
@@ -2582,6 +2589,14 @@ export default function WorkOrderDetailPage() {
                   )}
                 </div>
               </div>
+
+              <JobPhotosCard
+                referenceId={parsedReferenceId}
+                canView={canViewSensitive}
+                canAdd={canCreateRepairLogs}
+                refreshKey={jobPhotosRefreshKey}
+                onPhotosSaved={() => loadExtras(parsedReferenceId)}
+              />
 
               {canCreateRepairLogs && repairLogModalOpen && editingRepairLogID === null && (
                 <div className="border-t border-border pt-3">{repairLogEditor}</div>

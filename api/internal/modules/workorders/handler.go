@@ -113,6 +113,12 @@ type sendCustomerEmailRequest struct {
 	// PhotoIDs are optional ids from GET /work-orders/:id/email-photos. Only
 	// photos stored on this work order are accepted; they are shrunk and attached.
 	PhotoIDs []string `json:"photo_ids"`
+	// PhotoWorkOrderIDs are other jobs (same customer) whose photos may also be
+	// picked in photo_ids. Used by multi-job Management email drafts.
+	PhotoWorkOrderIDs []int `json:"photo_work_order_ids"`
+	// Cc are optional staff addresses copied on the email. Each must belong to
+	// an active user; arbitrary outside addresses are rejected.
+	Cc []string `json:"cc"`
 }
 
 type createWorkOrderCustomerRequest struct {
@@ -452,8 +458,14 @@ func (h *Handler) SendCustomerEmail(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	cc, status, err := h.customerEmailCc(c.Request.Context(), req.Cc, msg.To)
+	if err != nil {
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	msg.Cc = cc
 	if len(req.PhotoIDs) > 0 {
-		attachments, status, err := h.customerEmailAttachments(c.Request.Context(), item, req.PhotoIDs)
+		attachments, status, err := h.customerEmailAttachments(c.Request.Context(), item, req.PhotoIDs, req.PhotoWorkOrderIDs)
 		if err != nil {
 			c.JSON(status, gin.H{"error": err.Error()})
 			return

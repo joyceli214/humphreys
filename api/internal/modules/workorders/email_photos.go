@@ -103,7 +103,11 @@ func (h *Handler) ListEmailPhotos(c *gin.Context) {
 // customerEmailAttachments validates the selected photo ids against the work
 // order's own photos and returns them shrunk, ready to attach. The client never
 // supplies URLs, so nothing outside the job's stored photos can be fetched.
-func (h *Handler) customerEmailAttachments(ctx context.Context, item domain.WorkOrderDetail, ids []string) ([]mailer.Attachment, int, error) {
+//
+// extraJobIDs lets a multi-job email (Management drafts) attach photos from the
+// other jobs it covers. Each extra job must belong to the same customer as the
+// send job, so one customer's photos can never be mailed to another.
+func (h *Handler) customerEmailAttachments(ctx context.Context, item domain.WorkOrderDetail, ids []string, extraJobIDs []int) ([]mailer.Attachment, int, error) {
 	if h.emailPhotos == nil {
 		return nil, http.StatusBadRequest, emailphotos.ErrStorageDisabled
 	}
@@ -111,6 +115,11 @@ func (h *Handler) customerEmailAttachments(ctx context.Context, item domain.Work
 	if err != nil {
 		return nil, http.StatusInternalServerError, errors.New("failed to load photos")
 	}
+	extraPhotos, status, err := h.extraJobPhotos(ctx, item, extraJobIDs)
+	if err != nil {
+		return nil, status, err
+	}
+	photos = append(photos, extraPhotos...)
 	attachments, err := h.emailPhotos.Resolve(ctx, photos, ids, fmt.Sprintf("job-%d", item.ReferenceID))
 	if err != nil {
 		switch {
@@ -125,6 +134,47 @@ func (h *Handler) customerEmailAttachments(ctx context.Context, item domain.Work
 	out := make([]mailer.Attachment, 0, len(attachments))
 	for _, attachment := range attachments {
 		out = append(out, mailer.Attachment{Name: attachment.Name, ContentType: attachment.ContentType, Data: attachment.Data})
+	}
+	return out, http.StatusOK, nil
+}
+
+// ErrPhotoJobOtherCustomer is returned when photo_work_order_ids names a job
+// that does not belong to the send job's customer.
+var ErrPhotoJobOtherCustomer = errors.New("photos can only come from jobs of the same customer")
+
+// extraJobPhotos collects photos from the other jobs of a multi-job email.
+func (h *Handler) extraJobPhotos(ctx context.Context, item domain.WorkOrderDetail, extraJobIDs []int) ([]emailphotos.Photo, int, error) {
+	seen := map[int]struct{}{int(item.ReferenceID): {}}
+	out := make([]emailphotos.Photo, 0)
+	for _, id := range extraJobIDs {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if len(seen) > emailDraftMaxJobs {
+			return nil, http.StatusBadRequest, fmt.Errorf("an email can cover at most %d jobs", emailDraftMaxJobs)
+		}
+		if item.Customer.CustomerID == nil {
+			return nil, http.StatusBadRequest, ErrPhotoJobOtherCustomer
+		}
+		other, err := h.service.GetWorkOrderDetail(ctx, id)
+		if errors.Is(err, ErrWorkOrderNotFound) {
+			return nil, http.StatusBadRequest, emailphotos.ErrPhotoNotOnJob
+		}
+		if err != nil {
+			return nil, http.StatusInternalServerError, errors.New("failed to load photos")
+		}
+		if other.Customer.CustomerID == nil || *other.Customer.CustomerID != *item.Customer.CustomerID {
+			return nil, http.StatusBadRequest, ErrPhotoJobOtherCustomer
+		}
+		photos, err := h.workOrderPhotos(ctx, other)
+		if err != nil {
+			return nil, http.StatusInternalServerError, errors.New("failed to load photos")
+		}
+		for _, photo := range photos {
+			photo.Source = fmt.Sprintf("Job #%d %s", other.ReferenceID, photo.Source)
+			out = append(out, photo)
+		}
 	}
 	return out, http.StatusOK, nil
 }

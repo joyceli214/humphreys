@@ -36,6 +36,13 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	group := authed.Group("/work-orders")
 	group.GET("/customers", middleware.RequirePermission(permRead), h.ListCustomers)
 	group.GET("/dashboard", middleware.RequirePermission(permRead), h.Dashboard)
+	// Staff that may be copied on customer email; same gate as sending it.
+	group.GET(
+		"/email-staff",
+		middleware.RequirePermission(permRead),
+		middleware.RequirePermission(permSensitiveRead),
+		h.ListEmailStaff,
+	)
 	group.POST("", middleware.RequirePermission(permCreate), h.CreateWorkOrder)
 	group.DELETE("/:reference_id", middleware.RequirePermission(permCreate), h.DeleteWorkOrder)
 	group.GET("", middleware.RequirePermission(permRead), h.ListWorkOrders)

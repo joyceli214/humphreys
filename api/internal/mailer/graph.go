@@ -19,7 +19,10 @@ import (
 var ErrNotConfigured = errors.New("email sending is not configured")
 
 type Message struct {
-	To      string
+	To string
+	// Cc are extra visible recipients. Callers validate them (customer email
+	// only allows active staff addresses).
+	Cc      []string
 	Subject string
 	// Body is plain text / light markdown. It is converted to HTML when BodyHTML is empty.
 	Body string
@@ -116,20 +119,31 @@ func (c *GraphClient) Send(ctx context.Context, msg Message) error {
 }
 
 func graphMessage(msg Message) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"subject": msg.Subject,
 		"body": map[string]string{
 			"contentType": "HTML",
 			"content":     msg.htmlContent(),
 		},
-		"toRecipients": []map[string]any{
-			{
-				"emailAddress": map[string]string{
-					"address": msg.To,
-				},
-			},
-		},
+		"toRecipients": graphRecipients([]string{msg.To}),
 	}
+	if cc := graphRecipients(msg.Cc); len(cc) > 0 {
+		out["ccRecipients"] = cc
+	}
+	return out
+}
+
+// graphRecipients maps addresses to Graph recipient objects, skipping blanks.
+func graphRecipients(addresses []string) []map[string]any {
+	out := make([]map[string]any, 0, len(addresses))
+	for _, address := range addresses {
+		address = strings.TrimSpace(address)
+		if address == "" {
+			continue
+		}
+		out = append(out, map[string]any{"emailAddress": map[string]string{"address": address}})
+	}
+	return out
 }
 
 func (c *GraphClient) accessToken(ctx context.Context) (string, error) {
