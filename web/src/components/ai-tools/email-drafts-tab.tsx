@@ -104,9 +104,14 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   // Jumping here from another tool pre-selects the job and a fitting type.
   useEffect(() => {
     if (!target) return;
-    setJobs((list) =>
-      addSelectedJob(list, { referenceId: target.referenceId, customerId: null, customerName: target.label, equipment: "", status: "" })
-    );
+    const job: SelectedEmailJob = target.job ?? {
+      referenceId: target.referenceId,
+      customerId: null,
+      customerName: target.label,
+      equipment: "",
+      status: ""
+    };
+    setJobs((list) => addSelectedJob(list, job));
     setType(target.type);
   }, [target]);
 

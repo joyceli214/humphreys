@@ -25,3 +25,7 @@ DropdownMenuContent.displayName = "DropdownMenuContent";
 export function DropdownMenuItem(props: React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item>) {
   return <DropdownMenuPrimitive.Item className="cursor-pointer rounded-sm px-2 py-2.5 md:py-1.5 text-sm outline-none hover:bg-muted" {...props} />;
 }
+
+export function DropdownMenuSeparator(props: React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>) {
+  return <DropdownMenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" {...props} />;
+}

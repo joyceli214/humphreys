@@ -135,6 +135,17 @@ describe("EmailDraftsTab", () => {
     expect(window.localStorage.getItem(EMAIL_SELECTION_STORAGE_KEY)).not.toContain("\"referenceId\":5");
   });
 
+  it("adds a target's full job (customer id) to an already-mounted tab so it groups with that customer", async () => {
+    const { rerender } = render(<EmailDraftsTab target={null} />);
+    await searchAndAdd(5);
+    const job = { referenceId: 9, customerId: 1, customerName: "Jane Doe", equipment: "Tape deck", status: "In Progress" };
+    rerender(<EmailDraftsTab target={{ referenceId: 9, label: "Jane Doe", type: "progress_update", job }} />);
+    expect(within(selectedList()).getByText(/#9/)).toBeInTheDocument();
+    expect(screen.queryByText(/different customers/i)).toBeNull();
+    const stored = JSON.parse(window.localStorage.getItem(EMAIL_SELECTION_STORAGE_KEY) ?? "[]");
+    expect(stored).toContainEqual(job);
+  });
+
   it("warns about different customers and requires choosing one", async () => {
     render(<EmailDraftsTab target={null} />);
     await searchAndAdd(5, 7);

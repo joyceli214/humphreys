@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APIError, apiClient } from "@/lib/api/client";
 import type { PartsPurchaseRequest, WorkOrderDetail } from "@/lib/api/generated/types";
 import WorkOrderDetailPage from "./work-order-detail-page";
+import { EMAIL_SELECTION_STORAGE_KEY } from "@/lib/ai-tools/email-selection";
+import { PENDING_EMAIL_DRAFT_KEY, takePendingEmailDraft } from "@/lib/ai-tools/open-email-drafts";
 
 const state = vi.hoisted(() => ({
   permissions: new Set<string>(),
@@ -14,12 +16,21 @@ const state = vi.hoisted(() => ({
 vi.mock("@/lib/auth/auth-context", () => ({ useAuth: () => ({ hasPermission: state.hasPermission, user: null }) }));
 vi.mock("@/lib/alerts/alert-context", () => ({ useAlerts: () => state.alerts }));
 vi.mock("@/components/ai-markdown-editor", () => ({ AIMarkdownEditor: () => null }));
+const pane = vi.hoisted(() => ({ available: false, show: vi.fn(), openWindow: vi.fn() }));
+vi.mock("@/components/ai-tools/management-pane", () => ({
+  useManagementPane: () => ({ available: pane.available, open: false, show: pane.show })
+}));
+vi.mock("@/lib/ai-tools/access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ai-tools/access")>()),
+  openAIToolsWindow: pane.openWindow
+}));
 // Keep action visibility in the rendered page without depending on menu positioning.
 vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children, onClick }: { children: ReactNode; onClick: () => void }) => <button onClick={onClick}>{children}</button>
+  DropdownMenuItem: ({ children, onClick }: { children: ReactNode; onClick: () => void }) => <button onClick={onClick}>{children}</button>,
+  DropdownMenuSeparator: () => <hr />
 }));
 
 // Render the form in its responsive container so the duplicate desktop/mobile
@@ -132,5 +143,60 @@ describe("parts request actions", () => {
     openPage();
     await screen.findAllByText("Capacitor");
     expect(screen.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+  });
+});
+
+describe("Draft email (Email Customer menu)", () => {
+  const jobDetail = {
+    ...detail, item_name: "Receiver", brand_names: ["Sony"], model_number: "STR-1", status_name: "In Progress",
+    customer: { customer_id: 7, first_name: "Jane", last_name: "Doe", email: "jane@example.com" }
+  } as unknown as WorkOrderDetail;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    state.permissions = new Set(["work_orders:read", "work_orders_sensitive:read"]);
+    pane.available = false;
+    pane.show.mockReset();
+    pane.openWindow.mockReset();
+    vi.spyOn(apiClient, "getWorkOrderDetail").mockResolvedValue(jobDetail);
+    vi.spyOn(apiClient, "listDropdownManagement").mockResolvedValue({ items: [] });
+    vi.spyOn(apiClient, "listPartsPurchaseRequests").mockResolvedValue({ items: [] });
+    vi.spyOn(apiClient, "generateWorkOrderAISummary").mockResolvedValue({ summary: "", model: "test", generated_at: "" });
+  });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
+
+  it("is hidden without work_orders:update (Management access), leaving the email templates", async () => {
+    openPage();
+    await screen.findAllByText("Job Completed Email");
+    expect(screen.getAllByText("Job Started Email").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Draft email")).toBeNull();
+  });
+
+  it("sits after the templates and opens the Management pane with this job queued", async () => {
+    state.permissions.add("work_orders:update");
+    pane.available = true;
+    openPage();
+    const [item] = await screen.findAllByText("Draft email");
+    const menu = item.parentElement!;
+    const labels = Array.from(menu.children).map((el) => el.tagName === "HR" ? "---" : el.textContent);
+    expect(labels).toEqual(["Job Started Email", "Job Completed Email", "---", "Draft email"]);
+
+    fireEvent.click(item);
+    expect(pane.show).toHaveBeenCalledTimes(1);
+    expect(pane.openWindow).not.toHaveBeenCalled();
+    expect(JSON.parse(window.localStorage.getItem(EMAIL_SELECTION_STORAGE_KEY) ?? "[]")).toEqual([
+      { referenceId: 123, customerId: 7, customerName: "Jane Doe", equipment: "Sony Receiver STR-1", status: "In Progress" }
+    ]);
+    expect(window.localStorage.getItem(PENDING_EMAIL_DRAFT_KEY) ?? "").not.toContain("jane@example.com");
+    expect(takePendingEmailDraft()).toMatchObject({ referenceId: 123, type: "progress_update" });
+  });
+
+  it("falls back to the Management pop-out window when there is no split pane", async () => {
+    state.permissions.add("work_orders:update");
+    openPage();
+    fireEvent.click((await screen.findAllByText("Draft email"))[0]);
+    expect(pane.openWindow).toHaveBeenCalledTimes(1);
+    expect(pane.show).not.toHaveBeenCalled();
+    expect(takePendingEmailDraft()).toMatchObject({ referenceId: 123 });
   });
 });
