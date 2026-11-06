@@ -21,6 +21,10 @@ import { EmailDraftEditor, type EditableDraft } from "@/components/ai-tools/emai
 import { EmailJobSearch } from "@/components/ai-tools/email-job-search";
 import { EmailSelectedJobs } from "@/components/ai-tools/email-selected-jobs";
 import { EmailSendConfirm } from "@/components/ai-tools/email-send-confirm";
+import { StaffCcPicker } from "@/components/ai-tools/staff-cc-picker";
+import { EmailPhotoPanel } from "@/components/email-photo-panel";
+import { useDraftPhotos } from "@/lib/ai-tools/draft-photos";
+import { summarizePhotoSelection } from "@/lib/email-photos";
 
 const DRAFT_TYPES: Array<{ value: EmailDraftType; label: string }> = [
   { value: "estimate", label: "Estimate" },
@@ -84,8 +88,18 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   const [sendError, setSendError] = useState("");
   const [sent, setSent] = useState(false);
   const [clipboardNote, setClipboardNote] = useState("");
+  const [photoIds, setPhotoIds] = useState<string[]>([]);
+  const [cc, setCc] = useState<string[]>([]);
+  // Photos come from every job in the draft. When the jobs belong to different
+  // customers only the send job's photos are offered (the server enforces this).
+  const photoJobIds = meta ? (meta.customerEmailMixed ? meta.ids.slice(0, 1) : meta.ids) : null;
+  const draftPhotos = useDraftPhotos(photoJobIds);
 
   useEffect(() => saveSelectedJobs(jobs), [jobs]);
+
+  // A new draft (different jobs) starts with no photos picked.
+  const metaKey = meta?.ids.join(",") ?? "";
+  useEffect(() => setPhotoIds([]), [metaKey]);
 
   // Jumping here from another tool pre-selects the job and a fitting type.
   useEffect(() => {
@@ -131,18 +145,29 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
     }
   };
 
+  const photoSummary = summarizePhotoSelection(draftPhotos.photos, photoIds, draftPhotos.limits, draftPhotos.loading);
+
   const send = async () => {
     if (!draft || !meta) return;
+    if (photoSummary.blockedReason) {
+      setSendError(photoSummary.blockedReason);
+      return;
+    }
     setSending(true);
     setSendError("");
     try {
       // Same endpoint as the Email Customer dialog. "to" is left empty so the
-      // server sends to the address on the customer record.
+      // server sends to the address on the customer record. The send runs on
+      // the first job; photos from the draft's other jobs (same customer) are
+      // allowed via photo_work_order_ids and checked server-side.
       await apiClient.sendWorkOrderCustomerEmail(meta.ids[0], {
         template: templateForDraftType(meta.type),
         to: "",
         subject: draft.subject.trim(),
-        body: draft.body.trim()
+        body: draft.body.trim(),
+        ...(photoIds.length > 0 ? { photo_ids: photoIds } : {}),
+        ...(photoIds.length > 0 && photoJobIds && photoJobIds.length > 1 ? { photo_work_order_ids: photoJobIds.slice(1) } : {}),
+        ...(cc.length > 0 ? { cc } : {})
       });
       setSent(true);
       setConfirming(false);
@@ -178,6 +203,14 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   if (meta && !meta.recipientHint) sendBlockedReason = "Send is disabled: no email address on file for this customer.";
   else if (meta && !sameIds(meta.ids, emailIds)) sendBlockedReason = "The selected jobs changed since this draft was generated. Regenerate first.";
   else if (sent) sendBlockedReason = "This draft was sent. Regenerate to send another email.";
+  else if (photoSummary.blockedReason) sendBlockedReason = photoSummary.blockedReason;
+
+  const multiJobPhotoNote =
+    meta && meta.ids.length > 1
+      ? meta.customerEmailMixed
+        ? `These jobs belong to different customers, so only photos from job #${meta.ids[0]} can be attached.`
+        : `Photos from all ${meta.ids.length} jobs are shown, labelled by job. They go out together on one email.`
+      : null;
 
   return (
     // Stacks on narrow panes; side by side from md up, giving the draft the larger share on wide panes.
@@ -277,12 +310,48 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
           setConfirming(true);
         }}
         sendBlockedReason={sendBlockedReason}
+        ccField={
+          meta && meta.recipientHint ? (
+            <StaffCcPicker
+              value={cc}
+              onChange={(next) => {
+                setCc(next);
+                setSent(false);
+              }}
+              disabled={busy}
+            />
+          ) : undefined
+        }
+        photos={
+          meta ? (
+            <div className="space-y-1.5">
+              {multiJobPhotoNote && <p className="text-xs text-neutral-600">{multiJobPhotoNote}</p>}
+              <EmailPhotoPanel
+                photos={draftPhotos.photos}
+                placeholderUrls={[]}
+                loading={draftPhotos.loading}
+                error={draftPhotos.error}
+                limits={draftPhotos.limits}
+                selectedIds={photoIds}
+                onChange={(ids) => {
+                  setPhotoIds(ids);
+                  setSent(false);
+                }}
+                disabled={busy}
+                layout="stacked"
+              />
+            </div>
+          ) : undefined
+        }
         footer={
           <>
             {confirming && meta && !sendBlockedReason && (
               <EmailSendConfirm
                 recipientHint={meta.recipientHint}
                 jobIds={meta.ids}
+                cc={cc}
+                photoCount={photoSummary.count}
+                photoBytes={photoSummary.totalBytes}
                 sending={sending}
                 onCancel={() => setConfirming(false)}
                 onConfirm={() => void send()}
@@ -290,7 +359,9 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
             )}
             {sent && meta && (
               <p className="mt-2 text-sm text-green-700">
-                Email sent to {meta.recipientHint} for job(s) {jobList(meta.ids)}.
+                Email sent to {meta.recipientHint}
+                {cc.length > 0 ? ` (Cc ${cc.join(", ")})` : ""} for job(s) {jobList(meta.ids)}
+                {photoSummary.count > 0 ? ` with ${photoSummary.count} ${photoSummary.count === 1 ? "photo" : "photos"}` : ""}.
               </p>
             )}
             {sendError && (

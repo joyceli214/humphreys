@@ -271,4 +271,20 @@ export interface DashboardData {
   overdue_items: DashboardOverdueItem[];
   parts_review_items: DashboardPartsReviewItem[];
   activity_items: DashboardActivityItem[];
+  /** Jobs per status in the selected range (older APIs omit it). */
+  status_counts?: DashboardStatusCount[];
+}
+
+export interface DashboardStatusCount {
+  status_id: number;
+  status: string;
+  status_group: string;
+  count: number;
+}
+
+/** Active staff user that may be copied (Cc) on customer email. */
+export interface StaffContact {
+  id: string;
+  email: string;
+  full_name: string;
 }

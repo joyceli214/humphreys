@@ -166,4 +166,15 @@ type DashboardData struct {
 	OverdueItems     []DashboardOverdueItem     `json:"overdue_items"`
 	PartsReviewItems []DashboardPartsReviewItem `json:"parts_review_items"`
 	ActivityItems    []DashboardActivityItem    `json:"activity_items"`
+	// StatusCounts has one row per work-order status (active ones, plus any
+	// inactive status that still has jobs) with the number of non-stock jobs
+	// in it for the selected range. Drives the dashboard "status focus" block.
+	StatusCounts []DashboardStatusCount `json:"status_counts"`
+}
+
+type DashboardStatusCount struct {
+	StatusID    int64  `json:"status_id"`
+	Status      string `json:"status"`
+	StatusGroup string `json:"status_group"`
+	Count       int64  `json:"count"`
 }

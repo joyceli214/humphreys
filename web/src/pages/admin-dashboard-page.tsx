@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DashboardStatusFocus } from "@/components/dashboard-status-focus";
 import { normalizeMarkdownInput } from "@/lib/markdown";
 import rehypeRaw from "rehype-raw";
 import ReactMarkdown from "react-markdown";
@@ -102,7 +103,7 @@ function markdownPlain(value: string | null | undefined) {
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
   const alerts = useAlerts();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canReadPartsReview = hasPermission("parts_purchase_requests:read") && hasPermission("work_orders_sensitive:read");
   const canReadRepairLogs = hasPermission("repair_logs:read");
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
@@ -186,7 +187,7 @@ export default function AdminDashboardPage() {
         </select>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <section className="rounded-lg border border-border bg-white p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Lookup</p>
           <form
@@ -224,6 +225,8 @@ export default function AdminDashboardPage() {
           <p className="text-2xl font-bold text-foreground">{dashboard.ready_total}</p>
           <p className="mt-1 text-xs text-muted-foreground">Awaiting customer</p>
         </section>
+
+        <DashboardStatusFocus statuses={dashboard.status_counts} loading={loading} userKey={user?.id ?? "anonymous"} />
 
         <section className="flex flex-col justify-between rounded-lg border border-border bg-white p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Operations</p>

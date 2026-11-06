@@ -23,6 +23,10 @@ type Props = {
   sendBlockedReason?: string;
   /** Rendered under the buttons (confirm step, success/error). */
   footer?: ReactNode;
+  /** Optional Cc row rendered under "To:" (staff picker). */
+  ccField?: ReactNode;
+  /** Optional job photo picker rendered under the body. */
+  photos?: ReactNode;
 };
 
 export function EmailDraftEditor({
@@ -37,7 +41,9 @@ export function EmailDraftEditor({
   canRegenerate,
   onSend,
   sendBlockedReason,
-  footer
+  footer,
+  ccField,
+  photos
 }: Props) {
   const complete = Boolean(draft?.subject.trim() && draft?.body.trim());
 
@@ -49,6 +55,7 @@ export function EmailDraftEditor({
           <div className="mt-2 flex flex-1 flex-col rounded-md border border-[#ddd5cc] bg-white">
             <div className="space-y-1 border-b border-[#efeae4] px-3 py-2 text-sm text-neutral-500">
               <div>To: {recipientHint || <span className="text-red-700">customer has no email on file</span>}</div>
+              {ccField}
               <div className="flex items-start gap-1">
                 <label htmlFor="ai-email-subject" className="shrink-0 leading-5">
                   Subject:
@@ -65,6 +72,7 @@ export function EmailDraftEditor({
               disabled={busy}
             />
           </div>
+          {photos && <div className="mt-3">{photos}</div>}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {onSend && (
               <AIButton onClick={onSend} disabled={busy || !complete || Boolean(sendBlockedReason)}>
@@ -91,7 +99,9 @@ export function EmailDraftEditor({
         <p className="mt-2 text-sm text-neutral-500">{busy ? "Drafting..." : "Select jobs and press Generate draft."}</p>
       )}
       <p className="mt-3 text-sm text-neutral-500">
-        Nothing is sent until you press Send email and confirm. &apos;Open in email app&apos; opens your device&apos;s email app with this draft; add photos there.
+        {photos
+          ? "Nothing is sent until you press Send email and confirm. Photos picked above are attached when you press Send email; 'Open in email app' carries the text only."
+          : "Nothing is sent until you press Send email and confirm. 'Open in email app' opens your device's email app with this draft; add photos there."}
       </p>
     </AICard>
   );

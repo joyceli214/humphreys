@@ -12,6 +12,7 @@ import type {
   Permission,
   RepairLog,
   Role,
+  StaffContact,
   User,
   WorkOrderDetail,
   WorkOrderListItem
@@ -347,11 +348,37 @@ export class APIClient {
 
   sendWorkOrderCustomerEmail(
     referenceID: number,
-    payload: { template: EmailTemplateKey; to: string; subject: string; body: string; body_html?: string; photo_ids?: string[] }
+    payload: {
+      template: EmailTemplateKey;
+      to: string;
+      subject: string;
+      body: string;
+      body_html?: string;
+      photo_ids?: string[];
+      /** Other jobs of the same customer whose photos may be in photo_ids (multi-job drafts). */
+      photo_work_order_ids?: number[];
+      /** Staff emails to copy; the server rejects anything that isn't an active staff user. */
+      cc?: string[];
+    }
   ) {
     return this.request<{ sent: boolean }>(`/work-orders/${referenceID}/customer-email`, {
       method: "POST",
       body: JSON.stringify(payload)
+    });
+  }
+
+  listEmailStaff() {
+    return this.request<{ items: StaffContact[]; max_cc: number }>("/work-orders/email-staff");
+  }
+
+  getUserPreference<T>(key: string) {
+    return this.request<{ value: T | null }>(`/user-preferences/${encodeURIComponent(key)}`);
+  }
+
+  saveUserPreference<T>(key: string, value: T) {
+    return this.request<{ value: T }>(`/user-preferences/${encodeURIComponent(key)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ value })
     });
   }
 

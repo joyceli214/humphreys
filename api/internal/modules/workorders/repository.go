@@ -44,6 +44,7 @@ type Repository interface {
 	AIStaleCandidates(ctx context.Context) ([]AIStaleCandidate, error)
 	AISearch(ctx context.Context, filters aiResolvedSearchFilters) ([]AISearchRow, int, error)
 	ApplyMassUpdateJob(ctx context.Context, referenceID int, expectedUpdatedAt *time.Time, ops []massUpdateResolvedOp, userID string) ([]string, error)
+	ListActiveStaffContacts(ctx context.Context) ([]StaffContact, error)
 }
 
 type storeRepository struct {
@@ -1423,7 +1424,14 @@ func (r *storeRepository) GetDashboardData(ctx context.Context, input DashboardQ
 		OverdueItems:     make([]domain.DashboardOverdueItem, 0),
 		PartsReviewItems: make([]domain.DashboardPartsReviewItem, 0),
 		ActivityItems:    make([]domain.DashboardActivityItem, 0),
+		StatusCounts:     make([]domain.DashboardStatusCount, 0),
 	}
+
+	statusCounts, err := r.dashboardStatusCounts(ctx, input.RangeStart)
+	if err != nil {
+		return domain.DashboardData{}, err
+	}
+	out.StatusCounts = statusCounts
 
 	baseFilter := `
 		FROM public.work_orders wo
