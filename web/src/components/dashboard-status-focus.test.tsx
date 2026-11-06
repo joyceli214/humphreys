@@ -98,4 +98,33 @@ describe("DashboardStatusFocus", () => {
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(window.localStorage.getItem(STATUS_FOCUS_STORAGE_PREFIX + "u2")).toBe(JSON.stringify({ status_ids: [4] }));
   });
+
+  it("always shows the settings button, and says it couldn't load when status_counts is missing", async () => {
+    render(<DashboardStatusFocus statuses={undefined} loading={false} userKey="u1" />);
+    const block = screen.getByRole("region", { name: "Status focus" });
+    expect(within(block).getByRole("alert")).toHaveTextContent("Couldn't load statuses");
+    expect(within(block).getByText("—")).toBeInTheDocument();
+    expect(within(block).queryByText("0")).not.toBeInTheDocument();
+    fireEvent.click(within(block).getByRole("button", { name: "Choose statuses" }));
+    expect(within(block).getByText(/Couldn't load statuses/)).toBeInTheDocument();
+    expect(within(block).getByRole("button", { name: "Save" })).toBeDisabled();
+    await waitFor(() => expect(getUserPreference).toHaveBeenCalled());
+  });
+
+  it("does not show a silent 0 when the dashboard load failed", async () => {
+    render(<DashboardStatusFocus statuses={STATUSES} loading={false} error userKey="u1" />);
+    const block = screen.getByRole("region", { name: "Status focus" });
+    expect(within(block).getByRole("alert")).toHaveTextContent("Couldn't load statuses");
+    expect(within(block).queryByText("10")).not.toBeInTheDocument();
+    expect(within(block).getByRole("button", { name: "Choose statuses" })).toBeInTheDocument();
+    await waitFor(() => expect(getUserPreference).toHaveBeenCalled());
+  });
+
+  it("keeps the settings button when the shop has no statuses", async () => {
+    render(<DashboardStatusFocus statuses={[]} loading={false} userKey="u1" />);
+    expect(screen.getByText("No statuses to count yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose statuses" })).toBeInTheDocument();
+    await waitFor(() => expect(getUserPreference).toHaveBeenCalled());
+  });
 });

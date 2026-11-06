@@ -206,6 +206,7 @@ type dashboardResponse struct {
 	OverdueItems     []domain.DashboardOverdueItem     `json:"overdue_items"`
 	PartsReviewItems []domain.DashboardPartsReviewItem `json:"parts_review_items"`
 	ActivityItems    []domain.DashboardActivityItem    `json:"activity_items"`
+	StatusCounts     []domain.DashboardStatusCount     `json:"status_counts"`
 }
 
 func New(db *pgxpool.Pool) *Handler {
@@ -341,7 +342,17 @@ func (h *Handler) Dashboard(c *gin.Context) {
 		OverdueItems:     data.OverdueItems,
 		PartsReviewItems: data.PartsReviewItems,
 		ActivityItems:    data.ActivityItems,
+		StatusCounts:     nonNilStatusCounts(data.StatusCounts),
 	})
+}
+
+// nonNilStatusCounts keeps status_counts a JSON array ([] not null) so the
+// web client can tell "no statuses" apart from "field missing".
+func nonNilStatusCounts(items []domain.DashboardStatusCount) []domain.DashboardStatusCount {
+	if items == nil {
+		return make([]domain.DashboardStatusCount, 0)
+	}
+	return items
 }
 
 func parsePositiveInt64Query(raw string) (*int64, error) {

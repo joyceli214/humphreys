@@ -115,6 +115,7 @@ export default function AdminDashboardPage() {
   const pageSize = 5;
 
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [dashboard, setDashboard] = useState<DashboardData>({
     ready_total: 0,
     overdue_total: 0,
@@ -141,8 +142,10 @@ export default function AdminDashboardPage() {
       .then((data) => {
         if (cancelled) return;
         setDashboard(data);
+        setLoadFailed(false);
       })
       .catch((err) => {
+        if (!cancelled) setLoadFailed(true);
         alerts.error("Failed to load dashboard", err instanceof Error ? err.message : "Request failed");
       })
       .finally(() => {
@@ -226,7 +229,12 @@ export default function AdminDashboardPage() {
           <p className="mt-1 text-xs text-muted-foreground">Awaiting customer</p>
         </section>
 
-        <DashboardStatusFocus statuses={dashboard.status_counts} loading={loading} userKey={user?.id ?? "anonymous"} />
+        <DashboardStatusFocus
+          statuses={dashboard.status_counts}
+          loading={loading}
+          error={loadFailed}
+          userKey={user?.id ?? "anonymous"}
+        />
 
         <section className="flex flex-col justify-between rounded-lg border border-border bg-white p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Operations</p>
