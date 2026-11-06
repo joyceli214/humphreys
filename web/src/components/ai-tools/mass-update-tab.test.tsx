@@ -6,12 +6,14 @@ import type { MassUpdatePreviewResponse } from "@/lib/ai-tools/types";
 const previewAIMassUpdate = vi.fn();
 const applyAIMassUpdate = vi.fn();
 const getAILineItemCatalog = vi.fn();
+const runAISearch = vi.fn();
 
 vi.mock("@/lib/api/client", () => ({
   apiClient: {
     previewAIMassUpdate: (...args: unknown[]) => previewAIMassUpdate(...args),
     applyAIMassUpdate: (...args: unknown[]) => applyAIMassUpdate(...args),
     getAILineItemCatalog: (...args: unknown[]) => getAILineItemCatalog(...args),
+    runAISearch: (...args: unknown[]) => runAISearch(...args),
     listWorkOrderStatuses: (...args: unknown[]) => listWorkOrderStatuses(...args)
   }
 }));
@@ -20,6 +22,7 @@ const listWorkOrderStatuses = vi.fn();
 
 beforeEach(() => {
   getAILineItemCatalog.mockResolvedValue({ items: [{ name: "Belt Kit / Shipping", unit_price: 32, quantity_text: "1" }] });
+  runAISearch.mockResolvedValue({ rows: [{ reference_id: 29275, customer_name: "Alex Example", equipment_name: "Receiver", brand_names: [], model_number: "", status_name: "Received" }] });
   listWorkOrderStatuses.mockResolvedValue({ items: [{ id: 1, label: "Ready for pickup" }, { id: 2, label: "In repair" }] });
 });
 
@@ -69,6 +72,7 @@ afterEach(() => {
   cleanup();
   previewAIMassUpdate.mockReset();
   applyAIMassUpdate.mockReset();
+  runAISearch.mockReset();
 });
 
 describe("MassUpdateTab", () => {
@@ -261,6 +265,56 @@ describe("MassUpdateTab", () => {
 
     fireEvent.change(within(slots).getByLabelText("Jobs"), { target: { value: "42" } });
     expect(box).toHaveValue('Add "Belt Kit / Shipping" at $32.00 (qty 1) to job 42.');
+  });
+
+  it("keeps variable-price profile items out of preview until jobs and price are confirmed", async () => {
+    render(<MassUpdateTab />);
+    fireEvent.click(screen.getByText("Pick from product profile"));
+    fireEvent.change(screen.getByLabelText("Product profile"), { target: { value: "turntable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Insert Cartridge from Turntable" }));
+
+    const slots = screen.getByRole("group", { name: "Fill in the example" });
+    expect(within(slots).getByLabelText("Item")).toHaveValue("Cartridge");
+    expect(within(slots).getByLabelText("Price")).toHaveValue("");
+    expect(within(slots).getByLabelText("Qty")).toHaveValue("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    expect(screen.getByText("Enter the job numbers before previewing this profile item.")).toBeInTheDocument();
+    expect(previewAIMassUpdate).not.toHaveBeenCalled();
+
+    fireEvent.change(within(slots).getByLabelText("Jobs"), { target: { value: "29275" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    expect(screen.getByText("Enter a valid unit price and quantity before previewing this profile item.")).toBeInTheDocument();
+    expect(previewAIMassUpdate).not.toHaveBeenCalled();
+
+    fireEvent.change(within(slots).getByLabelText("Price"), { target: { value: "169.45" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    await waitFor(() => expect(previewAIMassUpdate).toHaveBeenCalledWith('Add "Cartridge" at $169.45 (qty 1) to job 29275.'));
+  });
+
+  it("adds a customer-search suggestion to the profile instruction as a job number", async () => {
+    render(<MassUpdateTab />);
+    fireEvent.click(screen.getByText("Pick from product profile"));
+    fireEvent.change(screen.getByLabelText("Product profile"), { target: { value: "turntable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Insert Audio Cable from Turntable" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Jobs" }), { target: { value: "Alex" } });
+    fireEvent.click(await screen.findByRole("option", { name: /#29275 Alex Example/ }));
+    expect(runAISearch).toHaveBeenCalledWith({ customer_name: "Alex", limit: 20 });
+    expect(screen.getByLabelText("Describe the changes you want to make")).toHaveValue('Add "Audio Cable" at $26.99 (qty 1) to job 29275.');
+  });
+
+  it("discards an old preview when the profile job search is edited", async () => {
+    previewAIMassUpdate.mockResolvedValue(PREVIEW);
+    render(<MassUpdateTab />);
+    fireEvent.click(screen.getByText("Pick from product profile"));
+    fireEvent.change(screen.getByLabelText("Product profile"), { target: { value: "turntable" } });
+    fireEvent.click(screen.getByRole("button", { name: "Insert Audio Cable from Turntable" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Jobs" }), { target: { value: "29275" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    expect(await screen.findByText("Preview: 3 changes across 3 jobs")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Jobs" }), { target: { value: "Alex" } });
+    expect(screen.queryByText("Preview: 3 changes across 3 jobs")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Apply/ })).not.toBeInTheDocument();
   });
 
   it("catalog Insert keeps earlier typed text and composes the new line beneath it", async () => {

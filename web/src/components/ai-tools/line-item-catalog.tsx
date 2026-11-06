@@ -3,19 +3,22 @@ import { apiClient } from "@/lib/api/client";
 import type { LineItemCatalogItem } from "@/lib/ai-tools/types";
 import { formatMoney } from "@/lib/ai-tools/money";
 import { AICard, AICardTitle, AIErrorBox } from "@/components/ai-tools/ai-ui";
+import { BillingProfilePicker } from "@/components/billing-profile-picker";
+import type { BillingProfileItem } from "@/lib/billing-profiles";
 
 type State = { status: "loading" } | { status: "error" } | { status: "ready"; items: LineItemCatalogItem[] };
 
 type Props = {
   /** Called with the row's item; the parent opens the add-item template with it prefilled. */
   onInsert: (item: LineItemCatalogItem) => void;
+  onPickProfile: (item: BillingProfileItem) => void;
   /** Called once the list has loaded, so the item slot can offer the same names. */
   onLoaded?: (items: LineItemCatalogItem[]) => void;
   disabled?: boolean;
 };
 
 /** Typical line item prices; "Insert" opens the add-item template for the row. */
-export function LineItemCatalog({ onInsert, onLoaded, disabled = false }: Props) {
+export function LineItemCatalog({ onInsert, onPickProfile, onLoaded, disabled = false }: Props) {
   const [state, setState] = useState<State>({ status: "loading" });
   const onLoadedRef = useRef(onLoaded);
   onLoadedRef.current = onLoaded;
@@ -42,6 +45,9 @@ export function LineItemCatalog({ onInsert, onLoaded, disabled = false }: Props)
       <p className="mt-1 text-xs text-neutral-500">
         Typical prices from past jobs. The AI uses these when you name an item without a price.
       </p>
+      <div className="mt-3">
+        <BillingProfilePicker onPick={onPickProfile} actionLabel="Insert" disabled={disabled} />
+      </div>
       {state.status === "loading" && <p className="mt-3 text-sm text-neutral-500">Loading typical prices...</p>}
       {state.status === "error" && (
         <div className="mt-3">
