@@ -19,6 +19,8 @@ type Props = {
   /** Per-status counts from GET /work-orders/dashboard; undefined on older APIs. */
   statuses: DashboardStatusCount[] | undefined;
   loading: boolean;
+  /** True when the last dashboard load failed, so counts can't be trusted. */
+  error?: boolean;
   /** Per-user key for the local mirror (user id). */
   userKey: string;
 };
@@ -28,7 +30,7 @@ type Props = {
  * Finished, waiting for pickup) and sees the job count. The choice is saved per
  * user via /user-preferences (mirrored in localStorage).
  */
-export function DashboardStatusFocus({ statuses, loading, userKey }: Props) {
+export function DashboardStatusFocus({ statuses, loading, error = false, userKey }: Props) {
   const [saved, setSaved] = useState<number[] | null>(() => readLocalStatusFocus(userKey));
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<number[]>([]);
@@ -55,7 +57,13 @@ export function DashboardStatusFocus({ statuses, loading, userKey }: Props) {
     };
   }, [userKey]);
 
-  const list = statuses ?? [];
+  // A missing list (older API / dropped field) or a failed load is "couldn't
+  // load", never a silent 0.
+  const unavailable = !loading && (error || statuses === undefined);
+  const list = unavailable ? [] : (statuses ?? []);
+  const emptyMessage = unavailable
+    ? "Couldn't load statuses. Refresh the page to try again."
+    : "No statuses to count yet.";
   const focus = resolveStatusFocus(saved, list);
   const focusSet = new Set(focus);
   const focused = list.filter((s) => focusSet.has(s.status_id));
@@ -79,24 +87,23 @@ export function DashboardStatusFocus({ statuses, loading, userKey }: Props) {
     <section aria-label="Status focus" className="rounded-lg border border-border bg-white p-4">
       <div className="mb-2 flex items-start justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status Focus</p>
-        {list.length > 0 && (
-          <button
-            type="button"
-            aria-label="Choose statuses"
-            aria-expanded={editing}
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={() => {
-              setDraft(focus);
-              setEditing((open) => !open);
-            }}
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
-        )}
+        <button
+          type="button"
+          aria-label="Choose statuses"
+          aria-expanded={editing}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => {
+            setDraft(focus);
+            setEditing((open) => !open);
+          }}
+        >
+          <Settings2 className="h-4 w-4" />
+        </button>
       </div>
 
       {editing ? (
         <div className="space-y-2">
+          {list.length === 0 && <p className="text-xs text-amber-700">{emptyMessage}</p>}
           {presets.length > 0 && (
             <div className="flex flex-wrap gap-1.5" aria-label="Presets">
               {presets.map((preset) => (
@@ -134,7 +141,7 @@ export function DashboardStatusFocus({ statuses, loading, userKey }: Props) {
           <div className="flex gap-2">
             <Button
               size="sm"
-              disabled={draft.length === 0}
+              disabled={list.length === 0 || draft.length === 0}
               onClick={() => {
                 const ordered = list.filter((s) => draft.includes(s.status_id)).map((s) => s.status_id);
                 setEditing(false);
@@ -154,7 +161,7 @@ export function DashboardStatusFocus({ statuses, loading, userKey }: Props) {
             {title}
           </p>
           <p className="text-2xl font-bold text-foreground" aria-live="polite">
-            {loading && !statuses ? "…" : total}
+            {loading && !statuses ? "…" : unavailable ? "—" : total}
           </p>
           {focused.length > 1 && (
             <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
@@ -166,7 +173,14 @@ export function DashboardStatusFocus({ statuses, loading, userKey }: Props) {
               ))}
             </ul>
           )}
-          {!loading && list.length === 0 && <p className="mt-1 text-xs text-muted-foreground">No statuses to count.</p>}
+          {!loading && list.length === 0 && (
+            <p
+              className={cn("mt-1 text-xs", unavailable ? "text-amber-700" : "text-muted-foreground")}
+              role={unavailable ? "alert" : undefined}
+            >
+              {emptyMessage}
+            </p>
+          )}
           {list.length > 0 && focused.length === 0 && (
             <p className="mt-1 text-xs text-muted-foreground">Choose statuses with the settings button.</p>
           )}
