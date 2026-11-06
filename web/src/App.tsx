@@ -11,6 +11,7 @@ import UsersPage from "@/pages/users-page";
 import RolesPage from "@/pages/roles-page";
 import AdminDashboardPage from "@/pages/admin-dashboard-page";
 import DropdownManagementPage from "@/pages/dropdown-management-page";
+import EmailCommonContactsPage from "@/pages/email-common-contacts-page";
 import EmailTemplatesPage from "@/pages/email-templates-page";
 import AISettingsPage from "@/pages/ai-settings-page";
 import WorkOrderLayoutPage from "@/pages/work-order-layout-page";
@@ -98,6 +99,14 @@ export default function App() {
         element={
           <ProtectedShell>
             <DropdownManagementPage />
+          </ProtectedShell>
+        }
+      />
+      <Route
+        path="/email-common-contacts"
+        element={
+          <ProtectedShell>
+            <EmailCommonContactsPage />
           </ProtectedShell>
         }
       />

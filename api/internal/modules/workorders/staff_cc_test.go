@@ -28,14 +28,22 @@ var testStaff = []StaffContact{
 // staffEmailStub adds the staff directory to the multi-job email stub.
 type staffEmailStub struct {
 	*aiToolsStub
-	staff    []StaffContact
-	staffErr error
-	calls    int
+	staff        []StaffContact
+	staffErr     error
+	calls        int
+	contacts     []CommonEmailContact
+	contactsErr  error
+	contactCalls int
 }
 
 func (s *staffEmailStub) ListActiveStaffContacts(context.Context) ([]StaffContact, error) {
 	s.calls++
 	return s.staff, s.staffErr
+}
+
+func (s *staffEmailStub) ListActiveCommonEmailContacts(context.Context) ([]CommonEmailContact, error) {
+	s.contactCalls++
+	return s.contacts, s.contactsErr
 }
 
 // photoStore serves "managed:<key>" tokens from markdown as stored photos.
@@ -95,51 +103,7 @@ func newStaffEmailStub() *staffEmailStub {
 	base := multiJobEmailStub()
 	base.repairLogs[5] = append(base.repairLogs[5], domain.RepairLog{Details: "Bench photo managed:markdown-images/5/front.png"})
 	base.repairLogs[6] = append(base.repairLogs[6], domain.RepairLog{Details: "managed:markdown-images/6/other.png"})
-	return &staffEmailStub{aiToolsStub: base, staff: testStaff}
-}
-
-func TestResolveStaffCc(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		in      []string
-		to      string
-		want    []string
-		wantErr error
-	}{
-		{name: "empty", in: nil, want: []string{}},
-		{name: "case-insensitive match keeps directory spelling", in: []string{"dave@humphreys.test"}, want: []string{"Dave@Humphreys.test"}},
-		{name: "dedupes and skips blanks", in: []string{"amy@humphreys.test", " ", "AMY@humphreys.test"}, want: []string{"amy@humphreys.test"}},
-		{name: "drops the To address", in: []string{"amy@humphreys.test"}, to: "Amy@humphreys.test", want: []string{}},
-		{name: "outside address rejected", in: []string{"someone@gmail.com"}, wantErr: ErrCcNotStaff},
-		{name: "display-name form rejected", in: []string{"Dave <dave@humphreys.test>"}, wantErr: ErrCcNotStaff},
-		{name: "garbage rejected", in: []string{"not an email"}, wantErr: ErrCcNotStaff},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := resolveStaffCc(tc.in, testStaff, tc.to)
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("err = %v, want %v", err, tc.wantErr)
-			}
-			if tc.wantErr != nil {
-				return
-			}
-			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-				t.Fatalf("got %v want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestResolveStaffCcCapsCount(t *testing.T) {
-	staff := make([]StaffContact, 0, MaxCustomerEmailCc+1)
-	requested := make([]string, 0, MaxCustomerEmailCc+1)
-	for i := 0; i <= MaxCustomerEmailCc; i++ {
-		email := string(rune('a'+i)) + "@humphreys.test"
-		staff = append(staff, StaffContact{Email: email})
-		requested = append(requested, email)
-	}
-	if _, err := resolveStaffCc(requested, staff, ""); !errors.Is(err, ErrTooManyCc) {
-		t.Fatalf("want ErrTooManyCc, got %v", err)
-	}
+	return &staffEmailStub{aiToolsStub: base, staff: testStaff, contacts: testContacts}
 }
 
 func TestCustomerEmailCcStaffIsSent(t *testing.T) {
@@ -164,8 +128,9 @@ func TestCustomerEmailRejectsNonStaffCc(t *testing.T) {
 	stub := newStaffEmailStub()
 	sender := &fakeSender{}
 	router := staffEmailRouter(t, stub, sender, nil)
+	// Senders without work_orders:update may only Cc staff / common contacts.
 	resp := partsAuditRequest(t, router, http.MethodPost, "/work-orders/5/customer-email",
-		`{"template":"job_started","subject":"Update","body":"Hi","cc":["dave@humphreys.test","attacker@evil.test"]}`, ownerPerms)
+		`{"template":"job_started","subject":"Update","body":"Hi","cc":["dave@humphreys.test","attacker@evil.test"]}`, senderPerms)
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("want 400, got %d %s", resp.Code, resp.Body.String())
 	}
@@ -184,8 +149,8 @@ func TestCustomerEmailWithoutCcSkipsStaffLookup(t *testing.T) {
 	router := staffEmailRouter(t, stub, sender, nil)
 	resp := partsAuditRequest(t, router, http.MethodPost, "/work-orders/5/customer-email",
 		`{"template":"job_started","subject":"Update","body":"Hi","cc":[]}`, ownerPerms)
-	if resp.Code != http.StatusOK || stub.calls != 0 {
-		t.Fatalf("got %d (staff calls %d) %s", resp.Code, stub.calls, resp.Body.String())
+	if resp.Code != http.StatusOK || stub.calls != 0 || stub.contactCalls != 0 {
+		t.Fatalf("got %d (staff calls %d, contact calls %d) %s", resp.Code, stub.calls, stub.contactCalls, resp.Body.String())
 	}
 	if len(sender.sent) != 1 || len(sender.sent[0].Cc) != 0 {
 		t.Fatalf("unexpected send: %+v", sender.sent)

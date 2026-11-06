@@ -104,9 +104,11 @@ type updateCustomerRequest struct {
 
 type sendCustomerEmailRequest struct {
 	Template string `json:"template" binding:"required"`
-	To       string `json:"to"`
-	Subject  string `json:"subject"`
-	Body     string `json:"body"`
+	// To is the legacy single-recipient override. Empty sends to the customer
+	// email on file; a different address needs work_orders:update.
+	To      string `json:"to"`
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
 	// BodyHTML is optional. When it has visible text it is sanitized and sent
 	// as the HTML body; Body stays the plain-text copy for older clients.
 	BodyHTML string `json:"body_html"`
@@ -116,9 +118,23 @@ type sendCustomerEmailRequest struct {
 	// PhotoWorkOrderIDs are other jobs (same customer) whose photos may also be
 	// picked in photo_ids. Used by multi-job Management email drafts.
 	PhotoWorkOrderIDs []int `json:"photo_work_order_ids"`
-	// Cc are optional staff addresses copied on the email. Each must belong to
-	// an active user; arbitrary outside addresses are rejected.
+	// Cc are optional addresses copied on the email (legacy name; same rules
+	// as CcEmails). Each must be an active staff user or active common contact
+	// unless the sender has work_orders:update.
 	Cc []string `json:"cc"`
+
+	// Recipient picker fields. When any is present the request is resolved in
+	// picker mode (see resolveCustomerEmailRecipients) and legacy To must be empty.
+	//
+	// ToCustomer sends To the customer email on the work order (default true).
+	ToCustomer *bool `json:"to_customer"`
+	// ToContactIDs / CcContactIDs are active common contact ids.
+	ToContactIDs []int64 `json:"to_contact_ids"`
+	CcContactIDs []int64 `json:"cc_contact_ids"`
+	// ToEmails are typed To addresses (work_orders:update only).
+	ToEmails []string `json:"to_emails"`
+	// CcEmails follow the same rules as Cc.
+	CcEmails []string `json:"cc_emails"`
 }
 
 type createWorkOrderCustomerRequest struct {
@@ -446,24 +462,17 @@ func (h *Handler) SendCustomerEmail(c *gin.Context) {
 
 	msg, err := buildCustomerEmailMessage(item, strings.TrimSpace(req.Template))
 	if err != nil {
-		if errors.Is(err, ErrInvalidEmailFormat) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	msg, err = applyCustomerEmailOverrides(msg, req)
+	msg = applyCustomerEmailOverrides(msg, req)
+	directory := &lazyRecipientDirectory{ctx: c.Request.Context(), service: h.service}
+	to, cc, err := resolveCustomerEmailRecipients(req, stringValue(item.Customer.Email), hasPermission(c, permUpdate), directory)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(recipientErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
-	cc, status, err := h.customerEmailCc(c.Request.Context(), req.Cc, msg.To)
-	if err != nil {
-		c.JSON(status, gin.H{"error": err.Error()})
-		return
-	}
-	msg.Cc = cc
+	msg.To, msg.ExtraTo, msg.Cc = to[0], to[1:], cc
 	if len(req.PhotoIDs) > 0 {
 		attachments, status, err := h.customerEmailAttachments(c.Request.Context(), item, req.PhotoIDs, req.PhotoWorkOrderIDs)
 		if err != nil {

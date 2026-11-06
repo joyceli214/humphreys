@@ -288,3 +288,36 @@ export interface StaffContact {
   email: string;
   full_name: string;
 }
+
+export type EmailCommonContactRole = "boss" | "staff" | "other";
+
+/** Common contact (常用聯絡人) as managed on the Common contacts page. */
+export interface EmailCommonContact {
+  id: number;
+  name: string;
+  email: string;
+  role: EmailCommonContactRole;
+  is_active: boolean;
+  is_pinned: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Active common contact offered in the customer email recipient picker. */
+export interface EmailPickerContact {
+  id: number;
+  name: string;
+  email: string;
+  role: EmailCommonContactRole;
+  is_pinned: boolean;
+}
+
+export interface EmailCommonContactInput {
+  name: string;
+  email: string;
+  role: EmailCommonContactRole;
+  is_active?: boolean;
+  is_pinned?: boolean;
+  sort_order?: number;
+}

@@ -52,8 +52,8 @@ export function StaffCcPicker({ value, onChange, disabled = false }: Props) {
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-1.5">
-        <label htmlFor="ai-email-cc" className="shrink-0">
-          Cc:
+        <label htmlFor="ai-email-cc" className="shrink-0 text-xs font-medium text-neutral-600">
+          Portal staff (Cc):
         </label>
         {value.map((email) => {
           const contact = byEmail.get(email.toLowerCase());

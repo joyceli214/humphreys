@@ -3,7 +3,6 @@ package workorders
 import (
 	"errors"
 	"fmt"
-	"net/mail"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,15 +18,9 @@ const (
 
 type customerEmailMessage = mailer.Message
 
+// buildCustomerEmailMessage builds the default subject/body for a template.
+// Recipients are not set here; resolveCustomerEmailRecipients decides them.
 func buildCustomerEmailMessage(item domain.WorkOrderDetail, template string) (customerEmailMessage, error) {
-	email := strings.TrimSpace(stringValue(item.Customer.Email))
-	if email == "" {
-		return customerEmailMessage{}, errors.New("customer email missing")
-	}
-	if _, err := mail.ParseAddress(email); err != nil {
-		return customerEmailMessage{}, ErrInvalidEmailFormat
-	}
-
 	customerName := emailCustomerName(item)
 	equipmentName := emailEquipmentName(item)
 	details := emailJobDetails(item)
@@ -35,7 +28,6 @@ func buildCustomerEmailMessage(item domain.WorkOrderDetail, template string) (cu
 	switch template {
 	case customerEmailJobStarted:
 		return customerEmailMessage{
-			To:      email,
 			Subject: fmt.Sprintf("Job #%d started - %s", item.ReferenceID, equipmentName),
 			Body: strings.Join([]string{
 				fmt.Sprintf("Hi %s,", customerName),
@@ -53,7 +45,6 @@ func buildCustomerEmailMessage(item domain.WorkOrderDetail, template string) (cu
 		}, nil
 	case customerEmailJobCompleted:
 		return customerEmailMessage{
-			To:      email,
 			Subject: fmt.Sprintf("Job #%d completed - %s", item.ReferenceID, equipmentName),
 			Body: strings.Join([]string{
 				fmt.Sprintf("Hi %s,", customerName),
@@ -74,15 +65,9 @@ func buildCustomerEmailMessage(item domain.WorkOrderDetail, template string) (cu
 	}
 }
 
-// applyCustomerEmailOverrides applies the edits from the email dialog on top of
-// the default message built from the work order.
-func applyCustomerEmailOverrides(msg customerEmailMessage, req sendCustomerEmailRequest) (customerEmailMessage, error) {
-	if to := strings.TrimSpace(req.To); to != "" {
-		if _, err := mail.ParseAddress(to); err != nil {
-			return msg, ErrInvalidEmailFormat
-		}
-		msg.To = to
-	}
+// applyCustomerEmailOverrides applies the subject/body edits from the email
+// dialog on top of the default message built from the work order.
+func applyCustomerEmailOverrides(msg customerEmailMessage, req sendCustomerEmailRequest) customerEmailMessage {
 	if subject := strings.TrimSpace(req.Subject); subject != "" {
 		msg.Subject = subject
 	}
@@ -92,7 +77,7 @@ func applyCustomerEmailOverrides(msg customerEmailMessage, req sendCustomerEmail
 	if bodyHTML := strings.TrimSpace(req.BodyHTML); bodyHTML != "" && mailer.HasVisibleText(bodyHTML) {
 		msg.BodyHTML = mailer.SanitizeEmailHTML(bodyHTML)
 	}
-	return msg, nil
+	return msg
 }
 
 func emailCustomerName(item domain.WorkOrderDetail) string {
