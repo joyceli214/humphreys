@@ -4,6 +4,9 @@ import type {
   CustomerLookupOption,
   DropdownManagementEntry,
   DashboardData,
+  EmailCommonContact,
+  EmailCommonContactInput,
+  EmailPickerContact,
   EmailTemplate,
   EmailTemplateKey,
   LookupOption,
@@ -36,6 +39,22 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000;
+
+
+/**
+ * Recipient picker fields for POST /work-orders/:id/customer-email. When any is
+ * set, "to" must be empty; the server resolves and enforces the final list.
+ */
+export type CustomerEmailRecipientFields = {
+  /** Send To the customer email on the work order (server default true). */
+  to_customer?: boolean;
+  /** Active common contact ids. */
+  to_contact_ids?: number[];
+  cc_contact_ids?: number[];
+  /** Typed addresses; only allowed for work_orders:update. */
+  to_emails?: string[];
+  cc_emails?: string[];
+};
 
 export class APIError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -357,9 +376,9 @@ export class APIClient {
       photo_ids?: string[];
       /** Other jobs of the same customer whose photos may be in photo_ids (multi-job drafts). */
       photo_work_order_ids?: number[];
-      /** Staff emails to copy; the server rejects anything that isn't an active staff user. */
+      /** Cc emails: active staff or common contacts (any address for work_orders:update). */
       cc?: string[];
-    }
+    } & CustomerEmailRecipientFields
   ) {
     return this.request<{ sent: boolean }>(`/work-orders/${referenceID}/customer-email`, {
       method: "POST",
@@ -369,6 +388,34 @@ export class APIClient {
 
   listEmailStaff() {
     return this.request<{ items: StaffContact[]; max_cc: number }>("/work-orders/email-staff");
+  }
+
+  /** Active common contacts for the customer email recipient picker. */
+  listEmailPickerContacts() {
+    return this.request<{ items: EmailPickerContact[]; max_to: number; max_cc: number }>("/work-orders/email-common-contacts");
+  }
+
+  /** All common contacts (incl. inactive) for the Common contacts page. */
+  listEmailCommonContacts() {
+    return this.request<{ items: EmailCommonContact[]; max_contacts: number }>("/catalog/email-common-contacts");
+  }
+
+  createEmailCommonContact(payload: EmailCommonContactInput) {
+    return this.request<EmailCommonContact>("/catalog/email-common-contacts", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  updateEmailCommonContact(id: number, payload: Partial<EmailCommonContactInput>) {
+    return this.request<EmailCommonContact>(`/catalog/email-common-contacts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  deleteEmailCommonContact(id: number) {
+    return this.request<void>(`/catalog/email-common-contacts/${id}`, { method: "DELETE" });
   }
 
   getUserPreference<T>(key: string) {

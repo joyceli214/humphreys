@@ -43,3 +43,31 @@ func TestGraphMessageOmitsEmptyCc(t *testing.T) {
 		t.Fatalf("no bcc in MVP: %s", raw)
 	}
 }
+
+func TestGraphMessageAddsExtraToRecipients(t *testing.T) {
+	raw, err := json.Marshal(graphMessage(Message{To: "jane@example.com", ExtraTo: []string{"boss@shop.test", " "}, Subject: "Hi", Body: "Hello"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		To []struct {
+			EmailAddress struct{ Address string } `json:"emailAddress"`
+		} `json:"toRecipients"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.To) != 2 || out.To[0].EmailAddress.Address != "jane@example.com" || out.To[1].EmailAddress.Address != "boss@shop.test" {
+		t.Fatalf("toRecipients = %+v", out.To)
+	}
+}
+
+func TestGraphMessageExtraToOnlyWhenPrimaryBlank(t *testing.T) {
+	raw, err := json.Marshal(graphMessage(Message{ExtraTo: []string{"boss@shop.test"}, Subject: "Hi", Body: "Hello"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"toRecipients":[{"emailAddress":{"address":"boss@shop.test"}}]`) {
+		t.Fatalf("unexpected payload: %s", raw)
+	}
+}

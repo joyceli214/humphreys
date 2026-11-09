@@ -43,6 +43,13 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		middleware.RequirePermission(permSensitiveRead),
 		h.ListEmailStaff,
 	)
+	// Active common contacts for the customer email recipient picker.
+	group.GET(
+		"/email-common-contacts",
+		middleware.RequirePermission(permRead),
+		middleware.RequirePermission(permSensitiveRead),
+		h.ListEmailCommonContacts,
+	)
 	group.POST("", middleware.RequirePermission(permCreate), h.CreateWorkOrder)
 	group.DELETE("/:reference_id", middleware.RequirePermission(permCreate), h.DeleteWorkOrder)
 	group.GET("", middleware.RequirePermission(permRead), h.ListWorkOrders)

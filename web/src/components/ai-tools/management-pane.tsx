@@ -21,6 +21,8 @@ export type ManagementPaneValue = {
   dock: Dock;
   ratio: number;
   toggle: () => void;
+  /** Opens the pane (no-op when already open); unlike toggle it never closes it. */
+  show: () => void;
   close: () => void;
   setDock: (dock: Dock) => void;
   setRatio: (ratio: number) => void;
@@ -33,7 +35,7 @@ export type ManagementPaneValue = {
 const noop = () => {};
 // Returned outside a provider (e.g. non-admin shells): inert, never opens.
 const UNAVAILABLE: ManagementPaneValue = { available: false, open: false, dock: "right", ratio: DEFAULT_RATIO,
-  toggle: noop, close: noop, setDock: noop, setRatio: noop, popOut: noop, frameRef: noop };
+  toggle: noop, show: noop, close: noop, setDock: noop, setRatio: noop, popOut: noop, frameRef: noop };
 
 const ManagementPaneContext = createContext<ManagementPaneValue | null>(null);
 
@@ -111,6 +113,7 @@ export function ManagementPaneProvider({
   }, []);
 
   const toggle = useCallback(() => setOpen((o) => !o), []);
+  const show = useCallback(() => setOpen(true), []);
   const close = useCallback(() => setOpen(false), []);
   const setDock = useCallback((d: Dock) => setDockState(d), []);
   const setRatio = useCallback((r: number) => setRatioState(clampRatio(r)), []);
@@ -123,8 +126,8 @@ export function ManagementPaneProvider({
   }, []);
 
   const value = useMemo<ManagementPaneValue>(
-    () => ({ available: true, open, dock, ratio, toggle, close, setDock, setRatio, popOut, frameRef }),
-    [open, dock, ratio, toggle, close, setDock, setRatio, popOut, frameRef]
+    () => ({ available: true, open, dock, ratio, toggle, show, close, setDock, setRatio, popOut, frameRef }),
+    [open, dock, ratio, toggle, show, close, setDock, setRatio, popOut, frameRef]
   );
 
   return <ManagementPaneContext.Provider value={value}>{children}</ManagementPaneContext.Provider>;

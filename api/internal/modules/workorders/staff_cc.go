@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/mail"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,8 +12,9 @@ import (
 const MaxCustomerEmailCc = 10
 
 var (
-	// ErrCcNotStaff is returned when a Cc address is not an active staff user.
-	ErrCcNotStaff = errors.New("cc must be an active staff email")
+	// ErrCcNotStaff is returned when a Cc address is neither an active staff
+	// user nor an active common contact (and the sender may not type addresses).
+	ErrCcNotStaff = errors.New("cc must be an active staff or common contact email")
 	// ErrTooManyCc is returned when more than MaxCustomerEmailCc addresses are given.
 	ErrTooManyCc = errors.New("too many cc recipients")
 )
@@ -51,76 +50,6 @@ func (r *storeRepository) ListActiveStaffContacts(ctx context.Context) ([]StaffC
 		out = append(out, item)
 	}
 	return out, rows.Err()
-}
-
-// resolveStaffCc validates requested Cc addresses against the active staff
-// directory. Free-typed outside addresses are rejected. The result keeps the
-// request order, is de-duplicated case-insensitively, and drops the To address.
-func resolveStaffCc(requested []string, staff []StaffContact, to string) ([]string, error) {
-	allowed := make(map[string]string, len(staff))
-	for _, contact := range staff {
-		email := strings.ToLower(strings.TrimSpace(contact.Email))
-		if email != "" {
-			allowed[email] = strings.TrimSpace(contact.Email)
-		}
-	}
-	toKey := strings.ToLower(strings.TrimSpace(to))
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(requested))
-	for _, raw := range requested {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		parsed, err := mail.ParseAddress(value)
-		if err != nil || !strings.EqualFold(parsed.Address, value) {
-			// Only bare addresses; "Name <x@y>" forms are not accepted.
-			return nil, ErrCcNotStaff
-		}
-		key := strings.ToLower(parsed.Address)
-		address, ok := allowed[key]
-		if !ok {
-			return nil, ErrCcNotStaff
-		}
-		if key == toKey {
-			continue
-		}
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, address)
-	}
-	if len(out) > MaxCustomerEmailCc {
-		return nil, ErrTooManyCc
-	}
-	return out, nil
-}
-
-// customerEmailCc loads the staff directory only when Cc was requested.
-func (h *Handler) customerEmailCc(ctx context.Context, requested []string, to string) ([]string, int, error) {
-	hasAny := false
-	for _, value := range requested {
-		if strings.TrimSpace(value) != "" {
-			hasAny = true
-			break
-		}
-	}
-	if !hasAny {
-		return nil, http.StatusOK, nil
-	}
-	if len(requested) > MaxCustomerEmailCc*2 {
-		return nil, http.StatusBadRequest, ErrTooManyCc
-	}
-	staff, err := h.service.ListActiveStaffContacts(ctx)
-	if err != nil {
-		return nil, http.StatusInternalServerError, errors.New("failed to load staff")
-	}
-	cc, err := resolveStaffCc(requested, staff, to)
-	if err != nil {
-		return nil, http.StatusBadRequest, err
-	}
-	return cc, http.StatusOK, nil
 }
 
 // ListEmailStaff returns active staff that can be copied (Cc) on customer email.

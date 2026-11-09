@@ -4,6 +4,8 @@ import { MassUpdateTab } from "@/components/ai-tools/mass-update-tab";
 import { AdvancedSearchTab } from "@/components/ai-tools/advanced-search-tab";
 import { EmailDraftsTab } from "@/components/ai-tools/email-drafts-tab";
 import { DockBackButton } from "@/components/ai-tools/dock-back-button";
+import { PENDING_EMAIL_DRAFT_KEY, takePendingEmailDraft } from "@/lib/ai-tools/open-email-drafts";
+import type { EmailDraftTarget } from "@/lib/ai-tools/types";
 
 // The former "Job Summary" tab (components/ai-tools/job-summary-tab.tsx) is
 // intentionally kept in the repo, unused, for reuse on the dashboard later.
@@ -24,9 +26,37 @@ function panelClass(active: boolean) {
 
 export default function AIToolsPage() {
   const [tab, setTab] = useState<TabKey>("mass-update");
+  const [emailTarget, setEmailTarget] = useState<EmailDraftTarget | null>(null);
 
   useEffect(() => {
     document.title = "Management";
+  }, []);
+
+  // "Draft email" on a work-order page queues a job for the email drafts tab.
+  // Take it on load, and when this page is already open (split pane or
+  // pop-out) via the cross-document storage event / regaining focus.
+  useEffect(() => {
+    const take = () => {
+      const target = takePendingEmailDraft();
+      if (!target) return;
+      setEmailTarget(target);
+      setTab("email-drafts");
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PENDING_EMAIL_DRAFT_KEY && event.newValue != null) take();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") take();
+    };
+    take();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", take);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", take);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   return (
@@ -96,7 +126,7 @@ export default function AIToolsPage() {
             hidden={tab !== "email-drafts"}
             className={panelClass(tab === "email-drafts")}
           >
-            <EmailDraftsTab target={null} />
+            <EmailDraftsTab target={emailTarget} />
           </section>
         </div>
       </div>

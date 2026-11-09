@@ -3,12 +3,15 @@ export type NavEntry = {
   label: string;
   readPermission: string;
   group?: "administration" | "config";
+  /** Optional secondary label (e.g. Cantonese) shown as a tooltip. */
+  hint?: string;
 };
 
 export const NAV_ENTRIES: NavEntry[] = [
   { href: "/dashboard", label: "Dashboard", readPermission: "work_orders:read" },
   { href: "/work-orders", label: "Work Orders", readPermission: "work_orders:read" },
   { href: "/dropdown-management", label: "Dropdown", readPermission: "work_orders:update", group: "config" },
+  { href: "/email-common-contacts", label: "Common contacts", readPermission: "work_orders:update", group: "config", hint: "常用聯絡人" },
   { href: "/email-templates", label: "Email Templates", readPermission: "work_orders:update", group: "config" },
   { href: "/ai-settings", label: "AI Settings", readPermission: "work_orders:update", group: "config" },
   { href: "/parts-purchase-requests", label: "Parts Requests", readPermission: "work_orders_sensitive:read" },

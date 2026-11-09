@@ -18,9 +18,14 @@ function setWidth(width: number) {
 function Harness() {
   const pane = useManagementPane();
   return (
-    <button type="button" onClick={pane.toggle}>
-      Toggle harness
-    </button>
+    <>
+      <button type="button" onClick={pane.toggle}>
+        Toggle harness
+      </button>
+      <button type="button" onClick={pane.show}>
+        Show harness
+      </button>
+    </>
   );
 }
 
@@ -53,6 +58,15 @@ afterEach(() => {
 });
 
 describe("ManagementSplit", () => {
+  it("show() opens the pane and keeps it open when already open", () => {
+    renderSplit();
+    fireEvent.click(screen.getByRole("button", { name: "Show harness" }));
+    expect(screen.getByTitle("Management")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show harness" }));
+    expect(screen.getByTitle("Management")).toBeInTheDocument();
+  });
+
+
   it("renders only children when closed", () => {
     renderSplit();
     expect(screen.getByText("Portal content")).toBeInTheDocument();

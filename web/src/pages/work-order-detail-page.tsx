@@ -22,7 +22,7 @@ import {
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th } from "@/components/ui/table";
 import { AIMarkdownEditor } from "@/components/ai-markdown-editor";
@@ -37,6 +37,9 @@ import { DEFAULT_EMAIL_PHOTO_LIMITS, extractPhotoUrls, summarizePhotoSelection, 
 import { useMediaQuery } from "@/lib/use-media-query";
 import { isPortalWorkOrderTwoColumn, usePortalWidth } from "@/components/layout/portal-width";
 import { AI_EMAIL_DRAFT_QUERY_PARAM, takeAIEmailDraft, type AIEmailDraftHandoff } from "@/lib/ai-tools/email-handoff";
+import { AI_TOOLS_PERMISSION, openAIToolsWindow } from "@/lib/ai-tools/access";
+import { queueEmailDraft, selectedJobFromDetail } from "@/lib/ai-tools/open-email-drafts";
+import { useManagementPane } from "@/components/ai-tools/management-pane";
 import { EmailPhotoPanel } from "@/components/email-photo-panel";
 import { JobPhotosCard } from "@/components/job-photos-card";
 import "@mdxeditor/editor/style.css";
@@ -377,6 +380,9 @@ export default function WorkOrderDetailPage() {
   const canUpdateStatus = hasPermission("work_orders_status:update");
   const canUpdateLocation = hasPermission("work_orders_location:update");
   const canViewSensitive = hasPermission("work_orders_sensitive:read");
+  // Same check as canUseAITools(scope): Management (and its API) needs work_orders:update.
+  const canDraftEmail = hasPermission(AI_TOOLS_PERMISSION);
+  const managementPane = useManagementPane();
   const canReadRepairLogs = hasPermission("repair_logs:read");
   const canCreateRepairLogs = hasPermission("repair_logs:create");
   const canUpdateRepairLogs = hasPermission("repair_logs:update");
@@ -840,6 +846,12 @@ export default function WorkOrderDetailPage() {
       cleanupRemovedTempMarkdownImages(prev.work_done, normalizedValue);
       return { ...prev, work_done: normalizedValue };
     });
+  };
+
+  const openEmailDrafts = () => {
+    queueEmailDraft(selectedJobFromDetail(item), "progress_update");
+    if (managementPane.available) managementPane.show();
+    else openAIToolsWindow();
   };
 
   const buildShareContent = () => {
@@ -2032,6 +2044,14 @@ export default function WorkOrderDetailPage() {
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => void openCustomerEmailPreview("job_started")}>Job Started Email</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void openCustomerEmailPreview("job_completed")}>Job Completed Email</DropdownMenuItem>
+                {/* Placement per Justin: under the Email Customer list, after a separator, so it reads as a
+                    second action (open Management's Customer Email Drafts with this job) rather than a template. */}
+                {canDraftEmail && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={openEmailDrafts}>Draft email</DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}

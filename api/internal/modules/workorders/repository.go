@@ -45,6 +45,7 @@ type Repository interface {
 	AISearch(ctx context.Context, filters aiResolvedSearchFilters) ([]AISearchRow, int, error)
 	ApplyMassUpdateJob(ctx context.Context, referenceID int, expectedUpdatedAt *time.Time, ops []massUpdateResolvedOp, userID string) ([]string, error)
 	ListActiveStaffContacts(ctx context.Context) ([]StaffContact, error)
+	ListActiveCommonEmailContacts(ctx context.Context) ([]CommonEmailContact, error)
 }
 
 type storeRepository struct {

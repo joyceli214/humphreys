@@ -21,6 +21,12 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 	authed.PATCH("/catalog/dropdown-management/:key/options/:optionId/active", middleware.RequirePermission(permWorkOrdersUpdate), h.SetDropdownOptionActive)
 	authed.PATCH("/catalog/dropdown-management/:key/options/:optionId/pinned", middleware.RequirePermission(permWorkOrdersUpdate), h.SetDropdownOptionPinned)
 	authed.PATCH("/catalog/dropdown-management/work_order_statuses/options/:optionId/group", middleware.RequirePermission(permWorkOrdersUpdate), h.SetWorkOrderStatusGroup)
+	// Common contacts (常用聯絡人) management; the active list for the send
+	// picker is GET /work-orders/email-common-contacts.
+	authed.GET("/catalog/email-common-contacts", middleware.RequirePermission(permWorkOrdersUpdate), h.ListEmailCommonContacts)
+	authed.POST("/catalog/email-common-contacts", middleware.RequirePermission(permWorkOrdersUpdate), h.CreateEmailCommonContact)
+	authed.PATCH("/catalog/email-common-contacts/:id", middleware.RequirePermission(permWorkOrdersUpdate), h.UpdateEmailCommonContact)
+	authed.DELETE("/catalog/email-common-contacts/:id", middleware.RequirePermission(permWorkOrdersUpdate), h.DeleteEmailCommonContact)
 	authed.GET("/catalog/work-order-statuses/complete-job-target", middleware.RequirePermission(permWorkOrdersRead), h.GetCompleteJobStatus)
 	authed.PATCH("/catalog/work-order-statuses/complete-job-target", middleware.RequirePermission(permWorkOrdersUpdate), h.SetCompleteJobStatus)
 	authed.GET("/catalog/work-order-statuses", middleware.RequirePermission(permWorkOrdersRead), h.ListWorkOrderStatuses)

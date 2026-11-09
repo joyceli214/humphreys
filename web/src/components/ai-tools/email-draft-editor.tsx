@@ -25,6 +25,8 @@ type Props = {
   footer?: ReactNode;
   /** Optional Cc row rendered under "To:" (staff picker). */
   ccField?: ReactNode;
+  /** Full recipients block; replaces the "To:" line and ccField when given. */
+  recipientsField?: ReactNode;
   /** Optional job photo picker rendered under the body. */
   photos?: ReactNode;
 };
@@ -43,6 +45,7 @@ export function EmailDraftEditor({
   sendBlockedReason,
   footer,
   ccField,
+  recipientsField,
   photos
 }: Props) {
   const complete = Boolean(draft?.subject.trim() && draft?.body.trim());
@@ -54,8 +57,12 @@ export function EmailDraftEditor({
         <>
           <div className="mt-2 flex flex-1 flex-col rounded-md border border-[#ddd5cc] bg-white">
             <div className="space-y-1 border-b border-[#efeae4] px-3 py-2 text-sm text-neutral-500">
-              <div>To: {recipientHint || <span className="text-red-700">customer has no email on file</span>}</div>
-              {ccField}
+              {recipientsField ?? (
+                <>
+                  <div>To: {recipientHint || <span className="text-red-700">customer has no email on file</span>}</div>
+                  {ccField}
+                </>
+              )}
               <div className="flex items-start gap-1">
                 <label htmlFor="ai-email-subject" className="shrink-0 leading-5">
                   Subject:

@@ -147,6 +147,11 @@ type Repository interface {
 	CreatePaymentMethod(ctx context.Context, label string) (LookupOption, error)
 	CreateLocation(ctx context.Context, shelf string, floor int32) (LookupOption, error)
 	CreatePartsItemPreset(ctx context.Context, label string) (LookupOption, error)
+	ListEmailCommonContacts(ctx context.Context) ([]EmailCommonContact, error)
+	GetEmailCommonContact(ctx context.Context, id int64) (EmailCommonContact, error)
+	CreateEmailCommonContact(ctx context.Context, item EmailCommonContact) (EmailCommonContact, error)
+	UpdateEmailCommonContact(ctx context.Context, item EmailCommonContact) (EmailCommonContact, error)
+	DeleteEmailCommonContact(ctx context.Context, id int64) error
 }
 
 type storeRepository struct {

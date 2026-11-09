@@ -1,6 +1,8 @@
 // Wire types for the admin-only /api/ai-tools endpoints
 // (api/internal/modules/workorders/ai_tools*.go).
 
+import type { SelectedEmailJob } from "@/lib/ai-tools/email-selection";
+
 export type MassUpdateOpType =
   | "set_labour_total"
   | "set_labour_discount"
@@ -131,11 +133,13 @@ export type EmailDraftResponse = {
   customer_email_mixed?: boolean;
 };
 
-/** A job pre-selected when jumping from Job Summary to the email drafts tab. */
+/** A job pre-selected when jumping from Job Summary (or a work-order page) to the email drafts tab. */
 export type EmailDraftTarget = {
   referenceId: number;
   label: string;
   type: EmailDraftType;
+  /** Full selected-jobs entry (customer id, equipment, status) when the sender has it. */
+  job?: SelectedEmailJob;
 };
 
 // Advanced Search (ai_tools_search*.go). Results carry the customer's display

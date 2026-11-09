@@ -9,6 +9,12 @@ const draftAICustomerEmail = vi.fn();
 const sendWorkOrderCustomerEmail = vi.fn();
 const listWorkOrderEmailPhotos = vi.fn();
 const listEmailStaff = vi.fn();
+const listEmailPickerContacts = vi.fn();
+const auth = { scope: ["work_orders:read", "work_orders:update", "work_orders_sensitive:read"] as string[] };
+
+vi.mock("@/lib/auth/auth-context", () => ({
+  useAuth: () => ({ ...auth, hasPermission: (p: string) => auth.scope.includes(p) })
+}));
 
 vi.mock("@/lib/api/client", () => ({
   apiClient: {
@@ -16,7 +22,8 @@ vi.mock("@/lib/api/client", () => ({
     draftAICustomerEmail: (...args: unknown[]) => draftAICustomerEmail(...args),
     sendWorkOrderCustomerEmail: (...args: unknown[]) => sendWorkOrderCustomerEmail(...args),
     listWorkOrderEmailPhotos: (...args: unknown[]) => listWorkOrderEmailPhotos(...args),
-    listEmailStaff: (...args: unknown[]) => listEmailStaff(...args)
+    listEmailStaff: (...args: unknown[]) => listEmailStaff(...args),
+    listEmailPickerContacts: (...args: unknown[]) => listEmailPickerContacts(...args)
   }
 }));
 
@@ -83,6 +90,14 @@ beforeEach(() => {
     ],
     max_cc: 10
   });
+  listEmailPickerContacts.mockResolvedValue({
+    items: [
+      { id: 1, name: "Big Boss", email: "boss@shop.test", role: "boss", is_pinned: true },
+      { id: 2, name: "Books", email: "books@shop.test", role: "other", is_pinned: false }
+    ],
+    max_to: 10,
+    max_cc: 10
+  });
 });
 
 afterEach(() => {
@@ -94,6 +109,8 @@ afterEach(() => {
   sendWorkOrderCustomerEmail.mockReset();
   listWorkOrderEmailPhotos.mockReset();
   listEmailStaff.mockReset();
+  listEmailPickerContacts.mockReset();
+  auth.scope = ["work_orders:read", "work_orders:update", "work_orders_sensitive:read"];
 });
 
 async function searchAndAdd(...ids: number[]) {
@@ -133,6 +150,17 @@ describe("EmailDraftsTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove job #5" }));
     expect(within(selectedList()).queryByText(/#5/)).toBeNull();
     expect(window.localStorage.getItem(EMAIL_SELECTION_STORAGE_KEY)).not.toContain("\"referenceId\":5");
+  });
+
+  it("adds a target's full job (customer id) to an already-mounted tab so it groups with that customer", async () => {
+    const { rerender } = render(<EmailDraftsTab target={null} />);
+    await searchAndAdd(5);
+    const job = { referenceId: 9, customerId: 1, customerName: "Jane Doe", equipment: "Tape deck", status: "In Progress" };
+    rerender(<EmailDraftsTab target={{ referenceId: 9, label: "Jane Doe", type: "progress_update", job }} />);
+    expect(within(selectedList()).getByText(/#9/)).toBeInTheDocument();
+    expect(screen.queryByText(/different customers/i)).toBeNull();
+    const stored = JSON.parse(window.localStorage.getItem(EMAIL_SELECTION_STORAGE_KEY) ?? "[]");
+    expect(stored).toContainEqual(job);
   });
 
   it("warns about different customers and requires choosing one", async () => {
@@ -179,7 +207,9 @@ describe("EmailDraftsTab", () => {
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Send" }));
     await screen.findByText(/Email sent/);
     expect(sendWorkOrderCustomerEmail).toHaveBeenCalledTimes(1);
-    expect(sendWorkOrderCustomerEmail).toHaveBeenCalledWith(5, { template: "job_started", to: "", subject: "Edited subject", body: "Hi Jane" });
+    expect(sendWorkOrderCustomerEmail).toHaveBeenCalledWith(5, {
+      template: "job_started", to: "", subject: "Edited subject", body: "Hi Jane", to_customer: true
+    });
   });
 
   it("lets the admin pick job photos and staff Cc, and sends them with the email", async () => {
@@ -200,7 +230,7 @@ describe("EmailDraftsTab", () => {
     await waitFor(() => expect(ccSelect).toBeEnabled());
     fireEvent.change(ccSelect, { target: { value: "amy@humphreys.test" } });
     expect(screen.getByRole("button", { name: "Remove amy@humphreys.test from Cc" })).toBeInTheDocument();
-    // Only staff from the directory can be picked: no free-text input.
+    // Staff are picked from the directory: no free-text Cc input.
     expect(screen.queryByRole("textbox", { name: /cc/i })).toBeNull();
 
     sendWorkOrderCustomerEmail.mockResolvedValue({ sent: true });
@@ -212,7 +242,7 @@ describe("EmailDraftsTab", () => {
     await screen.findByText(/Email sent/);
     expect(sendWorkOrderCustomerEmail).toHaveBeenCalledWith(5, {
       template: "job_started", to: "", subject: "Update on your jobs", body: "Hi Jane",
-      photo_ids: ["p2"], cc: ["amy@humphreys.test"]
+      to_customer: true, cc_emails: ["amy@humphreys.test"], photo_ids: ["p2"]
     });
   });
 
@@ -234,7 +264,7 @@ describe("EmailDraftsTab", () => {
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Send" }));
     await screen.findByText(/Email sent/);
     expect(sendWorkOrderCustomerEmail).toHaveBeenCalledWith(5, expect.objectContaining({ photo_ids: ["p6"], photo_work_order_ids: [6] }));
-    expect(sendWorkOrderCustomerEmail.mock.calls[0][1]).not.toHaveProperty("cc");
+    expect(sendWorkOrderCustomerEmail.mock.calls[0][1]).not.toHaveProperty("cc_emails");
   });
 
   it("only offers the send job's photos when the jobs belong to different customers", async () => {
@@ -251,7 +281,84 @@ describe("EmailDraftsTab", () => {
     draftAICustomerEmail.mockResolvedValue(draftResponse([5], ""));
     fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
     expect(await screen.findByText(/customer has no email on file/i)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Send to customer" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send email" })).toBeDisabled();
+  });
+
+  it("sends to the customer and checked common contacts (Cc), with a typed Cc for admins", async () => {
+    render(<EmailDraftsTab target={null} />);
+    await searchAndAdd(5);
+    draftAICustomerEmail.mockResolvedValue(draftResponse([5]));
+    fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+
+    const recipients = await screen.findByRole("group", { name: "Recipients" });
+    expect(within(recipients).getByRole("checkbox", { name: "Send to customer" })).toBeChecked();
+    const boss = await within(recipients).findByRole("checkbox", { name: "Big Boss <boss@shop.test>" });
+    expect(boss).not.toBeChecked();
+    expect(within(recipients).getByText("Boss 老闆")).toBeInTheDocument();
+    fireEvent.click(boss);
+
+    fireEvent.change(within(recipients).getByRole("textbox", { name: "Add email address" }), { target: { value: "not-an-email" } });
+    fireEvent.click(within(recipients).getByRole("button", { name: "Add" }));
+    expect(within(recipients).getByText(/plain email address/)).toBeInTheDocument();
+    fireEvent.change(within(recipients).getByRole("textbox", { name: "Add email address" }), { target: { value: "partner@example.com" } });
+    fireEvent.click(within(recipients).getByRole("button", { name: "Add" }));
+    expect(within(recipients).getByRole("button", { name: "Remove partner@example.com" })).toBeInTheDocument();
+
+    sendWorkOrderCustomerEmail.mockResolvedValue({ sent: true });
+    fireEvent.click(screen.getByRole("button", { name: "Send email" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText(/Send to j\*\*\*@example.com for job\(s\) #5\?/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Cc: Big Boss <boss@shop.test>, partner@example.com")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send" }));
+    await screen.findByText(/Email sent/);
+    expect(sendWorkOrderCustomerEmail).toHaveBeenCalledWith(5, {
+      template: "job_started", to: "", subject: "Update on your jobs", body: "Hi Jane",
+      to_customer: true, cc_contact_ids: [1], cc_emails: ["partner@example.com"]
+    });
+  });
+
+  it("sends To a common contact when the customer is unchecked, and blocks with no To", async () => {
+    render(<EmailDraftsTab target={null} />);
+    await searchAndAdd(5);
+    draftAICustomerEmail.mockResolvedValue(draftResponse([5]));
+    fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+
+    const recipients = await screen.findByRole("group", { name: "Recipients" });
+    fireEvent.click(within(recipients).getByRole("checkbox", { name: "Send to customer" }));
+    expect(screen.getByRole("button", { name: "Send email" })).toBeDisabled();
+    expect(screen.getByText(/Choose at least one To recipient/)).toBeInTheDocument();
+
+    fireEvent.click(await within(recipients).findByRole("checkbox", { name: "Books <books@shop.test>" }));
+    expect(screen.getByRole("button", { name: "Send email" })).toBeEnabled();
+    sendWorkOrderCustomerEmail.mockResolvedValue({ sent: true });
+    fireEvent.click(screen.getByRole("button", { name: "Send email" }));
+    expect(within(screen.getByRole("alertdialog")).getByText(/Send to Books <books@shop.test> for job/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Send" }));
+    await screen.findByText(/Email sent/);
+    expect(sendWorkOrderCustomerEmail).toHaveBeenCalledWith(5, expect.objectContaining({ to_customer: false, to_contact_ids: [2] }));
+    expect(sendWorkOrderCustomerEmail.mock.calls[0][1]).not.toHaveProperty("cc_contact_ids");
+  });
+
+  it("hides the typed address input from senders without work_orders:update", async () => {
+    auth.scope = ["work_orders:read", "work_orders_sensitive:read"];
+    render(<EmailDraftsTab target={null} />);
+    await searchAndAdd(5);
+    draftAICustomerEmail.mockResolvedValue(draftResponse([5]));
+    fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+    const recipients = await screen.findByRole("group", { name: "Recipients" });
+    await within(recipients).findByRole("checkbox", { name: "Big Boss <boss@shop.test>" });
+    expect(within(recipients).queryByRole("textbox", { name: "Add email address" })).toBeNull();
+  });
+
+  it("lets a customer with no email on file be skipped by sending To a common contact", async () => {
+    render(<EmailDraftsTab target={null} />);
+    await searchAndAdd(5);
+    draftAICustomerEmail.mockResolvedValue(draftResponse([5], ""));
+    fireEvent.click(screen.getByRole("button", { name: "Generate draft" }));
+    const recipients = await screen.findByRole("group", { name: "Recipients" });
+    fireEvent.click(await within(recipients).findByRole("checkbox", { name: "Big Boss <boss@shop.test>" }));
+    expect(screen.getByRole("button", { name: "Send email" })).toBeEnabled();
   });
 
   it("shows the real error when sending fails", async () => {

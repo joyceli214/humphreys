@@ -19,7 +19,10 @@ import (
 var ErrNotConfigured = errors.New("email sending is not configured")
 
 type Message struct {
+	// To is the primary recipient.
 	To string
+	// ExtraTo are additional To recipients (after To). Callers validate them.
+	ExtraTo []string
 	// Cc are extra visible recipients. Callers validate them (customer email
 	// only allows active staff addresses).
 	Cc      []string
@@ -125,12 +128,19 @@ func graphMessage(msg Message) map[string]any {
 			"contentType": "HTML",
 			"content":     msg.htmlContent(),
 		},
-		"toRecipients": graphRecipients([]string{msg.To}),
+		"toRecipients": graphRecipients(msg.AllTo()),
 	}
 	if cc := graphRecipients(msg.Cc); len(cc) > 0 {
 		out["ccRecipients"] = cc
 	}
 	return out
+}
+
+// AllTo returns To followed by ExtraTo (blanks are skipped when sending).
+func (m Message) AllTo() []string {
+	out := make([]string, 0, 1+len(m.ExtraTo))
+	out = append(out, m.To)
+	return append(out, m.ExtraTo...)
 }
 
 // graphRecipients maps addresses to Graph recipient objects, skipping blanks.

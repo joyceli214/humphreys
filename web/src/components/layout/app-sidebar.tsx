@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import {
   ChevronRight,
   ClipboardList,
+  Contact,
   LayoutDashboard,
   ListChecks,
   Mail,
@@ -24,6 +25,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   "/dashboard": LayoutDashboard,
   "/work-orders": ClipboardList,
   "/dropdown-management": ListChecks,
+  "/email-common-contacts": Contact,
   "/email-templates": Mail,
   "/ai-settings": Settings2,
   "/parts-purchase-requests": PackageCheck,
@@ -64,6 +66,7 @@ export function AppSidebar({ className, onNavigate }: { className?: string; onNa
       <Link
         key={link.href}
         to={link.href}
+        title={link.hint}
         onClick={onNavigate}
         className={cn(
           "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap",

@@ -21,7 +21,9 @@ import { EmailDraftEditor, type EditableDraft } from "@/components/ai-tools/emai
 import { EmailJobSearch } from "@/components/ai-tools/email-job-search";
 import { EmailSelectedJobs } from "@/components/ai-tools/email-selected-jobs";
 import { EmailSendConfirm } from "@/components/ai-tools/email-send-confirm";
-import { StaffCcPicker } from "@/components/ai-tools/staff-cc-picker";
+import { EmailRecipientPicker, usePickerContacts } from "@/components/ai-tools/email-recipient-picker";
+import { EMPTY_RECIPIENTS, recipientLabels, recipientPayload, type RecipientSelection } from "@/lib/ai-tools/email-recipients";
+import { useAuth } from "@/lib/auth/auth-context";
 import { EmailPhotoPanel } from "@/components/email-photo-panel";
 import { useDraftPhotos } from "@/lib/ai-tools/draft-photos";
 import { summarizePhotoSelection } from "@/lib/email-photos";
@@ -89,7 +91,10 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   const [sent, setSent] = useState(false);
   const [clipboardNote, setClipboardNote] = useState("");
   const [photoIds, setPhotoIds] = useState<string[]>([]);
-  const [cc, setCc] = useState<string[]>([]);
+  const [recipients, setRecipients] = useState<RecipientSelection>(EMPTY_RECIPIENTS);
+  const { hasPermission } = useAuth();
+  const canTypeRecipients = hasPermission("work_orders:update");
+  const pickerContacts = usePickerContacts(meta !== null);
   // Photos come from every job in the draft. When the jobs belong to different
   // customers only the send job's photos are offered (the server enforces this).
   const photoJobIds = meta ? (meta.customerEmailMixed ? meta.ids.slice(0, 1) : meta.ids) : null;
@@ -104,9 +109,14 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   // Jumping here from another tool pre-selects the job and a fitting type.
   useEffect(() => {
     if (!target) return;
-    setJobs((list) =>
-      addSelectedJob(list, { referenceId: target.referenceId, customerId: null, customerName: target.label, equipment: "", status: "" })
-    );
+    const job: SelectedEmailJob = target.job ?? {
+      referenceId: target.referenceId,
+      customerId: null,
+      customerName: target.label,
+      equipment: "",
+      status: ""
+    };
+    setJobs((list) => addSelectedJob(list, job));
     setType(target.type);
   }, [target]);
 
@@ -146,6 +156,8 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   };
 
   const photoSummary = summarizePhotoSelection(draftPhotos.photos, photoIds, draftPhotos.limits, draftPhotos.loading);
+  const hasCustomerEmail = Boolean(meta?.recipientHint);
+  const labels = recipientLabels(recipients, hasCustomerEmail, meta?.recipientHint ?? "", pickerContacts.contacts);
 
   const send = async () => {
     if (!draft || !meta) return;
@@ -156,18 +168,19 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
     setSending(true);
     setSendError("");
     try {
-      // Same endpoint as the Email Customer dialog. "to" is left empty so the
-      // server sends to the address on the customer record. The send runs on
-      // the first job; photos from the draft's other jobs (same customer) are
-      // allowed via photo_work_order_ids and checked server-side.
+      // Same endpoint as the Email Customer dialog, in recipient picker mode:
+      // the customer address always comes from the work order record, common
+      // contacts go by id, and the server re-checks every address. The send
+      // runs on the first job; photos from the draft's other jobs (same
+      // customer) are allowed via photo_work_order_ids and checked server-side.
       await apiClient.sendWorkOrderCustomerEmail(meta.ids[0], {
         template: templateForDraftType(meta.type),
         to: "",
         subject: draft.subject.trim(),
         body: draft.body.trim(),
+        ...recipientPayload(recipients, hasCustomerEmail),
         ...(photoIds.length > 0 ? { photo_ids: photoIds } : {}),
-        ...(photoIds.length > 0 && photoJobIds && photoJobIds.length > 1 ? { photo_work_order_ids: photoJobIds.slice(1) } : {}),
-        ...(cc.length > 0 ? { cc } : {})
+        ...(photoIds.length > 0 && photoJobIds && photoJobIds.length > 1 ? { photo_work_order_ids: photoJobIds.slice(1) } : {})
       });
       setSent(true);
       setConfirming(false);
@@ -200,7 +213,12 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
   };
 
   let sendBlockedReason: string | undefined;
-  if (meta && !meta.recipientHint) sendBlockedReason = "Send is disabled: no email address on file for this customer.";
+  if (meta && labels.to.length === 0)
+    sendBlockedReason = hasCustomerEmail
+      ? "Choose at least one To recipient (customer or a common contact)."
+      : "Send is disabled: no email address on file for this customer. Select a common contact to send to instead.";
+  else if (meta && labels.to.length > pickerContacts.maxTo) sendBlockedReason = `Too many To recipients (max ${pickerContacts.maxTo}).`;
+  else if (meta && labels.cc.length > pickerContacts.maxCc) sendBlockedReason = `Too many Cc recipients (max ${pickerContacts.maxCc}).`;
   else if (meta && !sameIds(meta.ids, emailIds)) sendBlockedReason = "The selected jobs changed since this draft was generated. Regenerate first.";
   else if (sent) sendBlockedReason = "This draft was sent. Regenerate to send another email.";
   else if (photoSummary.blockedReason) sendBlockedReason = photoSummary.blockedReason;
@@ -310,14 +328,17 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
           setConfirming(true);
         }}
         sendBlockedReason={sendBlockedReason}
-        ccField={
-          meta && meta.recipientHint ? (
-            <StaffCcPicker
-              value={cc}
+        recipientsField={
+          meta ? (
+            <EmailRecipientPicker
+              value={recipients}
               onChange={(next) => {
-                setCc(next);
+                setRecipients(next);
                 setSent(false);
               }}
+              customerHint={meta.recipientHint}
+              contacts={pickerContacts}
+              canType={canTypeRecipients}
               disabled={busy}
             />
           ) : undefined
@@ -347,9 +368,9 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
           <>
             {confirming && meta && !sendBlockedReason && (
               <EmailSendConfirm
-                recipientHint={meta.recipientHint}
+                recipientHint={labels.to.join(", ")}
                 jobIds={meta.ids}
-                cc={cc}
+                cc={labels.cc}
                 photoCount={photoSummary.count}
                 photoBytes={photoSummary.totalBytes}
                 sending={sending}
@@ -359,8 +380,8 @@ export function EmailDraftsTab({ target }: { target: EmailDraftTarget | null }) 
             )}
             {sent && meta && (
               <p className="mt-2 text-sm text-green-700">
-                Email sent to {meta.recipientHint}
-                {cc.length > 0 ? ` (Cc ${cc.join(", ")})` : ""} for job(s) {jobList(meta.ids)}
+                Email sent to {labels.to.join(", ")}
+                {labels.cc.length > 0 ? ` (Cc ${labels.cc.join(", ")})` : ""} for job(s) {jobList(meta.ids)}
                 {photoSummary.count > 0 ? ` with ${photoSummary.count} ${photoSummary.count === 1 ? "photo" : "photos"}` : ""}.
               </p>
             )}
