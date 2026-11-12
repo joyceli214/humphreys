@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const interpretAsk = vi.fn();
@@ -8,6 +8,8 @@ const applyAIMassUpdate = vi.fn();
 const listAllPartsPurchaseRequests = vi.fn();
 const listWorkOrders = vi.fn();
 const getWorkOrderDetail = vi.fn();
+const listEmailPickerContacts = vi.fn();
+const listWorkOrderCustomers = vi.fn();
 
 const { FakeAPIError } = vi.hoisted(() => ({
   FakeAPIError: class FakeAPIError extends Error {
@@ -25,7 +27,9 @@ vi.mock("@/lib/api/client", () => ({
     applyAIMassUpdate: (...a: unknown[]) => applyAIMassUpdate(...a),
     listAllPartsPurchaseRequests: (...a: unknown[]) => listAllPartsPurchaseRequests(...a),
     listWorkOrders: (...a: unknown[]) => listWorkOrders(...a),
-    getWorkOrderDetail: (...a: unknown[]) => getWorkOrderDetail(...a)
+    getWorkOrderDetail: (...a: unknown[]) => getWorkOrderDetail(...a),
+    listEmailPickerContacts: (...a: unknown[]) => listEmailPickerContacts(...a),
+    listWorkOrderCustomers: (...a: unknown[]) => listWorkOrderCustomers(...a)
   }
 }));
 
@@ -241,5 +245,248 @@ describe("AskTab", () => {
     expect(within(table).getByText("Total")).toBeInTheDocument();
     // 120 + 13% HST − 10 deposit
     expect(within(table).getAllByText("$125.60")).toHaveLength(2);
+  });
+});
+
+const contacts = [
+  { id: 1, name: "Staff Test", email: "staff@test.local", role: "shop", is_pinned: true },
+  { id: 2, name: "Parts Desk", email: "parts@test.local", role: "supplier", is_pinned: false }
+];
+const customers = [{ id: 7, label: "Test Customer A (000) - a@test.local", first_name: "Test Customer", last_name: "A", email: "a@test.local" }];
+const jobRow = (reference_id: number, customer_name: string) => ({
+  reference_id, customer_name, item_name: "Receiver", brand_names: ["Brand"], model_number: "M1", status: "In Progress"
+});
+
+const box = () => screen.getByLabelText("Message") as HTMLTextAreaElement;
+const type = (value: string) => fireEvent.change(box(), { target: { value } });
+const key = (k: string, extra: Record<string, unknown> = {}) => fireEvent.keyDown(box(), { key: k, ...extra });
+const flush = () => act(async () => { await vi.advanceTimersByTimeAsync(300); });
+
+describe("Ask shortcuts: / skills", () => {
+  it("lists the five chip actions and filters as you type", () => {
+    render(<AskTab />);
+    expect(screen.getByText("Type / for skills, @ for people, # for jobs.")).toBeInTheDocument();
+    type("/");
+    const list = screen.getByRole("listbox", { name: "Skills" });
+    expect(within(list).getAllByRole("option").map((o) => o.textContent?.replace("Skill", ""))).toEqual([
+      "Jobs for a customer", "Update a job", "Parts requests", "Update many jobs", "Sum up charges"
+    ]);
+    expect(box()).toHaveAttribute("aria-expanded", "true");
+    type("/upd");
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.getAttribute("aria-label"))).toEqual([
+      "Update a job", "Update many jobs"
+    ]);
+  });
+
+  it("picking a skill fills the same starter as the chip and does not send", () => {
+    render(<AskTab />);
+    type("/upd");
+    fireEvent.click(screen.getByRole("option", { name: "Update many jobs" }));
+    expect(box().value).toBe("Set jobs # and # to status ");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    type("/");
+    key("Enter");
+    expect(box().value).toBe("Show all jobs for ");
+    fireEvent.click(screen.getByRole("button", { name: "Parts requests" }));
+    expect(box().value).toBe("Show all parts requests");
+    expect(interpretAsk).not.toHaveBeenCalled();
+  });
+
+  it("arrows move the highlight and cycle", () => {
+    render(<AskTab />);
+    type("/upd");
+    const active = () => box().getAttribute("aria-activedescendant");
+    const ids = screen.getAllByRole("option").map((o) => o.id);
+    expect(active()).toBe(ids[0]);
+    key("ArrowDown");
+    expect(active()).toBe(ids[1]);
+    key("ArrowDown");
+    expect(active()).toBe(ids[0]);
+    key("ArrowUp");
+    key("Enter");
+    expect(box().value).toBe("Set jobs # and # to status ");
+  });
+
+  it("a slash inside a word stays plain text and Enter still sends", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply: "ok" }));
+    render(<AskTab />);
+    for (const text of ["10/15", "and/or", "hello/world", "foo@bar", "abc#15"]) {
+      type(text);
+      key("/");
+      expect(screen.queryByRole("listbox")).toBeNull();
+    }
+    type("set 10/15 and/or");
+    key("Enter");
+    await waitFor(() => expect(interpretAsk).toHaveBeenCalledWith("set 10/15 and/or"));
+  });
+
+  it("Escape closes; Enter with no match does not send; Tab is not trapped", () => {
+    render(<AskTab />);
+    type("/");
+    key("Escape");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    type("/u");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    type("hi /zz");
+    expect(screen.getByText("No match.")).toBeInTheDocument();
+    key("Enter");
+    expect(interpretAsk).not.toHaveBeenCalled();
+    expect(box().value).toBe("hi /zz");
+    const tab = fireEvent.keyDown(box(), { key: "Tab" });
+    expect(tab).toBe(true);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("clicking outside closes the menu", () => {
+    render(<AskTab />);
+    type("/");
+    fireEvent.mouseDown(screen.getByRole("log"));
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+});
+
+describe("Ask shortcuts: @ and #", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    listEmailPickerContacts.mockResolvedValue({ items: contacts, max_to: 5, max_cc: 5 });
+    listWorkOrderCustomers.mockResolvedValue({ items: customers });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("@ alone shows contacts and asks for a name for customers", async () => {
+    render(<AskTab />);
+    type("@");
+    await flush();
+    const group = screen.getByRole("group", { name: "Contacts" });
+    expect(within(group).getAllByRole("option")).toHaveLength(2);
+    expect(screen.getByText("Type a name to find customers.")).toBeInTheDocument();
+    expect(listWorkOrderCustomers).not.toHaveBeenCalled();
+    type("@desk");
+    await flush();
+    expect(within(screen.getByRole("group", { name: "Contacts" })).getAllByRole("option").map((o) => o.getAttribute("aria-label"))).toEqual([
+      "Parts Desk parts@test.local"
+    ]);
+    expect(listWorkOrderCustomers).toHaveBeenCalledWith("desk");
+  });
+
+  it("@ groups contacts and customers and adds several from one search", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply: "ok" }));
+    render(<AskTab />);
+    type("jobs for @te");
+    expect(screen.getByText("Searching…")).toBeInTheDocument();
+    await flush();
+    expect(listWorkOrderCustomers).toHaveBeenCalledTimes(1);
+    expect(listWorkOrderCustomers).toHaveBeenCalledWith("te");
+    expect(screen.getByRole("group", { name: "Contacts" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Customers" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("option", { name: "Staff Test staff@test.local" }));
+    expect(box().value).toBe("jobs for @Staff Test ");
+    const added = screen.getByRole("option", { name: "Staff Test staff@test.local · Added" });
+    expect(added).toHaveAttribute("aria-disabled", "true");
+    expect(within(added).getByText("Added ✓")).toBeInTheDocument();
+    fireEvent.click(added);
+    expect(box().value).toBe("jobs for @Staff Test ");
+
+    fireEvent.click(screen.getByRole("option", { name: "Test Customer A a@test.local" }));
+    expect(box().value).toBe("jobs for @Staff Test @Test Customer A ");
+    expect(screen.getByRole("option", { name: "Test Customer A a@test.local · Added" })).toBeInTheDocument();
+
+    type("jobs for @Test Customer A ");
+    expect(screen.getByRole("option", { name: "Staff Test staff@test.local" })).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("option", { name: "Test Customer A a@test.local · Added" })).toBeInTheDocument();
+
+    type("jobs for @Test Customer A x");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    key("Enter");
+    await waitFor(() => expect(interpretAsk).toHaveBeenCalledWith("jobs for @Test Customer A x"));
+  });
+
+  it("Enter after a pick closes the list without sending", async () => {
+    render(<AskTab />);
+    type("@sta");
+    await flush();
+    key("Enter");
+    expect(box().value).toBe("@Staff Test ");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    key("Enter");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(interpretAsk).not.toHaveBeenCalled();
+  });
+
+  it("shows a Retry when contacts fail to load", async () => {
+    listEmailPickerContacts.mockRejectedValueOnce(new Error("boom"));
+    render(<AskTab />);
+    type("@");
+    await flush();
+    expect(screen.getByText("Couldn't load contacts.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await flush();
+    expect(screen.getByRole("option", { name: "Staff Test staff@test.local" })).toBeInTheDocument();
+  });
+
+  it("says to add contacts when there are none", async () => {
+    listEmailPickerContacts.mockResolvedValue({ items: [], max_to: 5, max_cc: 5 });
+    listWorkOrderCustomers.mockResolvedValue({ items: [] });
+    render(<AskTab />);
+    type("@");
+    await flush();
+    expect(screen.getByText("No contacts yet. Add them on Common contacts.")).toBeInTheDocument();
+    type("@zz");
+    await flush();
+    expect(screen.getByText("No match.")).toBeInTheDocument();
+    expect(screen.queryByRole("option")).toBeNull();
+  });
+
+  it("# searches jobs and adds several, short ids included", async () => {
+    listWorkOrders.mockResolvedValue({ items: [jobRow(15, "Test Customer A"), jobRow(150, "Test Customer B"), jobRow(31221, "Test Customer C")] });
+    render(<AskTab />);
+    type("sum #");
+    expect(screen.getByText("Type a job number or name.")).toBeInTheDocument();
+    await flush();
+    expect(listWorkOrders).not.toHaveBeenCalled();
+    type("sum #1");
+    await flush();
+    const params = listWorkOrders.mock.calls[0][0] as URLSearchParams;
+    expect(params.get("q")).toBe("1");
+    const first = screen.getByRole("option", { name: "#15 Brand Receiver M1 · Test Customer A · In Progress" });
+    expect(within(first).getByText("Test Customer A · In Progress")).toBeInTheDocument();
+    fireEvent.click(first);
+    expect(box().value).toBe("sum #15 ");
+    expect(screen.getByRole("option", { name: /^#15 .* · Added$/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: /^#150 / })).not.toHaveAttribute("aria-disabled");
+    key("ArrowDown");
+    key("ArrowDown");
+    key("Enter");
+    expect(box().value).toBe("sum #15 #31221 ");
+    expect(screen.getByRole("option", { name: /^#31221 .* · Added$/ })).toBeInTheDocument();
+    type("sum #31221 ");
+    expect(screen.getByRole("option", { name: /^#15 / })).not.toHaveAttribute("aria-disabled");
+    expect(interpretAsk).not.toHaveBeenCalled();
+  });
+
+  it("# with no results inserts nothing", async () => {
+    listWorkOrders.mockResolvedValue({ items: [] });
+    render(<AskTab />);
+    type("#999");
+    await flush();
+    expect(listWorkOrders.mock.calls[0][0].get("q")).toBe("999");
+    expect(screen.getByText("No match.")).toBeInTheDocument();
+    key("Enter");
+    expect(box().value).toBe("#999");
+    expect(interpretAsk).not.toHaveBeenCalled();
+  });
+
+  it("# shows a Retry when the search fails", async () => {
+    listWorkOrders.mockRejectedValueOnce(new Error("down"));
+    listWorkOrders.mockResolvedValueOnce({ items: [jobRow(15, "Test Customer A")] });
+    render(<AskTab />);
+    type("#15");
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await flush();
+    expect(screen.getByRole("option", { name: /^#15 / })).toBeInTheDocument();
   });
 });

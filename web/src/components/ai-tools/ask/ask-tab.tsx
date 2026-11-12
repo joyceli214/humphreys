@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type SyntheticEvent } from "react";
 import { SendHorizontal } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
 import type { AskInterpretResponse } from "@/lib/ai-tools/types";
@@ -6,6 +6,8 @@ import { AI_TEXT_MAX } from "@/lib/ai-tools/limits";
 import { errorMessage } from "@/components/ai-tools/ai-ui";
 import { FOCUS, MgmtChip, MgmtError, MgmtLoading, errorStatus } from "@/components/ai-tools/mgmt-ui";
 import { ChargesAnswer, CustomerJobsAnswer, PartsAnswer, UpdatePreviewAnswer } from "@/components/ai-tools/ask/ask-answers";
+import { AskMentionMenu, useShortcutResults, type MenuRow } from "@/components/ai-tools/ask/ask-mention-menu";
+import { appendMention, findTrigger, insertMention, type ShortcutKind, type ShortcutTrigger } from "@/components/ai-tools/ask/ask-shortcuts";
 import { cn } from "@/lib/utils";
 
 /** Starter chips put an editable example in the box; they never send by themselves. */
@@ -16,6 +18,13 @@ export const ASK_STARTERS: Array<{ label: string; prompt: string }> = [
   { label: "Update many jobs", prompt: "Set jobs # and # to status " },
   { label: "Sum up charges", prompt: "Sum up the charges on job #" }
 ];
+
+/**
+ * Open shortcut menu. `caret` is where the next pick goes. After an `@`/`#`
+ * pick the menu is `sticky`: the token is gone from the text but the list
+ * stays open on the same query so several can be added.
+ */
+type MenuState = { kind: ShortcutKind; query: string; start: number; caret: number; sticky: boolean };
 
 type Turn = {
   id: number;
@@ -88,10 +97,42 @@ export function AskTab() {
   const nextId = useRef(1);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const menuRef = useRef<MenuState | null>(null);
+  const [active, setActive] = useState(0);
+  const [inserted, setInserted] = useState<string[]>([]);
+  const dismissed = useRef<{ kind: ShortcutKind; start: number } | null>(null);
+  const pendingCaret = useRef<number | null>(null);
+  const listId = useId();
+  const results = useShortcutResults(menu, input, ASK_STARTERS);
+  const activeIndex = active >= 0 && active < results.options.length ? active : -1;
+  const optionId = (i: number) => `${listId}-o${i}`;
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [turns]);
+
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current;
+    const el = inputRef.current;
+    if (caret === null || !el) return;
+    pendingCaret.current = null;
+    el.focus();
+    el.setSelectionRange(caret, caret);
+  }, [input]);
+
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (event: MouseEvent) => {
+      if (!formRef.current?.contains(event.target as Node)) {
+        menuRef.current = null;
+        setMenu(null);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menu]);
 
   const run = async (id: number, text: string) => {
     setTurns((list) => list.map((t) => (t.id === id ? { ...t, state: { status: "loading" } } : t)));
@@ -105,19 +146,13 @@ export function AskTab() {
 
   const send = (event?: FormEvent) => {
     event?.preventDefault();
+    closeMenu();
     const text = input.trim();
     if (!text) return;
     const id = nextId.current++;
     setTurns((list) => [...list, { id, text, state: { status: "loading" } }]);
     setInput("");
     void run(id, text);
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      send();
-    }
   };
 
   const fill = (prompt: string) => {
@@ -128,6 +163,114 @@ export function AskTab() {
       el.focus();
       el.setSelectionRange(prompt.length, prompt.length);
     });
+  };
+
+  const closeMenu = () => {
+    menuRef.current = null;
+    setMenu(null);
+  };
+
+  const openMenu = (t: ShortcutTrigger, caret: number) => {
+    const d = dismissed.current;
+    if (d && d.kind === t.kind && d.start === t.start) {
+      closeMenu();
+      return;
+    }
+    dismissed.current = null;
+    const prev = menuRef.current;
+    if (!prev || prev.sticky || prev.kind !== t.kind || prev.start !== t.start || prev.query !== t.query) setActive(0);
+    const next = { kind: t.kind, query: t.query, start: t.start, caret, sticky: false };
+    menuRef.current = next;
+    setMenu(next);
+  };
+
+  const onChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value;
+    const caret = event.target.selectionStart ?? value.length;
+    const deleted = value.length < input.length;
+    setInput(value);
+    const t = findTrigger(value, caret, inserted);
+    if (t) {
+      openMenu(t, caret);
+      return;
+    }
+    dismissed.current = null;
+    const m = menuRef.current;
+    if (m?.sticky && deleted) {
+      menuRef.current = { ...m, caret };
+      setMenu(menuRef.current);
+    } else if (m) {
+      closeMenu();
+    }
+  };
+
+  const onSelect = (event: SyntheticEvent<HTMLTextAreaElement>) => {
+    const el = event.currentTarget;
+    const caret = el.selectionStart;
+    const m = menuRef.current;
+    if (el.selectionEnd !== caret) {
+      if (m) closeMenu();
+      return;
+    }
+    if (m?.sticky) {
+      if (caret !== m.caret) closeMenu();
+      return;
+    }
+    const t = findTrigger(el.value, caret, inserted);
+    if (t) openMenu(t, caret);
+    else if (m) closeMenu();
+  };
+
+  const pick = (row: MenuRow) => {
+    const m = menuRef.current;
+    if (!m) return;
+    if (row.type === "skill") {
+      closeMenu();
+      fill(row.prompt);
+      return;
+    }
+    if (results.isPicked(row)) return;
+    const next = m.sticky ? appendMention(input, m.caret, row.mention) : insertMention(input, m, m.caret, row.mention);
+    setInput(next.value);
+    pendingCaret.current = next.caret;
+    setInserted((list) => (list.includes(row.mention) ? list : [...list, row.mention]));
+    menuRef.current = { ...m, caret: next.caret, sticky: true };
+    setMenu(menuRef.current);
+    setActive(-1);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menu) {
+      const { options } = results;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!menu.sticky) dismissed.current = { kind: menu.kind, start: menu.start };
+        closeMenu();
+        return;
+      }
+      if (event.key === "Tab") {
+        closeMenu();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (options.length === 0) return;
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setActive((i) => (i < 0 || i >= options.length ? (step > 0 ? 0 : options.length - 1) : (i + step + options.length) % options.length));
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        if (activeIndex >= 0) pick(options[activeIndex]);
+        else if (menu.sticky) closeMenu();
+        return;
+      }
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      send();
+    }
   };
 
   return (
@@ -158,31 +301,57 @@ export function AskTab() {
         <div ref={endRef} />
       </div>
       <form
+        ref={formRef}
         onSubmit={send}
-        className="sticky bottom-0 z-10 -mx-4 flex items-end gap-2 border-t border-[#d5d9de] bg-white px-3 pt-2.5 pb-[calc(10px+env(safe-area-inset-bottom))] sm:-mx-7"
+        className="relative sticky bottom-0 z-10 -mx-4 border-t border-[#d5d9de] bg-white px-3 pt-2.5 pb-[calc(10px+env(safe-area-inset-bottom))] sm:-mx-7"
       >
-        <label htmlFor="ask-input" className="sr-only">
-          Message
-        </label>
-        <textarea
-          id="ask-input"
-          ref={inputRef}
-          rows={1}
-          maxLength={AI_TEXT_MAX}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Ask or tell me what to change…"
-          className="max-h-[140px] min-h-[48px] flex-1 resize-none rounded-[12px] border-[1.5px] border-[#8b949e] bg-white px-3.5 py-2.5 text-[17px] outline-none focus:border-[#1a7f94] focus:ring-[3px] focus:ring-[#e6f3f6]"
-        />
-        <button
-          type="submit"
-          aria-label="Send"
-          disabled={!input.trim()}
-          className={cn("grid h-12 w-12 flex-none place-items-center rounded-[12px] bg-[#1a7f94] text-white hover:bg-[#135f6f] disabled:bg-[#5f6b73]", FOCUS)}
-        >
-          <SendHorizontal className="h-5 w-5" aria-hidden />
-        </button>
+        {menu && (
+          <AskMentionMenu
+            kind={menu.kind}
+            listId={listId}
+            results={results}
+            active={activeIndex}
+            optionId={optionId}
+            onHover={setActive}
+            onPick={pick}
+          />
+        )}
+        <div className="flex items-end gap-2">
+          <label htmlFor="ask-input" className="sr-only">
+            Message
+          </label>
+          <textarea
+            id="ask-input"
+            ref={inputRef}
+            rows={1}
+            maxLength={AI_TEXT_MAX}
+            value={input}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
+            aria-expanded={menu !== null}
+            aria-controls={menu ? listId : undefined}
+            aria-activedescendant={menu && activeIndex >= 0 ? optionId(activeIndex) : undefined}
+            aria-describedby="ask-input-hint"
+            autoComplete="off"
+            onChange={onChange}
+            onSelect={onSelect}
+            onKeyDown={onKeyDown}
+            placeholder="Ask or tell me what to change…"
+            className="max-h-[140px] min-h-[48px] min-w-0 flex-1 resize-none rounded-[12px] border-[1.5px] border-[#8b949e] bg-white px-3.5 py-2.5 text-[17px] outline-none focus:border-[#1a7f94] focus:ring-[3px] focus:ring-[#e6f3f6]"
+          />
+          <button
+            type="submit"
+            aria-label="Send"
+            disabled={!input.trim()}
+            className={cn("grid h-12 w-12 flex-none place-items-center rounded-[12px] bg-[#1a7f94] text-white hover:bg-[#135f6f] disabled:bg-[#5f6b73]", FOCUS)}
+          >
+            <SendHorizontal className="h-5 w-5" aria-hidden />
+          </button>
+        </div>
+        <p id="ask-input-hint" className="mt-1 px-1 text-[15px] text-[#4a5260]">
+          Type / for skills, @ for people, # for jobs.
+        </p>
       </form>
     </div>
   );

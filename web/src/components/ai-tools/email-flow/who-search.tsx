@@ -8,6 +8,13 @@ import { cn } from "@/lib/utils";
 export const WHO_SEARCH_DEBOUNCE_MS = 300;
 const JOB_RESULTS = 8;
 
+export const WHO_ROW_CLASS =
+  "flex min-h-[56px] w-full cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-[#d5d9de] bg-white px-3 py-2 text-left";
+export const WHO_ROW_ACTIVE = "border-[#1a7f94] bg-[#e6f3f6]";
+export const WHO_ADDED_CLASS =
+  "flex min-h-[56px] w-full cursor-default items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-[#1a7f94] bg-[#e6f3f6] px-3 py-2 text-left";
+export const WHO_GROUP_LABEL = "text-[14px] font-semibold uppercase tracking-wide text-[#4a5260]";
+
 export function jobItemLabel(row: Pick<WorkOrderListItem, "brand_names" | "item_name" | "model_number">) {
   return [row.brand_names?.join(" "), row.item_name, row.model_number].map((p) => (p ?? "").trim()).filter(Boolean).join(" ");
 }
@@ -128,13 +135,8 @@ export function WhoSearch(props: Props) {
   };
 
   const optionId = (i: number) => `${listId}-o${i}`;
-  const rowClass = (i: number) =>
-    cn(
-      "flex min-h-[56px] w-full cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-[#d5d9de] bg-white px-3 py-2 text-left",
-      i === active && "border-[#1a7f94] bg-[#e6f3f6]"
-    );
-  const addedClass =
-    "flex min-h-[56px] w-full cursor-default items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-[#1a7f94] bg-[#e6f3f6] px-3 py-2 text-left";
+  const rowClass = (i: number) => cn(WHO_ROW_CLASS, i === active && WHO_ROW_ACTIVE);
+  const addedClass = WHO_ADDED_CLASS;
   const added = <span className="flex-none text-[14px] font-semibold text-[#135f6f]">Added ✓</span>;
 
   let index = -1;
@@ -175,7 +177,7 @@ export function WhoSearch(props: Props) {
           )}
           {contactMatches.length > 0 && (
             <div role="group" aria-label={contactsLabel} className="space-y-1.5">
-              <p className="text-[14px] font-semibold uppercase tracking-wide text-[#4a5260]">{contactsLabel}</p>
+              <p className={WHO_GROUP_LABEL}>{contactsLabel}</p>
               {contactMatches.map((contact) => {
                 if (contactPicked(contact)) {
                   return (
@@ -226,7 +228,7 @@ export function WhoSearch(props: Props) {
           )}
           {visibleJobs.length > 0 && (
             <div role="group" aria-label="Jobs" className="space-y-1.5">
-              <p className="text-[14px] font-semibold uppercase tracking-wide text-[#4a5260]">Jobs</p>
+              <p className={WHO_GROUP_LABEL}>Jobs</p>
               {visibleJobs.map((row) => {
                 const item = jobItemLabel(row);
                 if (jobPicked(row)) {
