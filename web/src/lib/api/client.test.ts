@@ -134,3 +134,15 @@ describe("parts request versions", () => {
   vi.restoreAllMocks();
  });
 });
+
+describe("Management Ask API", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("sends only the typed message; follow-up context stays on the server", async () => {
+    const client = new APIClient();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse(200, { intent: "unknown" }));
+    await client.interpretAsk("update both to Finished");
+    expect(fetchSpy).toHaveBeenLastCalledWith(expect.stringContaining("/ai-tools/ask/interpret"), expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({ message: "update both to Finished" });
+  });
+});

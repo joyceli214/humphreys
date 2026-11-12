@@ -28,12 +28,33 @@ function interpretError(err: unknown) {
   return errorMessage(err, "I couldn't understand that right now.");
 }
 
-function Answer({ answer, text, onStarter }: { answer: AskInterpretResponse; text: string; onStarter: (prompt: string) => void }) {
+/** "Using jobs #275, #27501 from your last answer." when the server filled in a follow-up. */
+function contextLine(answer: AskInterpretResponse): string {
+  if (!answer.context_used) return "";
+  const ids = answer.reference_ids ?? [];
+  if (ids.length > 0) return `Using ${ids.length === 1 ? "job" : "jobs"} ${ids.map((id) => `#${id}`).join(", ")} from your last answer.`;
+  if (answer.customer_query) return `Using “${answer.customer_query}” from your last answer.`;
+  return "";
+}
+
+function Answer(props: { answer: AskInterpretResponse; text: string; onStarter: (prompt: string) => void }) {
+  const { answer } = props;
+  const using = contextLine(answer);
+  return (
+    <>
+      {answer.notice && <p className="mb-2 font-semibold">{answer.notice}</p>}
+      {using && <p className="mb-2 text-[15px] text-[#4a5260]">{using}</p>}
+      <AnswerBody {...props} />
+    </>
+  );
+}
+
+function AnswerBody({ answer, text, onStarter }: { answer: AskInterpretResponse; text: string; onStarter: (prompt: string) => void }) {
   switch (answer.intent) {
     case "customer_jobs":
       return <CustomerJobsAnswer customerQuery={answer.customer_query} referenceIds={answer.reference_ids ?? []} />;
     case "update_jobs":
-      return <UpdatePreviewAnswer message={text} />;
+      return <UpdatePreviewAnswer message={answer.preview_instruction || text} />;
     case "parts_requests":
       return <PartsAnswer query={answer.parts_query} statuses={answer.parts_statuses ?? []} />;
     case "charges_summary":

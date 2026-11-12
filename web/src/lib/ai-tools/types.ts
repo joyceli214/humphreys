@@ -122,6 +122,15 @@ export type AskInterpretResponse = {
   parts_statuses: string[];
   reply: string;
   model: string;
+  /** Server-built Mass Update instruction naming the resolved jobs; preview this instead of the typed text. */
+  preview_instruction?: string;
+  /** True when the jobs (or customer) came from this account's last Ask answer. */
+  context_used?: boolean;
+  /** Set when the server checked which job numbers exist. */
+  found_ids?: number[];
+  missing_ids?: number[];
+  /** Short line shown above the answer, e.g. "Found #275. No job #15." */
+  notice?: string;
 };
 
 /** ✎ AI help actions for POST /ai-tools/email-rewrite. */

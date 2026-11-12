@@ -1,9 +1,11 @@
 package workorders
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -61,6 +63,18 @@ type askInterpretResult struct {
 type askInterpretResponse struct {
 	askInterpretResult
 	Model string `json:"model"`
+	// PreviewInstruction is the server-built Mass Update instruction naming
+	// the resolved, existing jobs ("Jobs #275, #27501: update both to Finished").
+	// The front end previews this instead of the raw text when present.
+	PreviewInstruction string `json:"preview_instruction,omitempty"`
+	// ContextUsed is true when the job numbers (or customer) came from this
+	// user's last Ask answer rather than the message.
+	ContextUsed bool `json:"context_used"`
+	// FoundIDs / MissingIDs are set when the server checked the job numbers.
+	FoundIDs   []int64 `json:"found_ids,omitempty"`
+	MissingIDs []int64 `json:"missing_ids,omitempty"`
+	// Notice is a short line shown above the answer ("No job #15.").
+	Notice string `json:"notice,omitempty"`
 }
 
 // AskInterpret classifies one Management chat message into an intent plus a few
@@ -98,7 +112,83 @@ func (h *Handler) AskInterpret(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, askInterpretResponse{askInterpretResult: result, Model: model})
+	resp := h.resolveAsk(c.Request.Context(), aiToolsActor(c), message, result, time.Now())
+	resp.Model = model
+	c.JSON(http.StatusOK, resp)
+}
+
+// askIntentUsesJobs reports whether an intent works on job numbers/customers
+// (and so reads/writes the follow-up context).
+func askIntentUsesJobs(intent string) bool {
+	return intent == askIntentCustomerJobs || intent == askIntentUpdateJobs || intent == askIntentCharges
+}
+
+// resolveAsk applies the deterministic rules on top of the model's
+// classification: job numbers parsed from the text override the model's,
+// follow-ups ("update both") use the user's saved context, job numbers are
+// checked for existence, and the context is saved for the next message.
+func (h *Handler) resolveAsk(ctx context.Context, userID, message string, result askInterpretResult, now time.Time) askInterpretResponse {
+	resp := askInterpretResponse{askInterpretResult: result}
+	if resp.ReferenceIDs == nil {
+		resp.ReferenceIDs = []int64{}
+	}
+	if resp.PartsStatuses == nil {
+		resp.PartsStatuses = []string{}
+	}
+	updateVerb := isAskUpdateVerb(message)
+
+	if ids := parseAskJobIDs(message); len(ids) > 0 {
+		resp.ReferenceIDs = ids
+	} else if isAskFollowUp(message) && (askIntentUsesJobs(resp.Intent) || updateVerb) {
+		prev := h.loadAskContext(ctx, userID, now)
+		switch {
+		case len(prev.ReferenceIDs) > 0:
+			resp.ReferenceIDs = append([]int64{}, prev.ReferenceIDs...)
+			resp.CustomerQuery = ""
+			resp.ContextUsed = true
+			if updateVerb {
+				resp.Intent = askIntentUpdateJobs
+			}
+		case prev.CustomerQuery != "" && !updateVerb && resp.Intent != askIntentUpdateJobs:
+			resp.CustomerQuery = prev.CustomerQuery
+			resp.ReferenceIDs = []int64{}
+			resp.ContextUsed = true
+		default:
+			return askPlainReply(resp, askNoContextReply)
+		}
+	}
+
+	if askIntentUsesJobs(resp.Intent) && len(resp.ReferenceIDs) > 0 {
+		if found, missing, ok := h.checkAskJobs(ctx, resp.ReferenceIDs); ok {
+			resp.FoundIDs, resp.MissingIDs = found, missing
+			resp.Notice = askNotice(found, missing)
+			resp.ReferenceIDs = found
+			if len(found) == 0 {
+				resp.ContextUsed = false
+				return askPlainReply(resp, askNoJobsReply)
+			}
+		}
+	}
+
+	if resp.Intent == askIntentUpdateJobs && len(resp.ReferenceIDs) > 0 {
+		resp.PreviewInstruction = askPreviewInstruction(resp.ReferenceIDs, message)
+	}
+
+	if askIntentUsesJobs(resp.Intent) && (len(resp.ReferenceIDs) > 0 || resp.CustomerQuery != "") {
+		h.saveAskContext(ctx, userID, askContext{ReferenceIDs: resp.ReferenceIDs, CustomerQuery: resp.CustomerQuery})
+	}
+	return resp
+}
+
+// askPlainReply turns resp into a plain "unknown" answer with reply text,
+// keeping any notice and found/missing ids.
+func askPlainReply(resp askInterpretResponse, reply string) askInterpretResponse {
+	resp.Intent = askIntentUnknown
+	resp.Reply = reply
+	resp.ReferenceIDs = []int64{}
+	resp.CustomerQuery = ""
+	resp.PreviewInstruction = ""
+	return resp
 }
 
 // parseAskInterpretOutput parses the model's JSON and normalizes every field:
@@ -156,7 +246,7 @@ func askSystemPrompt() string {
 		`{"intent":"...","customer_query":"","reference_ids":[],"parts_query":"","parts_statuses":[],"reply":""}. ` +
 		"intent must be one of:\n" +
 		`- "customer_jobs": list or summarise jobs for a customer or for job numbers; put the customer name in customer_query\n` +
-		`- "update_jobs": change one or more jobs (status, location, labour, line items, work done); put job numbers in reference_ids\n` +
+		`- "update_jobs": change one or more jobs (status, location, labour, line items, work done); put job numbers in reference_ids; follow-ups like "update both" or "set those to Finished" are update_jobs with empty reference_ids\n` +
 		`- "parts_requests": show parts purchase requests; optional parts_query text and parts_statuses from: draft, waiting_approval, approved, ordered, arrived, used, cancelled\n` +
 		`- "charges_summary": sum up labour, parts, deposit and balance for jobs; put job numbers in reference_ids or the customer in customer_query\n` +
 		`- "unknown": anything else; put one short, plain sentence in reply saying what you can help with\n` +

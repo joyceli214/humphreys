@@ -89,6 +89,68 @@ describe("AskTab", () => {
     expect(await screen.findByText(/1 job updated/)).toBeInTheDocument();
   });
 
+  it("sends only the typed text to interpret", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply: "ok" }));
+    render(<AskTab />);
+    ask("set job 31 to Finished");
+    ask("update both to Finished");
+    await waitFor(() => expect(interpretAsk).toHaveBeenCalledTimes(2));
+    expect(interpretAsk.mock.calls[0]).toEqual(["set job 31 to Finished"]);
+    expect(interpretAsk.mock.calls[1]).toEqual(["update both to Finished"]);
+  });
+
+  it("previews the server's preview_instruction for a follow-up and applies only on Apply", async () => {
+    interpretAsk.mockResolvedValue(
+      intent({
+        intent: "update_jobs",
+        reference_ids: [275, 27501],
+        context_used: true,
+        preview_instruction: "Jobs #275, #27501: update both to Finished"
+      })
+    );
+    previewAIMassUpdate.mockResolvedValue({ rows: [previewRow], model: "m" });
+    applyAIMassUpdate.mockResolvedValue({ results: [{ reference_id: 31, success: true, applied: ["Status → Finished"] }] });
+    render(<AskTab />);
+    ask("update both to Finished");
+    expect(await screen.findByText("Using jobs #275, #27501 from your last answer.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Apply" })).toBeInTheDocument();
+    expect(previewAIMassUpdate).toHaveBeenCalledTimes(1);
+    expect(previewAIMassUpdate).toHaveBeenCalledWith("Jobs #275, #27501: update both to Finished");
+    expect(applyAIMassUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(applyAIMassUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows the server notice above the answer", async () => {
+    interpretAsk.mockResolvedValue(
+      intent({
+        intent: "update_jobs",
+        reference_ids: [275],
+        found_ids: [275],
+        missing_ids: [15],
+        notice: "Found #275. No job #15.",
+        preview_instruction: "Job #275: set jobs 275 and 15 to Finished"
+      })
+    );
+    previewAIMassUpdate.mockResolvedValue({ rows: [previewRow], model: "m" });
+    render(<AskTab />);
+    ask("set jobs 275 and 15 to Finished");
+    const notice = await screen.findByText("Found #275. No job #15.");
+    expect(notice).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Apply" })).toBeInTheDocument();
+    expect(previewAIMassUpdate).toHaveBeenCalledWith("Job #275: set jobs 275 and 15 to Finished");
+    expect(screen.queryByText(/from your last answer/)).toBeNull();
+    expect(applyAIMassUpdate).not.toHaveBeenCalled();
+  });
+
+  it("asks for job numbers when there is no recent context", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply: "I don't have recent jobs to refer to. Tell me the job numbers." }));
+    render(<AskTab />);
+    ask("update both to Finished");
+    expect(await screen.findByText("I don't have recent jobs to refer to. Tell me the job numbers.")).toBeInTheDocument();
+    expect(previewAIMassUpdate).not.toHaveBeenCalled();
+  });
+
   it("Cancel discards the preview without applying", async () => {
     interpretAsk.mockResolvedValue(intent({ intent: "update_jobs", reference_ids: [31] }));
     previewAIMassUpdate.mockResolvedValue({ rows: [previewRow], model: "m" });
