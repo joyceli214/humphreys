@@ -467,6 +467,20 @@ describe("Ask shortcuts: @ and #", () => {
     expect(interpretAsk).not.toHaveBeenCalled();
   });
 
+  it("typing a full job number still lets you pick that job", async () => {
+    listWorkOrders.mockResolvedValue({ items: [jobRow(15, "Test Customer A"), jobRow(150, "Test Customer B")] });
+    render(<AskTab />);
+    type("#15");
+    await flush();
+    const row = screen.getByRole("option", { name: /^#15 / });
+    expect(row).not.toHaveAttribute("aria-disabled");
+    expect(within(row).queryByText("Added ✓")).toBeNull();
+    fireEvent.click(row);
+    expect(box().value).toBe("#15 ");
+    expect(screen.getByRole("option", { name: /^#15 .* · Added$/ })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: /^#150 / })).not.toHaveAttribute("aria-disabled");
+  });
+
   it("# with no results inserts nothing", async () => {
     listWorkOrders.mockResolvedValue({ items: [] });
     render(<AskTab />);

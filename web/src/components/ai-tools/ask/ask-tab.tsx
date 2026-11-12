@@ -105,7 +105,9 @@ export function AskTab() {
   const dismissed = useRef<{ kind: ShortcutKind; start: number } | null>(null);
   const pendingCaret = useRef<number | null>(null);
   const listId = useId();
-  const results = useShortcutResults(menu, input, ASK_STARTERS);
+  // A query still being typed (#15, @Name) is not itself an inserted mention.
+  const pickedText = menu && !menu.sticky ? `${input.slice(0, menu.start)}${input.slice(menu.caret)}` : input;
+  const results = useShortcutResults(menu, pickedText, ASK_STARTERS);
   const activeIndex = active >= 0 && active < results.options.length ? active : -1;
   const optionId = (i: number) => `${listId}-o${i}`;
 
