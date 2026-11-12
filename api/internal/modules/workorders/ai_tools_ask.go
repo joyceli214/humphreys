@@ -3,7 +3,9 @@ package workorders
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -123,10 +125,20 @@ func askIntentUsesJobs(intent string) bool {
 	return intent == askIntentCustomerJobs || intent == askIntentUpdateJobs || intent == askIntentCharges
 }
 
+// askIntentTopic is the context topic an answer of this intent leaves behind.
+func askIntentTopic(intent string) string {
+	if intent == askIntentPartsRequests {
+		return askTopicParts
+	}
+	return askTopicJobs
+}
+
 // resolveAsk applies the deterministic rules on top of the model's
-// classification: job numbers parsed from the text override the model's,
-// follow-ups ("update both") use the user's saved context, job numbers are
-// checked for existence, and the context is saved for the next message.
+// classification: job numbers parsed from the text override the model's and
+// replace the saved context (for every intent), follow-ups ("update both") use
+// the user's saved context, job numbers are checked for existence, and the
+// context is saved for the next message. A follow-up update after a parts
+// answer never becomes a job Mass Update.
 func (h *Handler) resolveAsk(ctx context.Context, userID, message string, result askInterpretResult, now time.Time) askInterpretResponse {
 	resp := askInterpretResponse{askInterpretResult: result}
 	if resp.ReferenceIDs == nil {
@@ -136,11 +148,18 @@ func (h *Handler) resolveAsk(ctx context.Context, userID, message string, result
 		resp.PartsStatuses = []string{}
 	}
 	updateVerb := isAskUpdateVerb(message)
+	parts := resp.Intent == askIntentPartsRequests
+	explicit := parseAskJobIDs(message)
+	followUp := isAskFollowUp(message) || (parts && askFollowUpTheir.MatchString(message))
 
-	if ids := parseAskJobIDs(message); len(ids) > 0 {
-		resp.ReferenceIDs = ids
-	} else if isAskFollowUp(message) && (askIntentUsesJobs(resp.Intent) || updateVerb) {
+	if len(explicit) > 0 {
+		resp.ReferenceIDs = explicit
+	} else if followUp && (askIntentUsesJobs(resp.Intent) || updateVerb || parts) {
 		prev := h.loadAskContext(ctx, userID, now)
+		if normalizeAskTopic(prev.Topic) == askTopicParts && len(prev.ReferenceIDs) > 0 &&
+			(updateVerb || resp.Intent == askIntentUpdateJobs) {
+			return h.askPartsUpdateFollowUp(ctx, userID, resp, prev.ReferenceIDs)
+		}
 		switch {
 		case len(prev.ReferenceIDs) > 0:
 			resp.ReferenceIDs = append([]int64{}, prev.ReferenceIDs...)
@@ -149,7 +168,7 @@ func (h *Handler) resolveAsk(ctx context.Context, userID, message string, result
 			if updateVerb {
 				resp.Intent = askIntentUpdateJobs
 			}
-		case prev.CustomerQuery != "" && !updateVerb && resp.Intent != askIntentUpdateJobs:
+		case prev.CustomerQuery != "" && !updateVerb && resp.Intent != askIntentUpdateJobs && !parts:
 			resp.CustomerQuery = prev.CustomerQuery
 			resp.ReferenceIDs = []int64{}
 			resp.ContextUsed = true
@@ -158,13 +177,23 @@ func (h *Handler) resolveAsk(ctx context.Context, userID, message string, result
 		}
 	}
 
-	if askIntentUsesJobs(resp.Intent) && len(resp.ReferenceIDs) > 0 {
+	topic := askIntentTopic(resp.Intent)
+	checksJobs := askIntentUsesJobs(resp.Intent) || resp.Intent == askIntentPartsRequests
+
+	if len(resp.ReferenceIDs) > 0 && (checksJobs || len(explicit) > 0) {
 		if found, missing, ok := h.checkAskJobs(ctx, resp.ReferenceIDs); ok {
+			if !checksJobs {
+				// Other intents only remember the named jobs that exist.
+				h.saveAskContext(ctx, userID, askContext{ReferenceIDs: found, Topic: topic})
+				return resp
+			}
 			resp.FoundIDs, resp.MissingIDs = found, missing
 			resp.Notice = askNotice(found, missing)
 			resp.ReferenceIDs = found
 			if len(found) == 0 {
 				resp.ContextUsed = false
+				// Never fall back to older jobs on the next follow-up.
+				h.saveAskContext(ctx, userID, askContext{ReferenceIDs: []int64{}, Topic: topic})
 				return askPlainReply(resp, askNoJobsReply)
 			}
 		}
@@ -174,10 +203,67 @@ func (h *Handler) resolveAsk(ctx context.Context, userID, message string, result
 		resp.PreviewInstruction = askPreviewInstruction(resp.ReferenceIDs, message)
 	}
 
-	if askIntentUsesJobs(resp.Intent) && (len(resp.ReferenceIDs) > 0 || resp.CustomerQuery != "") {
-		h.saveAskContext(ctx, userID, askContext{ReferenceIDs: resp.ReferenceIDs, CustomerQuery: resp.CustomerQuery})
+	switch {
+	case len(explicit) > 0:
+		// Named job numbers always replace the saved context.
+		ac := askContext{ReferenceIDs: resp.ReferenceIDs, Topic: topic}
+		if topic == askTopicJobs {
+			ac.CustomerQuery = resp.CustomerQuery
+		}
+		h.saveAskContext(ctx, userID, ac)
+	case askIntentUsesJobs(resp.Intent) && (len(resp.ReferenceIDs) > 0 || resp.CustomerQuery != ""):
+		h.saveAskContext(ctx, userID, askContext{ReferenceIDs: resp.ReferenceIDs, CustomerQuery: resp.CustomerQuery, Topic: askTopicJobs})
+	case resp.Intent == askIntentPartsRequests && len(resp.ReferenceIDs) > 0:
+		h.saveAskContext(ctx, userID, askContext{ReferenceIDs: resp.ReferenceIDs, Topic: askTopicParts})
 	}
 	return resp
+}
+
+// askPartsUpdateFollowUp answers an update follow-up ("set them to pending")
+// whose saved context is a parts answer. Ask cannot change parts request
+// status, so it never returns update_jobs or a preview instruction: with no
+// parts requests on those jobs it says there is nothing to change, otherwise
+// it shows those jobs' parts requests with a notice.
+func (h *Handler) askPartsUpdateFollowUp(ctx context.Context, userID string, resp askInterpretResponse, ids []int64) askInterpretResponse {
+	ids = append([]int64{}, ids...)
+	resp.ContextUsed = true
+	resp.CustomerQuery = ""
+	resp.PreviewInstruction = ""
+	h.saveAskContext(ctx, userID, askContext{ReferenceIDs: ids, Topic: askTopicParts})
+
+	count := -1 // unknown: show the list rather than claim there is nothing
+	if h.askJobs != nil {
+		n, err := h.askJobs.PartsRequestCount(ctx, ids)
+		if err != nil {
+			log.Printf("[ai] ask parts count: %v", err)
+		} else {
+			count = n
+		}
+	}
+	if count == 0 {
+		return askPlainReply(resp, askNoPartsToChangeReply(ids))
+	}
+	resp.Intent = askIntentPartsRequests
+	resp.ReferenceIDs = ids
+	resp.PartsQuery = ""
+	resp.PartsStatuses = []string{}
+	resp.Reply = ""
+	resp.Notice = askPartsStatusNotice
+	return resp
+}
+
+// askNoPartsToChangeReply: "There are no parts requests on jobs #31221, #31121,
+// #7, so there is nothing to change."
+func askNoPartsToChangeReply(ids []int64) string {
+	label := "jobs "
+	if len(ids) == 1 {
+		label = "job "
+	}
+	refs := make([]string, len(ids))
+	for i, id := range ids {
+		refs[i] = "#" + strconv.FormatInt(id, 10)
+	}
+	return "There are no parts requests on " + label + strings.Join(refs, ", ") + ", so there is nothing to change."
 }
 
 // askPlainReply turns resp into a plain "unknown" answer with reply text,
@@ -247,7 +333,7 @@ func askSystemPrompt() string {
 		"intent must be one of:\n" +
 		`- "customer_jobs": list or summarise jobs for a customer or for job numbers; put the customer name in customer_query\n` +
 		`- "update_jobs": change one or more jobs (status, location, labour, line items, work done); put job numbers in reference_ids; follow-ups like "update both" or "set those to Finished" are update_jobs with empty reference_ids\n` +
-		`- "parts_requests": show parts purchase requests; optional parts_query text and parts_statuses from: draft, waiting_approval, approved, ordered, arrived, used, cancelled\n` +
+		`- "parts_requests": show parts purchase requests; optional parts_query text and parts_statuses from: draft, waiting_approval, approved, ordered, arrived, used, cancelled; put job numbers in reference_ids when named; follow-ups about parts after a parts list (e.g. "set them to ordered") are parts_requests, not update_jobs\n` +
 		`- "charges_summary": sum up labour, parts, deposit and balance for jobs; put job numbers in reference_ids or the customer in customer_query\n` +
 		`- "unknown": anything else; put one short, plain sentence in reply saying what you can help with\n` +
 		"reference_ids are job numbers as integers. Leave fields you do not need empty. " +

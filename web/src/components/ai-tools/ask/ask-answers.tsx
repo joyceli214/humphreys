@@ -191,11 +191,23 @@ function sourceLabel(p: Pick<PartsPurchaseRequest, "source" | "source_url">) {
   }
 }
 
-export function PartsAnswer({ query, statuses }: { query: string; statuses: string[] }) {
+// "jobs #31221, #31121, #7" / "job #7"
+function jobsLabel(ids: number[]) {
+  return `${ids.length === 1 ? "job" : "jobs"} ${ids.map((id) => `#${id}`).join(", ")}`;
+}
+
+export function PartsAnswer({ query, statuses, referenceIds = [] }: { query: string; statuses: string[]; referenceIds?: number[] }) {
   const load = useLoad(() => apiClient.listAllPartsPurchaseRequests());
   const [search, setSearch] = useState(query);
   const [statusFilter, setStatusFilter] = useState<string[]>(statuses);
-  const items = useMemo(() => (load.data?.items ?? []).filter((p) => statusFilter.length === 0 || statusFilter.includes(p.status)), [load.data, statusFilter]);
+  // Only the named jobs' requests when the answer is about specific jobs.
+  const onJobs = useMemo(() => {
+    const all = load.data?.items ?? [];
+    if (referenceIds.length === 0) return all;
+    const wanted = new Set(referenceIds);
+    return all.filter((p) => wanted.has(p.reference_id));
+  }, [load.data, referenceIds]);
+  const items = useMemo(() => onJobs.filter((p) => statusFilter.length === 0 || statusFilter.includes(p.status)), [onJobs, statusFilter]);
   const q = search.trim().toLowerCase().replace(/^#/, "");
   const shown = q
     ? items.filter((p) => [p.item_name, String(p.reference_id), p.status, partsStatusWord(p.status), sourceLabel(p)].join(" ").toLowerCase().includes(q))
@@ -207,7 +219,9 @@ export function PartsAnswer({ query, statuses }: { query: string; statuses: stri
     return <MgmtError onRetry={load.retry}>{errorMessage(load.error, "Couldn't load parts requests.")}</MgmtError>;
   }
   const jobs = new Set(items.map((p) => p.reference_id)).size;
-  if ((load.data?.items ?? []).length === 0) return <p>No parts requests yet.</p>;
+  if (onJobs.length === 0) {
+    return <p>{referenceIds.length > 0 ? `No parts requests on ${jobsLabel(referenceIds)}.` : "No parts requests yet."}</p>;
+  }
   return (
     <div>
       <p className="mb-2">

@@ -138,6 +138,15 @@ func (r *storeRepository) AIStaleCandidates(ctx context.Context) ([]AIStaleCandi
 	return out, rows.Err()
 }
 
+// sameUpdatedAt reports whether the locked row's updated_at still matches the
+// preview's value (both NULL, or the same instant at microsecond precision).
+func sameUpdatedAt(current, expected *time.Time) bool {
+	if current == nil || expected == nil {
+		return current == nil && expected == nil
+	}
+	return current.Truncate(time.Microsecond).Equal(expected.Truncate(time.Microsecond))
+}
+
 // ApplyMassUpdateJob applies one job's resolved operations inside a single
 // transaction so a failure here rolls back only this job, never the others in
 // the batch. Totals are recomputed when line items change and
@@ -154,20 +163,25 @@ func (r *storeRepository) ApplyMassUpdateJob(ctx context.Context, referenceID in
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var unchanged bool
+	// Lock the row and read updated_at through the same scan path the preview
+	// uses, then compare in Go. Comparing in SQL against a timestamptz
+	// parameter is wrong for the legacy `timestamp without time zone` column:
+	// Postgres converts it with the session TimeZone while the preview value
+	// carried the wall clock labelled as UTC.
+	var current *time.Time
 	err = tx.QueryRow(ctx, `
-		SELECT updated_at IS NOT DISTINCT FROM $2::timestamptz
+		SELECT updated_at
 		FROM public.work_orders
 		WHERE reference_id = $1
 		FOR UPDATE
-	`, referenceID, expectedUpdatedAt).Scan(&unchanged)
+	`, referenceID).Scan(&current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrWorkOrderNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !unchanged {
+	if !sameUpdatedAt(current, expectedUpdatedAt) {
 		return nil, ErrMassUpdateStale
 	}
 

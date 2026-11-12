@@ -23,13 +23,14 @@ type memAskStore struct {
 	mu      sync.Mutex
 	rows    map[string]askContext
 	jobs    map[int64]bool
+	parts   map[int64]int // parts requests per job
 	saves   int
 	deletes int
 	loadErr error
 }
 
 func newMemAskStore(jobs ...int64) *memAskStore {
-	s := &memAskStore{rows: map[string]askContext{}, jobs: map[int64]bool{}}
+	s := &memAskStore{rows: map[string]askContext{}, jobs: map[int64]bool{}, parts: map[int64]int{}}
 	for _, id := range jobs {
 		s.jobs[id] = true
 	}
@@ -74,6 +75,14 @@ func (s *memAskStore) ExistingJobIDs(_ context.Context, ids []int64) (map[int64]
 		}
 	}
 	return out, nil
+}
+
+func (s *memAskStore) PartsRequestCount(_ context.Context, ids []int64) (int, error) {
+	n := 0
+	for _, id := range ids {
+		n += s.parts[id]
+	}
+	return n, nil
 }
 
 func (s *memAskStore) row(userID string) (askContext, bool) {
@@ -287,8 +296,168 @@ func TestAskContextAllMissing(t *testing.T) {
 	if resp.Notice != "No jobs #15 or #16." || resp.Intent != askIntentUnknown || resp.PreviewInstruction != "" || len(resp.ReferenceIDs) != 0 {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if store.saves != 0 {
-		t.Fatal("nothing found: context must not be saved")
+	// Nothing found: the context is replaced by an empty list so older jobs are
+	// never reused by the next follow-up.
+	if row, ok := store.row(askUserA); !ok || len(row.ReferenceIDs) != 0 || row.CustomerQuery != "" {
+		t.Fatalf("saved context = %+v (ok=%v), want empty", row, ok)
+	}
+}
+
+// Justin's sequence: an older jobs answer (#275, #15), then a parts question
+// naming other jobs, then "Set them to status pending".
+func justinParts(t *testing.T, partsOn map[int64]int) (*askLLM, *memAskStore, *gin.Engine) {
+	t.Helper()
+	llm := newAskLLM(t)
+	store := newMemAskStore(275, 15, 31221, 31121, 7)
+	for id, n := range partsOn {
+		store.parts[id] = n
+	}
+	store.rows[askUserA] = askContext{ReferenceIDs: []int64{275, 15}, Topic: askTopicJobs, UpdatedAt: time.Now()}
+	router := askContextRouter(t, store)
+
+	llm.answer(askIntentPartsRequests)
+	first := askAs(t, router, askUserA, "Show all parts requests #31221, #31121 #7")
+	if first.Intent != askIntentPartsRequests || !reflect.DeepEqual(first.ReferenceIDs, []int64{31221, 31121, 7}) || first.ContextUsed {
+		t.Fatalf("first = %+v", first)
+	}
+	if !reflect.DeepEqual(first.FoundIDs, []int64{31221, 31121, 7}) || len(first.MissingIDs) != 0 || first.Notice != "" {
+		t.Fatalf("first found=%v missing=%v notice=%q", first.FoundIDs, first.MissingIDs, first.Notice)
+	}
+	row, ok := store.row(askUserA)
+	if !ok || !reflect.DeepEqual(row.ReferenceIDs, []int64{31221, 31121, 7}) || row.Topic != askTopicParts {
+		t.Fatalf("saved context = %+v (ok=%v)", row, ok)
+	}
+	return llm, store, router
+}
+
+func assertNoOldJobs(t *testing.T, resp askInterpretResponse) {
+	t.Helper()
+	for _, id := range resp.ReferenceIDs {
+		if id == 275 || id == 15 {
+			t.Fatalf("old context jobs reused: %+v", resp)
+		}
+	}
+	for _, s := range []string{resp.Reply, resp.Notice, resp.PreviewInstruction} {
+		if strings.Contains(s, "#275") || strings.Contains(s, "#15") {
+			t.Fatalf("old context jobs mentioned: %+v", resp)
+		}
+	}
+}
+
+func TestAskPartsFollowUpUpdateWithNoPartsRequests(t *testing.T) {
+	llm, store, router := justinParts(t, nil)
+
+	llm.answer(askIntentUpdateJobs)
+	second := askAs(t, router, askUserA, "Set them to status pending")
+	if second.Intent != askIntentUnknown || second.PreviewInstruction != "" || !second.ContextUsed {
+		t.Fatalf("second = %+v", second)
+	}
+	want := "There are no parts requests on jobs #31221, #31121, #7, so there is nothing to change."
+	if second.Reply != want {
+		t.Fatalf("reply = %q, want %q", second.Reply, want)
+	}
+	assertNoOldJobs(t, second)
+	if row, _ := store.row(askUserA); row.Topic != askTopicParts || !reflect.DeepEqual(row.ReferenceIDs, []int64{31221, 31121, 7}) {
+		t.Fatalf("context after = %+v", row)
+	}
+}
+
+func TestAskPartsFollowUpUpdateWithPartsRequests(t *testing.T) {
+	llm, _, router := justinParts(t, map[int64]int{31121: 2})
+
+	// Even when the classifier gets it "right" for jobs (update_jobs) or says
+	// unknown, a parts-topic follow-up never becomes a job Mass Update.
+	for _, intent := range []string{askIntentUpdateJobs, askIntentUnknown, askIntentPartsRequests} {
+		llm.answer(intent)
+		resp := askAs(t, router, askUserA, "Set them to status pending")
+		if resp.Intent != askIntentPartsRequests || resp.PreviewInstruction != "" || !resp.ContextUsed {
+			t.Fatalf("[%s] resp = %+v", intent, resp)
+		}
+		if !reflect.DeepEqual(resp.ReferenceIDs, []int64{31221, 31121, 7}) {
+			t.Fatalf("[%s] reference_ids = %v", intent, resp.ReferenceIDs)
+		}
+		if resp.Notice != askPartsStatusNotice {
+			t.Fatalf("[%s] notice = %q", intent, resp.Notice)
+		}
+		assertNoOldJobs(t, resp)
+	}
+}
+
+func TestAskPartsFollowUpSingleJobWording(t *testing.T) {
+	llm := newAskLLM(t)
+	store := newMemAskStore(7)
+	store.rows[askUserA] = askContext{ReferenceIDs: []int64{7}, Topic: askTopicParts, UpdatedAt: time.Now()}
+	router := askContextRouter(t, store)
+	llm.answer(askIntentUpdateJobs)
+	resp := askAs(t, router, askUserA, "set it to ordered")
+	if resp.Reply != "There are no parts requests on job #7, so there is nothing to change." {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestAskPartsShowFollowUpUsesContext(t *testing.T) {
+	llm := newAskLLM(t)
+	store := newMemAskStore(275, 27501)
+	store.rows[askUserA] = askContext{ReferenceIDs: []int64{275, 27501}, Topic: askTopicJobs, UpdatedAt: time.Now()}
+	router := askContextRouter(t, store)
+	llm.answer(askIntentPartsRequests)
+	resp := askAs(t, router, askUserA, "show their parts")
+	if resp.Intent != askIntentPartsRequests || !resp.ContextUsed || !reflect.DeepEqual(resp.ReferenceIDs, []int64{275, 27501}) {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if row, _ := store.row(askUserA); row.Topic != askTopicParts {
+		t.Fatalf("context topic = %q", row.Topic)
+	}
+
+	// A plain parts question with no jobs still lists everything and leaves
+	// the context alone.
+	resp = askAs(t, router, askUserA, "show all parts requests")
+	if resp.Intent != askIntentPartsRequests || resp.ContextUsed || len(resp.ReferenceIDs) != 0 {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestAskPartsQuestionWithOnlyMissingJobsClearsContext(t *testing.T) {
+	llm := newAskLLM(t)
+	store := newMemAskStore(275, 15)
+	store.rows[askUserA] = askContext{ReferenceIDs: []int64{275, 15}, Topic: askTopicJobs, UpdatedAt: time.Now()}
+	router := askContextRouter(t, store)
+
+	llm.answer(askIntentPartsRequests)
+	resp := askAs(t, router, askUserA, "Show all parts requests #31221, #31121 #7")
+	if resp.Intent != askIntentUnknown || resp.Reply != askNoJobsReply || len(resp.ReferenceIDs) != 0 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if !reflect.DeepEqual(resp.MissingIDs, []int64{31221, 31121, 7}) || resp.Notice != "No jobs #31221, #31121 or #7." {
+		t.Fatalf("missing=%v notice=%q", resp.MissingIDs, resp.Notice)
+	}
+	row, ok := store.row(askUserA)
+	if !ok || len(row.ReferenceIDs) != 0 || row.Topic != askTopicParts {
+		t.Fatalf("saved context = %+v (ok=%v), want empty parts context", row, ok)
+	}
+
+	llm.answer(askIntentUpdateJobs)
+	next := askAs(t, router, askUserA, "update both")
+	if next.Intent != askIntentUnknown || next.Reply != askNoContextReply || next.PreviewInstruction != "" {
+		t.Fatalf("next = %+v", next)
+	}
+	assertNoOldJobs(t, next)
+}
+
+func TestAskJobsQuestionReplacesPartsContext(t *testing.T) {
+	llm := newAskLLM(t)
+	store := newMemAskStore(7, 275)
+	store.rows[askUserA] = askContext{ReferenceIDs: []int64{7}, Topic: askTopicParts, UpdatedAt: time.Now()}
+	router := askContextRouter(t, store)
+	llm.answer(askIntentCustomerJobs)
+	askAs(t, router, askUserA, "show job 275")
+	if row, _ := store.row(askUserA); row.Topic != askTopicJobs || !reflect.DeepEqual(row.ReferenceIDs, []int64{275}) {
+		t.Fatalf("context = %+v", row)
+	}
+	llm.answer(askIntentUpdateJobs)
+	resp := askAs(t, router, askUserA, "set it to Finished")
+	if resp.Intent != askIntentUpdateJobs || resp.PreviewInstruction != "Job #275: set it to Finished" {
+		t.Fatalf("resp = %+v", resp)
 	}
 }
 

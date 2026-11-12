@@ -65,7 +65,7 @@ function AnswerBody({ answer, text, onStarter }: { answer: AskInterpretResponse;
     case "update_jobs":
       return <UpdatePreviewAnswer message={answer.preview_instruction || text} />;
     case "parts_requests":
-      return <PartsAnswer query={answer.parts_query} statuses={answer.parts_statuses ?? []} />;
+      return <PartsAnswer query={answer.parts_query} statuses={answer.parts_statuses ?? []} referenceIds={answer.reference_ids ?? []} />;
     case "charges_summary":
       return <ChargesAnswer referenceIds={answer.reference_ids ?? []} customerQuery={answer.customer_query} />;
     default:

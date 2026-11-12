@@ -363,7 +363,9 @@ var (
 		"呢啲", "嗰啲", "啱啱嗰啲", "啱啱", "頭先", "兩張", "兩單", "兩部", "兩個", "两张", "两单",
 		"這些", "这些", "那些", "佢哋", "呢張", "嗰張", "呢單", "嗰單", "上面",
 	}
-	askUpdateVerb = regexp.MustCompile(`(?i)\b(?:set|update|change|move|add|mark|remove|put)\b|改|設|设|更新|轉|转|搬|加|標|标`)
+	// "their" counts as a follow-up only for parts questions ("show their parts").
+	askFollowUpTheir = regexp.MustCompile(`(?i)\btheir\b`)
+	askUpdateVerb    = regexp.MustCompile(`(?i)\b(?:set|update|change|move|add|mark|remove|put)\b|改|設|设|更新|轉|转|搬|加|標|标`)
 )
 
 // isAskFollowUp reports whether a message refers back to earlier jobs.

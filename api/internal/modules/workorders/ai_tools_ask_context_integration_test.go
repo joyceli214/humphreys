@@ -46,11 +46,16 @@ func askContextTestDB(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	// Real users migration and 043; minimal work_orders fixture.
+	// Real users migration, 005 (parts requests), 043 then 045; minimal
+	// work_orders fixture.
 	if _, err := db.Exec(ctx, `CREATE TABLE public.work_orders(reference_id integer PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range []string{"001_init.sql", "043_ask_context.sql", "043_ask_context.sql"} { // twice: idempotent
+	for _, file := range []string{
+		"001_init.sql", "005_repair_logs_and_parts_purchase_requests.sql",
+		"043_ask_context.sql", "043_ask_context.sql", // twice: idempotent
+		"045_ask_context_topic.sql", "045_ask_context_topic.sql",
+	} {
 		migration, err := os.ReadFile("../../../migrations/" + file)
 		if err != nil {
 			t.Fatal(err)
@@ -84,7 +89,7 @@ func TestAskContextPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok, err := store.LoadAskContext(ctx, userA)
-	if err != nil || !ok || !reflect.DeepEqual(got.ReferenceIDs, []int64{275, 27501}) || time.Since(got.UpdatedAt) > time.Minute {
+	if err != nil || !ok || !reflect.DeepEqual(got.ReferenceIDs, []int64{275, 27501}) || got.Topic != askTopicJobs || time.Since(got.UpdatedAt) > time.Minute {
 		t.Fatalf("load A = %+v ok=%v err=%v", got, ok, err)
 	}
 	got, _, _ = store.LoadAskContext(ctx, userB)
@@ -99,6 +104,18 @@ func TestAskContextPostgres(t *testing.T) {
 	got, _, _ = store.LoadAskContext(ctx, userA)
 	if !reflect.DeepEqual(got.ReferenceIDs, []int64{15}) || got.CustomerQuery != "x" {
 		t.Fatalf("upsert = %+v", got)
+	}
+
+	// Topic round-trips; an empty id list is kept (not treated as missing).
+	if err := store.SaveAskContext(ctx, userA, askContext{ReferenceIDs: []int64{}, Topic: askTopicParts}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, _ = store.LoadAskContext(ctx, userA)
+	if !ok || len(got.ReferenceIDs) != 0 || got.Topic != askTopicParts {
+		t.Fatalf("parts topic = %+v ok=%v", got, ok)
+	}
+	if _, err := db.Exec(ctx, `UPDATE ai_ask_context SET topic = 'other' WHERE user_id = $1`, userA); err == nil {
+		t.Fatal("topic check constraint should reject unknown topics")
 	}
 
 	// Expired rows are deleted on read through the handler.
@@ -120,6 +137,20 @@ func TestAskContextPostgres(t *testing.T) {
 	exists, err := store.ExistingJobIDs(ctx, []int64{275, 16, 27501})
 	if err != nil || !exists[275] || !exists[27501] || exists[16] {
 		t.Fatalf("exists = %v err=%v", exists, err)
+	}
+
+	// Parts request count on jobs.
+	if _, err := db.Exec(ctx, `INSERT INTO parts_purchase_requests(reference_id, source, item_name, quantity, created_by_user_id)
+		VALUES (275, 'supplier', 'Belt', 1, $1), (275, 'online', 'Fuse', 2, $1), (15, 'supplier', 'Knob', 1, $1)`, userA); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		ids  []int64
+		want int
+	}{{[]int64{275}, 2}, {[]int64{275, 15}, 3}, {[]int64{27501}, 0}, {[]int64{}, 0}} {
+		if n, err := store.PartsRequestCount(ctx, c.ids); err != nil || n != c.want {
+			t.Fatalf("PartsRequestCount(%v) = %d err=%v, want %d", c.ids, n, err, c.want)
+		}
 	}
 
 	// Deleting a user removes the context.

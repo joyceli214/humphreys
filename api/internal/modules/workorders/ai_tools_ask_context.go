@@ -23,12 +23,34 @@ const askNoContextReply = "I don't have recent jobs to refer to. Tell me the job
 // askNoJobsReply answers when every job number named does not exist.
 const askNoJobsReply = "Check the job numbers and try again."
 
+// askPartsStatusNotice is shown when a follow-up asks to change the status of
+// parts requests: Ask has no parts-status write tool.
+const askPartsStatusNotice = "Ask can't change parts request status yet. Change it from each job's Parts list."
+
+// Context topics: what the last answer was about. A follow-up update after a
+// parts answer must never become a job-field Mass Update.
+const (
+	askTopicJobs  = "jobs"
+	askTopicParts = "parts"
+)
+
 // askContext is what the server remembers per login account between Ask
-// messages: only job numbers and a customer search, never message text.
+// messages: only job numbers, a customer search and the topic, never message
+// text.
 type askContext struct {
 	ReferenceIDs  []int64
 	CustomerQuery string
-	UpdatedAt     time.Time
+	// Topic is askTopicJobs or askTopicParts ("" counts as jobs).
+	Topic     string
+	UpdatedAt time.Time
+}
+
+// normalizeAskTopic maps anything but "parts" to "jobs".
+func normalizeAskTopic(topic string) string {
+	if topic == askTopicParts {
+		return askTopicParts
+	}
+	return askTopicJobs
 }
 
 // askContextStore persists askContext per user (table ai_ask_context).
@@ -41,9 +63,11 @@ type askContextStore interface {
 	DeleteExpiredAskContext(ctx context.Context, userID string, cutoff time.Time) error
 }
 
-// askJobLookup reports which job numbers exist.
+// askJobLookup reports which job numbers exist and how many parts requests
+// they have.
 type askJobLookup interface {
 	ExistingJobIDs(ctx context.Context, ids []int64) (map[int64]bool, error)
+	PartsRequestCount(ctx context.Context, ids []int64) (int, error)
 }
 
 // pgAskStore implements askContextStore and askJobLookup on PostgreSQL.
@@ -52,14 +76,15 @@ type pgAskStore struct{ db *pgxpool.Pool }
 func (s *pgAskStore) LoadAskContext(ctx context.Context, userID string) (askContext, bool, error) {
 	var ac askContext
 	err := s.db.QueryRow(ctx,
-		`SELECT reference_ids, customer_query, updated_at FROM public.ai_ask_context WHERE user_id = $1::uuid`,
-		userID).Scan(&ac.ReferenceIDs, &ac.CustomerQuery, &ac.UpdatedAt)
+		`SELECT reference_ids, customer_query, topic, updated_at FROM public.ai_ask_context WHERE user_id = $1::uuid`,
+		userID).Scan(&ac.ReferenceIDs, &ac.CustomerQuery, &ac.Topic, &ac.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return askContext{}, false, nil
 	}
 	if err != nil {
 		return askContext{}, false, err
 	}
+	ac.Topic = normalizeAskTopic(ac.Topic)
 	return ac, true, nil
 }
 
@@ -69,14 +94,37 @@ func (s *pgAskStore) SaveAskContext(ctx context.Context, userID string, ac askCo
 		ids = []int64{}
 	}
 	_, err := s.db.Exec(ctx,
-		`INSERT INTO public.ai_ask_context (user_id, reference_ids, customer_query, updated_at)
-		 VALUES ($1::uuid, $2::bigint[], $3, now())
+		`INSERT INTO public.ai_ask_context (user_id, reference_ids, customer_query, topic, updated_at)
+		 VALUES ($1::uuid, $2::bigint[], $3, $4, now())
 		 ON CONFLICT (user_id) DO UPDATE
 		   SET reference_ids = EXCLUDED.reference_ids,
 		       customer_query = EXCLUDED.customer_query,
+		       topic = EXCLUDED.topic,
 		       updated_at = now()`,
-		userID, ids, ac.CustomerQuery)
+		userID, ids, ac.CustomerQuery, normalizeAskTopic(ac.Topic))
 	return err
+}
+
+func (s *pgAskStore) PartsRequestCount(ctx context.Context, ids []int64) (int, error) {
+	ints := askInt32IDs(ids)
+	if len(ints) == 0 {
+		return 0, nil
+	}
+	var n int
+	err := s.db.QueryRow(ctx,
+		`SELECT count(*) FROM public.parts_purchase_requests WHERE reference_id = ANY($1::int[])`, ints).Scan(&n)
+	return n, err
+}
+
+// askInt32IDs keeps the ids that fit work_orders.reference_id (integer).
+func askInt32IDs(ids []int64) []int32 {
+	ints := make([]int32, 0, len(ids))
+	for _, id := range ids {
+		if id > 0 && id <= math.MaxInt32 {
+			ints = append(ints, int32(id))
+		}
+	}
+	return ints
 }
 
 func (s *pgAskStore) DeleteExpiredAskContext(ctx context.Context, userID string, cutoff time.Time) error {
@@ -86,12 +134,7 @@ func (s *pgAskStore) DeleteExpiredAskContext(ctx context.Context, userID string,
 }
 
 func (s *pgAskStore) ExistingJobIDs(ctx context.Context, ids []int64) (map[int64]bool, error) {
-	ints := make([]int32, 0, len(ids))
-	for _, id := range ids {
-		if id > 0 && id <= math.MaxInt32 {
-			ints = append(ints, int32(id))
-		}
-	}
+	ints := askInt32IDs(ids)
 	out := make(map[int64]bool, len(ints))
 	if len(ints) == 0 {
 		return out, nil

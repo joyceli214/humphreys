@@ -201,6 +201,40 @@ describe("AskTab", () => {
     expect(within(table).getByText("Fuse")).toBeInTheDocument();
   });
 
+  it("shows only the named jobs' parts requests", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "parts_requests", reference_ids: [41, 7] }));
+    listAllPartsPurchaseRequests.mockResolvedValue({
+      items: [
+        { parts_purchase_request_id: 900, reference_id: 41, item_name: "Drive belt", quantity: 2, status: "ordered", source: "supplier", source_url: null },
+        { parts_purchase_request_id: 901, reference_id: 42, item_name: "Fuse", quantity: 1, status: "approved", source: "online", source_url: null }
+      ]
+    });
+    render(<AskTab />);
+    ask("show parts requests for jobs 41 and 7");
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("Drive belt")).toBeInTheDocument();
+    expect(within(table).queryByText("Fuse")).toBeNull();
+    expect(screen.getByText(/across/).textContent).toBe("1 parts request across 1 job.");
+  });
+
+  it("says which jobs have no parts requests", async () => {
+    const items = [
+      { parts_purchase_request_id: 901, reference_id: 42, item_name: "Fuse", quantity: 1, status: "approved", source: "online", source_url: null }
+    ];
+    listAllPartsPurchaseRequests.mockResolvedValue({ items });
+    interpretAsk.mockImplementation(async (text: string) =>
+      intent({ intent: "parts_requests", reference_ids: text.includes("31221") ? [31221, 31121, 7] : [7] })
+    );
+    render(<AskTab />);
+    // (No trailing "#7": the # job picker would take the Enter.)
+    ask("Show all parts requests for jobs 31221, 31121 and 7");
+    expect(await screen.findByText("No parts requests on jobs #31221, #31121, #7.")).toBeInTheDocument();
+    ask("parts for job 7");
+    expect(await screen.findByText("No parts requests on job #7.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByText("No parts requests yet.")).toBeNull();
+  });
+
   it("says so when parts requests are not readable (403)", async () => {
     interpretAsk.mockResolvedValue(intent({ intent: "parts_requests" }));
     listAllPartsPurchaseRequests.mockRejectedValue(new FakeAPIError("forbidden (403 /parts-purchase-requests)", 403));
