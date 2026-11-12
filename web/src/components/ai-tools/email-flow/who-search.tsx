@@ -16,8 +16,10 @@ type Option = { kind: "contact"; contact: EmailPickerContact } | { kind: "job"; 
 
 type Props = {
   placeholder: string;
-  /** "Contacts" (customer) or "Suppliers" (supplier). Already filtered by role. */
+  /** "Contacts" (customer), "Suppliers" (supplier) or "Shop contacts" (shop). Already filtered by role. */
   contactsLabel: string;
+  /** Right-hand tag on a pickable contact row, e.g. "Contact", "Supplier", "Shop". */
+  contactTag: string;
   contacts: EmailPickerContact[];
   contactsLoading: boolean;
   contactsError: string;
@@ -32,9 +34,11 @@ type Props = {
 /**
  * One box that searches common contacts (client-side) and jobs
  * (debounced GET /work-orders?q=). Results are 44px+ rows, keyboard navigable.
+ * The search stays open after a pick (plan §12.4): picked rows show "Added ✓"
+ * and can't be picked again until removed, so several can be added at once.
  */
 export function WhoSearch(props: Props) {
-  const { placeholder, contactsLabel, contacts, pickedContactIds, pickedJobIds, canAddJob, onPickJob, onPickContact } = props;
+  const { placeholder, contactsLabel, contactTag, contacts, pickedContactIds, pickedJobIds, canAddJob, onPickJob, onPickContact } = props;
   const listId = useId();
   const inputId = useId();
   const [query, setQuery] = useState("");
@@ -78,20 +82,28 @@ export function WhoSearch(props: Props) {
   }, [q, attempt]);
 
   const needle = q.toLowerCase();
-  const contactMatches = needle
-    ? contacts.filter((c) => !pickedContactIds.includes(c.id) && `${c.name} ${c.email}`.toLowerCase().includes(needle))
-    : [];
-  const jobMatches = (jobs ?? []).filter((row) => !pickedJobIds.includes(row.reference_id)).slice(0, JOB_RESULTS);
+  const contactMatches = needle ? contacts.filter((c) => `${c.name} ${c.email}`.toLowerCase().includes(needle)) : [];
+  const contactPicked = (c: EmailPickerContact) => pickedContactIds.includes(c.id);
+  const jobPicked = (row: WorkOrderListItem) => pickedJobIds.includes(row.reference_id);
+  // Picked jobs stay in the list (Added ✓); the page was widened by the picked count.
+  const jobMatches = (jobs ?? []).slice(0, JOB_RESULTS + (jobs ?? []).filter(jobPicked).length);
+  const visibleJobs = canAddJob ? jobMatches : jobMatches.filter(jobPicked);
+  // Keyboard options: pickable rows only.
   const options: Option[] = [
-    ...contactMatches.map((contact) => ({ kind: "contact" as const, contact })),
-    ...(canAddJob ? jobMatches.map((row) => ({ kind: "job" as const, row })) : [])
+    ...contactMatches.filter((c) => !contactPicked(c)).map((contact) => ({ kind: "contact" as const, contact })),
+    ...(canAddJob ? jobMatches.filter((row) => !jobPicked(row)).map((row) => ({ kind: "job" as const, row })) : [])
   ];
   const showList = open && q !== "";
 
+  // Keep the query and the open list; the parent re-renders picked rows as Added ✓.
   const choose = (option: Option) => {
-    if (option.kind === "contact") onPickContact(option.contact);
-    else onPickJob(option.row);
-    setQuery("");
+    if (option.kind === "contact") {
+      if (contactPicked(option.contact)) return;
+      onPickContact(option.contact);
+    } else {
+      if (jobPicked(option.row)) return;
+      onPickJob(option.row);
+    }
     setActive(-1);
   };
 
@@ -121,6 +133,9 @@ export function WhoSearch(props: Props) {
       "flex min-h-[56px] w-full cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-[#d5d9de] bg-white px-3 py-2 text-left",
       i === active && "border-[#1a7f94] bg-[#e6f3f6]"
     );
+  const addedClass =
+    "flex min-h-[56px] w-full cursor-default items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-[#1a7f94] bg-[#e6f3f6] px-3 py-2 text-left";
+  const added = <span className="flex-none text-[14px] font-semibold text-[#135f6f]">Added ✓</span>;
 
   let index = -1;
   return (
@@ -162,6 +177,25 @@ export function WhoSearch(props: Props) {
             <div role="group" aria-label={contactsLabel} className="space-y-1.5">
               <p className="text-[14px] font-semibold uppercase tracking-wide text-[#4a5260]">{contactsLabel}</p>
               {contactMatches.map((contact) => {
+                if (contactPicked(contact)) {
+                  return (
+                    <div
+                      key={`c${contact.id}`}
+                      role="option"
+                      aria-selected={false}
+                      aria-disabled="true"
+                      aria-label={`${contact.name} ${contact.email} · Added`}
+                      className={addedClass}
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      <span className="min-w-0">
+                        <b className="block truncate">{contact.name}</b>
+                        <small className="block truncate text-[15px] text-[#4a5260]">{contact.email}</small>
+                      </span>
+                      {added}
+                    </div>
+                  );
+                }
                 index++;
                 const i = index;
                 return (
@@ -181,20 +215,45 @@ export function WhoSearch(props: Props) {
                       <b className="block truncate">{contact.name}</b>
                       <small className="block truncate text-[15px] text-[#4a5260]">{contact.email}</small>
                     </span>
-                    <span className="flex-none text-[14px] font-semibold text-[#4a5260]">{contactsLabel === "Suppliers" ? "Supplier" : "Contact"}</span>
+                    <span className="flex-none text-[14px] font-semibold text-[#4a5260]">{contactTag}</span>
                   </div>
                 );
               })}
             </div>
           )}
-          {!canAddJob && jobMatches.length > 0 && <p className="text-[15px] text-amber-800">Job limit reached. Remove a job to add another.</p>}
-          {canAddJob && jobMatches.length > 0 && (
+          {!canAddJob && jobMatches.some((row) => !jobPicked(row)) && (
+            <p className="text-[15px] text-amber-800">Job limit reached. Remove a job to add another.</p>
+          )}
+          {visibleJobs.length > 0 && (
             <div role="group" aria-label="Jobs" className="space-y-1.5">
               <p className="text-[14px] font-semibold uppercase tracking-wide text-[#4a5260]">Jobs</p>
-              {jobMatches.map((row) => {
+              {visibleJobs.map((row) => {
+                const item = jobItemLabel(row);
+                if (jobPicked(row)) {
+                  return (
+                    <div
+                      key={`j${row.reference_id}`}
+                      role="option"
+                      aria-selected={false}
+                      aria-disabled="true"
+                      aria-label={`#${row.reference_id} ${item} · ${row.customer_name ?? ""} · ${row.status} · Added`}
+                      className={addedClass}
+                      onMouseDown={(e) => e.preventDefault()}
+                    >
+                      <span className="min-w-0">
+                        <b className="block">
+                          <span className="text-[#135f6f]">#{row.reference_id}</span> {item}
+                        </b>
+                        <small className="block text-[15px] text-[#4a5260]">
+                          {row.customer_name || "No customer"} · {row.status}
+                        </small>
+                      </span>
+                      {added}
+                    </div>
+                  );
+                }
                 index++;
                 const i = index;
-                const item = jobItemLabel(row);
                 return (
                   <div
                     key={`j${row.reference_id}`}
@@ -235,7 +294,7 @@ export function WhoSearch(props: Props) {
               </button>
             </p>
           )}
-          {!loading && !error && options.length === 0 && jobs !== null && <p className="text-[16px] text-[#4a5260]">No match.</p>}
+          {!loading && !error && contactMatches.length === 0 && jobMatches.length === 0 && jobs !== null && <p className="text-[16px] text-[#4a5260]">No match.</p>}
         </div>
       )}
     </div>

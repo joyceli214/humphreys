@@ -3,25 +3,32 @@ import { X } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
 import type { EmailPickerContact, PartsPurchaseRequest, WorkOrderDetail, WorkOrderListItem } from "@/lib/api/generated/types";
 import type { EmailDraftTarget, EmailDraftType } from "@/lib/ai-tools/types";
-import { DEFAULT_EMAIL_TEMPLATES } from "@/lib/email-templates";
+import { DEFAULT_EMAIL_TEMPLATES, emailTemplatesHref, firstTemplateKey, type EmailTemplateKey } from "@/lib/email-templates";
 import { templateForDraftType } from "@/lib/ai-tools/email-handoff";
 import { EMAIL_MAX_JOBS, customerGroups, type SelectedEmailJob } from "@/lib/ai-tools/email-selection";
 import { DEFAULT_MAX_CC, DEFAULT_MAX_TO, EMPTY_RECIPIENTS, contactLabel, recipientLabels, recipientPayload, type RecipientSelection } from "@/lib/ai-tools/email-recipients";
 import {
   COMMON_CONTACTS_PATH,
   CUSTOMER_DRAFTS,
-  EMAIL_TEMPLATES_PATH,
+  SHOP_APPROVAL_PART_STATUSES,
+  SHOP_DRAFTS,
+  SHOP_TEMPLATE_KEYS,
   SUPPLIER_DRAFTS,
+  SUPPLIER_TEMPLATE_KEYS,
   buildCustomerDraft,
+  buildShopDraft,
   buildSupplierDraft,
   maskEmailHint,
+  partsStatusHint,
   partsStatusWord,
   signOffFromTemplate,
   supplierStatusHint,
   type CustomerTemplates,
   type EmailJob,
   type JobParts,
-  type SupplierDraftType
+  type ShopDraftType,
+  type SupplierDraftType,
+  type TemplateText
 } from "@/lib/ai-tools/email-flow";
 import { countBlanks, sendButtonState } from "@/lib/ai-tools/email-blanks";
 import { buildMailto, draftClipboardText, mailtoNavigator } from "@/lib/mailto";
@@ -39,7 +46,42 @@ import { EmailWriter } from "@/components/ai-tools/email-flow/email-writer";
 import { cn } from "@/lib/utils";
 
 
-type Kind = "customer" | "supplier";
+type Kind = "customer" | "supplier" | "shop";
+type AnyDraftType = EmailDraftType | SupplierDraftType | ShopDraftType;
+type LoadedTemplate = TemplateText & { label: string };
+
+const KIND_LABEL: Record<Kind, string> = { customer: "Customer", supplier: "Supplier", shop: "Shop" };
+
+/** Who-step copy per kind (plan §4.3, §12.2). */
+const WHO_COPY: Record<Kind, { heading: string; hint: string; placeholder: string; contactsLabel: string; contactTag: string }> = {
+  customer: {
+    heading: "Pick jobs or a contact.",
+    hint: "One job or several. Jobs for the same customer go in one email.",
+    placeholder: "Name or job #",
+    contactsLabel: "Contacts",
+    contactTag: "Contact"
+  },
+  supplier: {
+    heading: "Pick jobs and a supplier.",
+    hint: "Pick every job that needs parts. One email asks about all of them.",
+    placeholder: "Supplier name or job #",
+    contactsLabel: "Suppliers",
+    contactTag: "Supplier"
+  },
+  shop: {
+    heading: "Pick jobs and a shop contact.",
+    hint: "Emails inside the shop. The search stays open — tap each job you need.",
+    placeholder: "Shop contact or job #",
+    contactsLabel: "Shop contacts",
+    contactTag: "Shop"
+  }
+};
+
+const ALL_TEMPLATE_KEYS = Object.keys(DEFAULT_EMAIL_TEMPLATES) as EmailTemplateKey[];
+
+function defaultTemplates(): Record<EmailTemplateKey, LoadedTemplate> {
+  return Object.fromEntries(ALL_TEMPLATE_KEYS.map((key) => [key, DEFAULT_EMAIL_TEMPLATES[key]])) as unknown as Record<EmailTemplateKey, LoadedTemplate>;
+}
 type Step = 1 | 2 | 3;
 
 type PickedJob = {
@@ -68,8 +110,8 @@ type Draft = {
   hasCustomerEmail: boolean;
   customerHint: string;
   customerEmail: string;
-  /** Supplier To: picked supplier contact + typed addresses (work_orders:update only). */
-  supplierId: number | null;
+  /** Supplier / Shop To: picked common contact + typed addresses (work_orders:update only). */
+  contactId: number | null;
   typedTo: string[];
   photoIds: string[];
   sent: boolean;
@@ -238,17 +280,19 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
   const [jobs, setJobs] = useState<PickedJob[]>([]);
   const [toCustomer, setToCustomer] = useState(true);
   const [contactIds, setContactIds] = useState<number[]>([]);
-  const [supplierId, setSupplierId] = useState<number | null>(null);
+  const [toContactId, setToContactId] = useState<number | null>(null);
   const [mix, setMix] = useState<null | "split" | "picking">(null);
-  const [draftType, setDraftType] = useState<EmailDraftType | SupplierDraftType | null>(null);
+  const [draftType, setDraftType] = useState<AnyDraftType | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [current, setCurrent] = useState(0);
   const [showNames, setShowNames] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [templates, setTemplates] = useState<{ status: "idle" | "loading" | "ok" | "fallback"; value: CustomerTemplates }>({
-    status: "idle",
-    value: { job_started: DEFAULT_EMAIL_TEMPLATES.job_started, job_completed: DEFAULT_EMAIL_TEMPLATES.job_completed }
-  });
+  // Email Templates page templates; DEFAULT copy (same as migrations) when the API fails or lacks a key.
+  const [templates, setTemplates] = useState<{
+    status: "idle" | "loading" | "ok" | "fallback";
+    value: Record<EmailTemplateKey, LoadedTemplate>;
+    missing: EmailTemplateKey[];
+  }>(() => ({ status: "idle", value: defaultTemplates(), missing: [] }));
   const [parts, setParts] = useState<Record<number, PartsState>>({});
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
@@ -260,8 +304,11 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
 
   const customerContacts = useMemo(() => contacts.contacts.filter((c) => c.role !== "supplier"), [contacts.contacts]);
   const supplierContacts = useMemo(() => contacts.contacts.filter((c) => c.role === "supplier"), [contacts.contacts]);
+  // Shop emails go to internal people: Common contacts with role boss or staff.
+  const shopContacts = useMemo(() => contacts.contacts.filter((c) => c.role === "boss" || c.role === "staff"), [contacts.contacts]);
+  const kindContacts = kind === "customer" ? customerContacts : kind === "supplier" ? supplierContacts : shopContacts;
   const contactById = useMemo(() => new Map(contacts.contacts.map((c) => [c.id, c])), [contacts.contacts]);
-  const supplier = supplierId != null ? contactById.get(supplierId) ?? null : null;
+  const toContact = toContactId != null ? contactById.get(toContactId) ?? null : null;
 
   // --- Who state changes reset any drafts (plan: changing jobs resets the draft) ---
   const resetDrafts = () => {
@@ -339,7 +386,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     if (!target) return;
     const job = target.job ?? { referenceId: target.referenceId, customerId: null, customerName: target.label, equipment: "", status: "" };
     setKind("customer");
-    setSupplierId(null);
+    setToContactId(null);
     setStep(1);
     if (kind !== "customer") {
       jobsRef.current = [];
@@ -356,7 +403,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     setJobs([]);
     setContactIds([]);
     setToCustomer(true);
-    setSupplierId(null);
+    setToContactId(null);
     setMix(null);
     setShowNames(false);
     setParts({});
@@ -381,7 +428,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
   const whoValid =
     kind === "customer"
       ? (jobs.length > 0 || contactIds.length > 0) && !anyLoading && (!mixed || split)
-      : jobs.length > 0 || supplierId != null;
+      : jobs.length > 0 || toContactId != null; // supplier / shop: jobs or a To
 
   // --- Draft step data ---
   useEffect(() => {
@@ -390,17 +437,16 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     apiClient.listEmailTemplates().then(
       (res) => {
         const byKey = new Map((res.items ?? []).map((t) => [t.key, t]));
-        const started = byKey.get("job_started");
-        const completed = byKey.get("job_completed");
-        setTemplates({
-          status: started && completed ? "ok" : "fallback",
-          value: {
-            job_started: started ?? DEFAULT_EMAIL_TEMPLATES.job_started,
-            job_completed: completed ?? DEFAULT_EMAIL_TEMPLATES.job_completed
-          }
-        });
+        const value = defaultTemplates();
+        const missing: EmailTemplateKey[] = [];
+        for (const key of ALL_TEMPLATE_KEYS) {
+          const item = byKey.get(key);
+          if (item) value[key] = item;
+          else missing.push(key);
+        }
+        setTemplates({ status: "ok", value, missing });
       },
-      () => setTemplates((t) => ({ ...t, status: "fallback" }))
+      () => setTemplates((t) => ({ ...t, status: "fallback", missing: ALL_TEMPLATE_KEYS }))
     );
   }, [step, templates.status]);
 
@@ -418,29 +464,56 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
   }, []);
 
   useEffect(() => {
-    if (kind !== "supplier" || step < 2) return;
+    if (kind === "customer" || step < 2) return;
     for (const job of jobs) if (!parts[job.referenceId]) loadParts(job.referenceId);
   }, [kind, step, jobs, parts, loadParts]);
 
   const partsReady = jobs.every((j) => parts[j.referenceId] && parts[j.referenceId].status !== "loading");
   const signOff = signOffFromTemplate(templates.value.job_started.body_template);
   const templatesReady = templates.status === "ok" || templates.status === "fallback";
+  const customerTemplates: CustomerTemplates = useMemo(
+    () => ({ job_started: templates.value.job_started, job_completed: templates.value.job_completed }),
+    [templates.value]
+  );
+  const templateKeyFor = (type: AnyDraftType): EmailTemplateKey | null => {
+    if (type === "custom") return null;
+    if (kind === "supplier") return SUPPLIER_TEMPLATE_KEYS[type as Exclude<SupplierDraftType, "custom">] ?? null;
+    if (kind === "shop") return SHOP_TEMPLATE_KEYS[type as Exclude<ShopDraftType, "custom">] ?? null;
+    return null;
+  };
 
-  const supplierGenerated = useMemo(() => {
-    if (kind !== "supplier" || !draftType) return null;
-    const jobParts: JobParts[] = jobs.map((j) => {
-      const state = parts[j.referenceId];
-      return { referenceId: j.referenceId, customerName: j.customerName, parts: state && state.status === "ok" ? state.items : null };
+  // Supplier / Shop body follows parts, names and the current To (signature) until edited.
+  const writeContactId = drafts.length > 0 ? drafts[0].contactId : toContactId;
+  const writeContactName = writeContactId != null ? contactById.get(writeContactId)?.name ?? null : null;
+  const groupGenerated = useMemo(() => {
+    if (kind === "customer" || !draftType) return null;
+    const key = templateKeyFor(draftType);
+    const template = key ? templates.value[key] : null;
+    const partsOf = (id: number) => {
+      const state = parts[id];
+      return state && state.status === "ok" ? state.items : null;
+    };
+    if (kind === "supplier") {
+      const jobParts: JobParts[] = jobs.map((j) => ({ referenceId: j.referenceId, customerName: j.customerName, parts: partsOf(j.referenceId) }));
+      return buildSupplierDraft({ type: draftType as SupplierDraftType, template, supplierName: writeContactName, jobs: jobParts, showNames, signOff });
+    }
+    return buildShopDraft({
+      type: draftType as ShopDraftType,
+      template,
+      recipientName: writeContactName,
+      jobs: jobs.map((j) => ({ referenceId: j.referenceId, customerName: j.customerName, equipment: j.equipment, status: j.status, parts: partsOf(j.referenceId) })),
+      signOff
     });
-    return buildSupplierDraft({ type: draftType as SupplierDraftType, supplierName: supplier?.name ?? null, jobs: jobParts, showNames, signOff });
-  }, [kind, draftType, jobs, parts, supplier?.name, showNames, signOff]);
+    // templateKeyFor only reads kind.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, draftType, jobs, parts, writeContactName, showNames, signOff, templates.value]);
 
   const buildCustomerDrafts = (type: EmailDraftType): Draft[] => {
     const sets = split
       ? groups.map((g) => ({ title: g.customerName, picked: g.jobs.map((s) => jobs.find((j) => j.referenceId === s.referenceId)!) }))
       : [{ title: jobs[0]?.customerName ?? "", picked: jobs }];
     return sets.map((set, i) => {
-      const built = buildCustomerDraft({ type, jobs: set.picked.map(toEmailJob), templates: templates.value });
+      const built = buildCustomerDraft({ type, jobs: set.picked.map(toEmailJob), templates: customerTemplates });
       const email = set.picked.find((j) => j.detail)?.detail?.customer.email?.trim() ?? "";
       const hint = maskEmailHint(email);
       return {
@@ -455,7 +528,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
         hasCustomerEmail: hint !== "",
         customerHint: hint,
         customerEmail: hint ? email : "",
-        supplierId: null,
+        contactId: null,
         typedTo: [],
         photoIds: [],
         sent: false,
@@ -464,7 +537,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     });
   };
 
-  const pickDraft = (type: EmailDraftType | SupplierDraftType) => {
+  const pickDraft = (type: AnyDraftType) => {
     setDraftType(type);
     setCurrent(0);
     setConfirming(false);
@@ -475,25 +548,25 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     setStep(3);
   };
 
-  // Supplier draft appears once parts are loaded; then follows parts / names changes unless edited.
+  // Supplier / Shop draft appears once parts are loaded; then follows parts / names / To changes unless edited.
   useEffect(() => {
-    if (kind !== "supplier" || !supplierGenerated || !partsReady || !templatesReady) return;
+    if (kind === "customer" || !groupGenerated || !partsReady || !templatesReady) return;
     setDrafts((list) => {
       if (list.length === 0) {
         return [
           {
             key: "s0",
-            title: supplier?.name ?? "",
+            title: toContact?.name ?? "",
             jobIds: jobs.map((j) => j.referenceId),
-            subject: supplierGenerated.subject,
-            body: supplierGenerated.body,
-            basis: supplierGenerated.body,
+            subject: groupGenerated.subject,
+            body: groupGenerated.body,
+            basis: groupGenerated.body,
             edited: false,
             recipients: { ...EMPTY_RECIPIENTS, toCustomer: false },
             hasCustomerEmail: false,
             customerHint: "",
             customerEmail: "",
-            supplierId,
+            contactId: toContactId,
             typedTo: [],
             photoIds: [],
             sent: false,
@@ -502,18 +575,18 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
         ];
       }
       const d = list[0];
-      if (d.edited || d.sent || d.basis === supplierGenerated.body) return list;
-      return [{ ...d, body: supplierGenerated.body, basis: supplierGenerated.body }];
+      if (d.edited || d.sent || d.basis === groupGenerated.body) return list;
+      return [{ ...d, body: groupGenerated.body, basis: groupGenerated.body }];
     });
-  }, [kind, supplierGenerated, partsReady, templatesReady, jobs, supplier?.name, supplierId]);
+  }, [kind, groupGenerated, partsReady, templatesReady, jobs, toContact?.name, toContactId]);
 
   const draft = drafts[current] ?? null;
   const updateDraft = (patch: Partial<Draft>) => setDrafts((list) => list.map((d, i) => (i === current ? { ...d, ...patch } : d)));
 
   // --- recipients / send ---
   const toLabels = (d: Draft): { to: string[]; cc: string[] } => {
-    if (kind === "supplier") {
-      const s = d.supplierId != null ? contactById.get(d.supplierId) : null;
+    if (kind !== "customer") {
+      const s = d.contactId != null ? contactById.get(d.contactId) : null;
       return { to: [...(s ? [contactLabel(s)] : []), ...d.typedTo], cc: [] };
     }
     const named = d.hasCustomerEmail ? `${d.title} <${d.customerHint}>` : "";
@@ -553,7 +626,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
           template: "job_started",
           ...base,
           to_customer: false,
-          ...(draft.supplierId != null ? { to_contact_ids: [draft.supplierId] } : {}),
+          ...(draft.contactId != null ? { to_contact_ids: [draft.contactId] } : {}),
           ...(draft.typedTo.length > 0 ? { to_emails: draft.typedTo } : {})
         });
       }
@@ -571,8 +644,8 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
   };
 
   const mailtoTo = (d: Draft) => {
-    if (kind === "supplier") {
-      const s = d.supplierId != null ? contactById.get(d.supplierId) : null;
+    if (kind !== "customer") {
+      const s = d.contactId != null ? contactById.get(d.contactId) : null;
       return [...(s ? [s.email] : []), ...d.typedTo].join(",");
     }
     const list: string[] = [];
@@ -604,9 +677,9 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
   // Render pieces
 
   const summary = (() => {
-    const supplierLabel = supplier?.name ?? "No supplier yet";
+    const toLabel = toContact?.name ?? (kind === "shop" ? "No one yet" : "No supplier yet");
     let label: string;
-    if (kind === "supplier") label = `${supplierLabel} · ${jobs.length} job${jobs.length === 1 ? "" : "s"}`;
+    if (kind !== "customer") label = `${toLabel} · ${jobs.length} job${jobs.length === 1 ? "" : "s"}`;
     else if (split) label = `${jobs.length} jobs · ${groups.length} customers`;
     else if (jobs.length === 1) label = `Job #${jobs[0].referenceId} · ${jobs[0].customerName}`;
     else if (jobs.length > 1) label = `${jobs.length} jobs · ${jobs[0].customerName}`;
@@ -639,7 +712,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
             {jobs.map((j) => (
               <li key={j.referenceId} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-[#eceef0] py-1.5 last:border-b-0">
                 <b className="text-[#135f6f]">#{j.referenceId}</b> {j.equipment}
-                {(kind === "supplier" || split) && <small className="text-[#4a5260]">· {j.customerName}</small>}
+                {(kind !== "customer" || split) && <small className="text-[#4a5260]">· {j.customerName}</small>}
                 {j.status && (
                   <span className="ml-auto">
                     <StatusPill tone={statusTone(j.status)}>{j.status}</StatusPill>
@@ -726,8 +799,8 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
 
   const whoStep = (
     <div>
-      <div role="radiogroup" aria-label="Email to" className="mb-3.5 grid grid-cols-2 rounded-[12px] bg-[#e7e2dc] p-1">
-        {(["customer", "supplier"] as const).map((k) => (
+      <div role="radiogroup" aria-label="Email to" className="mb-3.5 grid grid-cols-3 rounded-[12px] bg-[#e7e2dc] p-1">
+        {(["customer", "supplier", "shop"] as const).map((k) => (
           <button
             key={k}
             type="button"
@@ -740,31 +813,30 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
               FOCUS
             )}
           >
-            {k === "customer" ? "Customer" : "Supplier"}
+            {KIND_LABEL[k]}
           </button>
         ))}
       </div>
-      <h2 className="mb-1 text-[20px] font-bold">{kind === "customer" ? "Pick jobs or a contact." : "Pick jobs and a supplier."}</h2>
-      <p className="text-[#4a5260]">
-        {kind === "customer" ? "One job or several. Jobs for the same customer go in one email." : "Pick every job that needs parts. One email asks about all of them."}
-      </p>
+      <h2 className="mb-1 text-[20px] font-bold">{WHO_COPY[kind].heading}</h2>
+      <p className="text-[#4a5260]">{WHO_COPY[kind].hint}</p>
       {drafts.length > 0 && <p className="mt-2 rounded-lg bg-[#fff1c9] px-3 py-1.5 text-[15px] text-[#6b3d00]">Changing jobs resets the draft.</p>}
       <WhoSearch
         key={kind}
-        placeholder={kind === "customer" ? "Name or job #" : "Supplier name or job #"}
-        contactsLabel={kind === "customer" ? "Contacts" : "Suppliers"}
-        contacts={kind === "customer" ? customerContacts : supplierContacts}
+        placeholder={WHO_COPY[kind].placeholder}
+        contactsLabel={WHO_COPY[kind].contactsLabel}
+        contactTag={WHO_COPY[kind].contactTag}
+        contacts={kindContacts}
         contactsLoading={contacts.loading}
         contactsError={contacts.error}
         onRetryContacts={contacts.retry}
-        pickedContactIds={kind === "customer" ? contactIds : supplierId != null ? [supplierId] : []}
+        pickedContactIds={kind === "customer" ? contactIds : toContactId != null ? [toContactId] : []}
         pickedJobIds={jobs.map((j) => j.referenceId)}
         canAddJob={jobs.length < EMAIL_MAX_JOBS}
         onPickJob={pickRow}
         onPickContact={(c: EmailPickerContact) => {
           resetDrafts();
           if (kind === "customer") setContactIds((ids) => (ids.includes(c.id) ? ids : [...ids, c.id]));
-          else setSupplierId(c.id);
+          else setToContactId(c.id);
         }}
       />
       {pickedJobs}
@@ -811,13 +883,13 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
       {kind === "supplier" && (
         <>
           <p className="mb-1 mt-3 text-[16px] font-semibold">To (supplier)</p>
-          {supplier ? (
+          {toContact ? (
             <ToChip
-              label={supplier.name}
-              sub={supplier.email}
+              label={toContact.name}
+              sub={toContact.email}
               removeLabel="Remove supplier"
               onRemove={() => {
-                setSupplierId(null);
+                setToContactId(null);
                 resetDrafts();
               }}
             />
@@ -844,23 +916,63 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
           )}
         </>
       )}
+      {kind === "shop" && (
+        <>
+          <p className="mb-1 mt-3 text-[16px] font-semibold">To (shop)</p>
+          {toContact ? (
+            <ToChip
+              label={toContact.name}
+              sub={`${toContact.role === "boss" ? "Boss" : "Staff"} · ${toContact.email}`}
+              removeLabel="Remove shop contact"
+              onRemove={() => {
+                setToContactId(null);
+                resetDrafts();
+              }}
+            />
+          ) : (
+            <p className="rounded-[10px] border-[1.5px] border-dashed border-[#8b949e] bg-white px-3 py-2.5 text-[16px]">
+              {!contacts.loading && !contacts.error && shopContacts.length === 0
+                ? "No shop contacts saved yet. Add boss or staff on "
+                : "No one yet. Search above, or add boss or staff on "}
+              <a href={COMMON_CONTACTS_PATH} target="_blank" rel="noopener noreferrer" className="font-semibold text-[#135f6f] underline">
+                Common contacts
+              </a>
+              .
+            </p>
+          )}
+        </>
+      )}
       {mixNotice}
     </div>
   );
+
+  // Customer keeps its four Management drafts; Supplier / Shop list the Email Templates page entries + Custom.
+  const draftOptions: Array<{ value: AnyDraftType; label: string; hint: string; key: EmailTemplateKey | null }> = (() => {
+    if (kind === "customer") {
+      return CUSTOMER_DRAFTS.map((d) => ({ ...d, key: d.value === "custom" ? null : templateForDraftType(d.value) }));
+    }
+    const base: Array<{ value: AnyDraftType; label: string; hint: string }> = kind === "supplier" ? SUPPLIER_DRAFTS : SHOP_DRAFTS;
+    return base.map((d) => {
+      const key = templateKeyFor(d.value);
+      return { ...d, key, label: key ? templates.value[key].label || d.label : d.label };
+    });
+  })();
 
   const draftStep = (
     <div>
       {summary}
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[20px] font-bold">Pick a draft</h2>
-        <a href={EMAIL_TEMPLATES_PATH} target="_blank" rel="noopener noreferrer" className={cn(LINK_BUTTON, "px-0")}>
+        <a href={emailTemplatesHref(firstTemplateKey(kind))} target="_blank" rel="noopener noreferrer" className={cn(LINK_BUTTON, "px-0")}>
           Edit templates
         </a>
       </div>
       {templates.status === "loading" && <p className="text-[15px] text-[#4a5260]">Loading email config…</p>}
-      {templates.status === "fallback" && <p className="text-[15px] text-[#4a5260]">Using default template (couldn't load email config)</p>}
+      {templatesReady && draftOptions.some((d) => d.key && templates.missing.includes(d.key)) && (
+        <p className="text-[15px] text-[#4a5260]">Using default template (couldn't load email config)</p>
+      )}
       <div className="mt-3 grid grid-cols-2 gap-3">
-        {(kind === "customer" ? CUSTOMER_DRAFTS : SUPPLIER_DRAFTS).map((d) => (
+        {draftOptions.map((d) => (
           <button
             key={d.value}
             type="button"
@@ -880,13 +992,14 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     </div>
   );
 
+  const usesParts = (kind === "supplier" && draftType !== null && draftType !== "custom") || (kind === "shop" && draftType === "approval");
   const partsNotes =
-    kind === "supplier" && draftType && draftType !== "custom" ? (
+    usesParts && draftType ? (
       <div className="mt-2 space-y-1 text-[15px] text-[#4a5260]">
-        <p>{supplierStatusHint(draftType as SupplierDraftType)}</p>
-        {supplierGenerated && supplierGenerated.excluded > 0 && (
+        <p>{kind === "supplier" ? supplierStatusHint(draftType as SupplierDraftType) : partsStatusHint(SHOP_APPROVAL_PART_STATUSES)}</p>
+        {groupGenerated && groupGenerated.excluded > 0 && (
           <p>
-            {supplierGenerated.excluded} other part{supplierGenerated.excluded === 1 ? "" : "s"} left out ({supplierGenerated.excludedStatuses.map(partsStatusWord).join(", ")}).
+            {groupGenerated.excluded} other part{groupGenerated.excluded === 1 ? "" : "s"} left out ({groupGenerated.excludedStatuses.map(partsStatusWord).join(", ")}).
           </p>
         )}
         {jobs.some((j) => parts[j.referenceId]?.status === "forbidden") && <p className="text-[#6b3d00]">You can't read parts requests, so fill the parts in by hand.</p>}
@@ -916,11 +1029,11 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
             </button>
           )}
         </div>
-        {draft.edited && !draft.sent && supplierGenerated && supplierGenerated.body !== draft.basis && (
+        {draft.edited && !draft.sent && groupGenerated && groupGenerated.body !== draft.basis && (
           <button
             type="button"
             className={cn(LINK_BUTTON, "px-0")}
-            onClick={() => updateDraft({ body: supplierGenerated.body, basis: supplierGenerated.body, subject: draft.subject, edited: false })}
+            onClick={() => updateDraft({ body: groupGenerated.body, basis: groupGenerated.body, subject: draft.subject, edited: false })}
           >
             Body was edited — reset to draft to apply
           </button>
@@ -957,24 +1070,31 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
         </div>
       );
     }
-    const s = d.supplierId != null ? contactById.get(d.supplierId) : null;
+    const s = d.contactId != null ? contactById.get(d.contactId) : null;
     return (
       <div>
         <p className="mb-1 text-[16px] font-semibold">To</p>
         <div className="flex flex-col gap-2">
-          {s && <ToChip label={s.name} sub={s.email} removeLabel="Remove supplier" onRemove={d.sent ? undefined : () => updateDraft({ supplierId: null })} />}
+          {s && (
+            <ToChip
+              label={s.name}
+              sub={s.email}
+              removeLabel={kind === "shop" ? "Remove shop contact" : "Remove supplier"}
+              onRemove={d.sent ? undefined : () => updateDraft({ contactId: null })}
+            />
+          )}
           {d.typedTo.map((email) => (
             <ToChip key={email} label={email} removeLabel={`Remove ${email}`} onRemove={d.sent ? undefined : () => updateDraft({ typedTo: d.typedTo.filter((e) => e !== email) })} />
           ))}
-          {!s && supplierContacts.length > 0 && !d.sent && (
+          {!s && kindContacts.length > 0 && !d.sent && (
             <select
-              aria-label="Supplier"
+              aria-label={kind === "shop" ? "Shop contact" : "Supplier"}
               className={INPUT_CLASS}
               value=""
-              onChange={(e) => e.target.value && updateDraft({ supplierId: Number(e.target.value) })}
+              onChange={(e) => e.target.value && updateDraft({ contactId: Number(e.target.value) })}
             >
-              <option value="">Pick a supplier…</option>
-              {supplierContacts.map((c) => (
+              <option value="">{kind === "shop" ? "Pick a shop contact…" : "Pick a supplier…"}</option>
+              {kindContacts.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} ({c.email})
                 </option>
@@ -1042,7 +1162,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
           ))}
         </div>
       )}
-      {kind === "supplier" && (!partsReady || !draft) ? (
+      {kind !== "customer" && (!partsReady || !draft) ? (
         <p role="status" className="text-[#4a5260]">
           Loading parts requests…
         </p>

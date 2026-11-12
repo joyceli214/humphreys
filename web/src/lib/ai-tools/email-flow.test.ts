@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { PartsPurchaseRequest, WorkOrderDetail } from "@/lib/api/generated/types";
 import { DEFAULT_EMAIL_TEMPLATES } from "@/lib/email-templates";
 import {
+  SHOP_APPROVAL_PART_STATUSES,
   SUPPLIER_PART_STATUSES,
+  applyShopSignature,
   buildCustomerDraft,
+  buildShopDraft,
   buildSupplierDraft,
+  shopApprovalCards,
+  shopUpdateCards,
+  type ShopJob,
   maskEmailHint,
   mergeSupplierParts,
   renderTemplateWithBlanks,
@@ -154,41 +160,136 @@ describe("buildSupplierDraft", () => {
     { referenceId: 23, customerName: "Test Customer A", parts: null }
   ];
   const signOff = "Thank you,\nHumphreys Electronics";
+  const inquiry = DEFAULT_EMAIL_TEMPLATES.supplier_parts_inquiry;
+  const followup = DEFAULT_EMAIL_TEMPLATES.supplier_order_followup;
 
-  it("builds bill-to, a merged plain-text table and blanks, without customer names", () => {
-    const out = buildSupplierDraft({ type: "parts_inquiry", supplierName: "Test Supplier", jobs, showNames: false, signOff });
-    expect(out.subject).toBe("Parts inquiry – jobs #21, #22, #23");
-    expect(out.body).toContain("Hello Test Supplier,");
-    expect(out.body).toContain("Could you send price and stock for these parts?");
-    expect(out.body).toContain("Bill to: Humphreys Electronics · Account {Account #}");
-    expect(out.body).toContain("Part | Qty | For job #");
-    expect(out.body).toContain("Drive belt | 3 | #21 ×2, #22 ×1");
-    expect(out.body).toContain("{Part for #23} | {Qty} | #23");
+  it("fills the supplier template: merged table at {{job_cards}}, account blank, no customer names", () => {
+    const out = buildSupplierDraft({ type: "parts_inquiry", template: inquiry, supplierName: "Test Supplier", jobs, showNames: false, signOff });
+    expect(out.subject).toBe("Parts inquiry – Jobs #21, #22, #23 (Acct {Account #})");
+    expect(out.body).toBe(
+      [
+        "Hi Test Supplier,",
+        "",
+        "Could you please confirm price and stock for these parts?",
+        "",
+        "Part | Qty | For job #",
+        "Drive belt | 3 | #21 ×2, #22 ×1",
+        "{Part for #23} | {Qty} | #23",
+        "",
+        "Please reply with price and lead time.",
+        "",
+        "Thanks,",
+        "Justin",
+        "Humphreys Electronics"
+      ].join("\n")
+    );
     expect(out.body).not.toContain("Test Customer");
-    expect(findBlanks(out.body).map((b) => b.token)).toEqual(["{Account #}", "{Part for #23}", "{Qty}"]);
+    expect(findBlanks(out.body).map((b) => b.token)).toEqual(["{Part for #23}", "{Qty}"]);
   });
 
   it("adds a Customer column only when names are shown", () => {
-    const out = buildSupplierDraft({ type: "order_followup", supplierName: "Test Supplier", jobs, showNames: true, signOff });
-    expect(out.body).toContain("Could you tell me the status of this order?");
+    const out = buildSupplierDraft({ type: "order_followup", template: followup, supplierName: "Test Supplier", jobs, showNames: true, signOff });
+    expect(out.body).toContain("Could you let us know where these parts are and when they will ship?");
     expect(out.body).toContain("Part | Qty | For job # | Customer");
     expect(out.body).toContain("Drive belt | 3 | #21 ×2, #22 ×1 | Test Customer A, Test Customer B");
   });
 
+  it("uses the saved template text (markdown escapes undone, unknown fields blank)", () => {
+    const template = { subject_template: "Order {{job\\_numbers}}", body_template: "Hello {{supplier\\_name}} \\*now\\*\n\n{{job\\_cards}}\n\nRe {{customer_name}}" };
+    const out = buildSupplierDraft({ type: "order_followup", template, supplierName: null, jobs: jobs.slice(0, 1), showNames: false, signOff });
+    expect(out.subject).toBe("Order #21");
+    expect(out.body).toBe("Hello team *now*\n\nPart | Qty | For job #\nDrive belt | 2 | #21\n\nRe {Customer name}");
+  });
+
   it("never contains preview example data", () => {
     for (const type of ["parts_inquiry", "order_followup", "custom"] as const) {
-      const out = buildSupplierDraft({ type, supplierName: null, jobs, showNames: false, signOff });
-      for (const bad of ["HE-2207", "555", "Justin"]) {
+      const out = buildSupplierDraft({ type, template: inquiry, supplierName: null, jobs, showNames: false, signOff });
+      for (const bad of ["HE-2207", "555", "example.test"]) {
         expect(out.body).not.toContain(bad);
         expect(out.subject).not.toContain(bad);
       }
     }
   });
 
-  it("uses a {Shop name} blank when the sign-off has no shop line", () => {
-    const out = buildSupplierDraft({ type: "parts_inquiry", supplierName: null, jobs, showNames: false, signOff: "Thanks" });
-    expect(out.body).toContain("Hello team,");
-    expect(out.body).toContain("Bill to: {Shop name} · Account {Account #}");
+  it("starts blank for Custom", () => {
+    const out = buildSupplierDraft({ type: "custom", template: null, supplierName: null, jobs, showNames: false, signOff: "Thanks" });
+    expect(out).toMatchObject({ subject: "{Subject}", body: "Hello team,\n\n{Your message}\n\nThanks" });
+  });
+});
+
+describe("Shop drafts", () => {
+  const shopJob = (referenceId: number, parts: PartsPurchaseRequest[] | null, status = "In Progress"): ShopJob => ({
+    referenceId,
+    customerName: `Customer ${referenceId}`,
+    equipment: `Item ${referenceId}`,
+    status,
+    parts
+  });
+  const priced = (id: number, name: string, qty: number, status: string, price: number) => ({ ...part(id, name, qty, status), total_price: price });
+  const approval = DEFAULT_EMAIL_TEMPLATES.shop_approval;
+  const update = DEFAULT_EMAIL_TEMPLATES.shop_update;
+  const signOff = "Thank you,\nHumphreys Electronics";
+
+  it("Ask for approval: stacked cards per part, cost only when the job has exactly one priced part", () => {
+    const jobs = [
+      shopJob(275, [priced(275, "Filter capacitor", 2, "waiting_approval", 197.1), priced(275, "Old fuse", 1, "arrived", 5)]),
+      shopJob(276, [priced(276, "Diode", 1, "draft", 3), priced(276, "Belt", 1, "waiting_approval", 9)]),
+      shopJob(277, [])
+    ];
+    const out = buildShopDraft({ type: "approval", template: approval, recipientName: "Dave", jobs, signOff });
+    expect(out.subject).toBe("Approval needed – Jobs #275, #276, #277");
+    expect(out.body).toBe(
+      [
+        "Hi Dave,",
+        "",
+        "Please approve the parts and work below.",
+        "",
+        "#275 · Item 275\nCustomer 275\nPart: Filter capacitor\nQty: 2\nCost: $197.10",
+        "",
+        "#276 · Item 276\nCustomer 276\nPart: Diode\nQty: 1\nCost: {Cost}",
+        "",
+        "#276 · Item 276\nCustomer 276\nPart: Belt\nQty: 1\nCost: {Cost}",
+        "",
+        "#277 · Item 277\nCustomer 277\nPart: {Part}\nQty: {Qty}\nCost: {Cost}",
+        "",
+        "Reply “yes” and we can order / start.",
+        "",
+        "Thanks,",
+        "Justin",
+        "Humphreys Electronics"
+      ].join("\n")
+    );
+    expect(out.excluded).toBe(1);
+    expect(out.excludedStatuses).toEqual(["arrived"]);
+    expect(SHOP_APPROVAL_PART_STATUSES).toEqual(["draft", "waiting_approval"]);
+  });
+
+  it("Ask for approval falls back to blanks when parts can't be read", () => {
+    const out = shopApprovalCards([shopJob(30, null)]);
+    expect(out.text).toBe("#30 · Item 30\nCustomer 30\nPart: {Part}\nQty: {Qty}\nCost: {Cost}");
+  });
+
+  it("Ask for an update: status and an {Update} blank per job; Dave signs unless To is Justin's", () => {
+    const jobs = [shopJob(275, null, "Waiting on parts"), shopJob(27501, null, "")];
+    const toTeam = buildShopDraft({ type: "update", template: update, recipientName: "Front Desk", jobs, signOff });
+    expect(toTeam.subject).toBe("Please update – Jobs #275, #27501");
+    expect(toTeam.body).toContain("#275 · Item 275\nCustomer 275\nStatus: Waiting on parts\nUpdate: {Update}\n\n#27501 · Item 27501\nCustomer 27501\nStatus: {Status}\nUpdate: {Update}");
+    expect(toTeam.body.endsWith("Thanks,\nJustin\nHumphreys Electronics")).toBe(true);
+    const toJustin = buildShopDraft({ type: "update", template: update, recipientName: "Justin Tech", jobs, signOff });
+    expect(toJustin.body.endsWith("Thanks,\nDave\nHumphreys Electronics")).toBe(true);
+    expect(shopUpdateCards([])).toContain("Update: {Update}");
+  });
+
+  it("signature swap touches only the default sign-off", () => {
+    expect(applyShopSignature("Hi\n\nThanks,\nDave\nHumphreys Electronics", "Dave")).toBe("Hi\n\nThanks,\nJustin\nHumphreys Electronics");
+    expect(applyShopSignature("Hi\n\nThanks,\nJustin\nHumphreys Electronics", "justin")).toBe("Hi\n\nThanks,\nDave\nHumphreys Electronics");
+    expect(applyShopSignature("Hi\n\nCheers,\nJustin", "Justin")).toBe("Hi\n\nCheers,\nJustin");
+    expect(applyShopSignature("Thanks,\nDave\nHumphreys Electronics\nP.S. call me", null)).toBe("Thanks,\nDave\nHumphreys Electronics\nP.S. call me");
+  });
+
+  it("Custom starts blank with the recipient name", () => {
+    const out = buildShopDraft({ type: "custom", template: null, recipientName: null, jobs: [], signOff });
+    expect(out).toMatchObject({ subject: "{Subject}", body: "Hi {Name},\n\n{Your message}\n\nThank you,\nHumphreys Electronics" });
   });
 });
 

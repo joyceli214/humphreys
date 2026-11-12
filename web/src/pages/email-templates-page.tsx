@@ -1,9 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { apiClient } from "@/lib/api/client";
 import type { EmailTemplate, EmailTemplateKey } from "@/lib/api/generated/types";
-import { DEFAULT_EMAIL_TEMPLATES, EMAIL_TEMPLATE_VARIABLES, type EmailTemplateVariable } from "@/lib/email-templates";
+import {
+  ALL_TEMPLATE_VARIABLES,
+  DEFAULT_EMAIL_TEMPLATES,
+  EDITOR_HINTS,
+  EMAIL_TEMPLATE_GROUPS,
+  JOB_CARDS_HINTS,
+  JOB_CARDS_NOTES,
+  TEMPLATE_VARIABLES_BY_KIND,
+  emailTemplateKind,
+  firstTemplateKey,
+  isEmailTemplateKey,
+  joinJobCards,
+  splitJobCards,
+  type EmailTemplateKind,
+  type EmailTemplateVariable
+} from "@/lib/email-templates";
 import { useAlerts } from "@/lib/alerts/alert-context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +49,7 @@ const emailVariableDirectiveDescriptor: DirectiveDescriptor = {
   testNode: (node) => node.type === "textDirective" && node.name === "woVar",
   Editor: ({ mdastNode }) => {
     const key = normalizeTemplateVariableKey(String(mdastNode.attributes?.key ?? ""));
-    const variable = EMAIL_TEMPLATE_VARIABLES.find((entry) => templateVariableKey(entry.token) === key);
+    const variable = ALL_TEMPLATE_VARIABLES.find((entry) => templateVariableKey(entry.token) === key);
     return (
       <span className="mx-0.5 inline-flex select-none items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800">
         {variable?.label ?? key}
@@ -61,19 +77,29 @@ const emailBodyEditorPlugins = [
 ];
 
 const emailBodyEditorContentClassName =
-  "min-h-[420px] px-3 py-2 text-sm leading-6 " +
+  "px-3 py-2 text-sm leading-6 " +
   "[&_p]:mb-2 [&_p:last-child]:mb-0 " +
   "[&_strong]:font-semibold [&_em]:italic [&_u]:underline " +
   "[&_a]:text-primary [&_a]:underline " +
   "[&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-6 [&_ol]:pl-6 " +
   "[&_li]:my-1";
 
+/** `?key=<template_key>` or `?kind=customer|supplier|shop` preselects a template. */
+export function initialTemplateKey(params: URLSearchParams): EmailTemplateKey {
+  const key = params.get("key");
+  if (isEmailTemplateKey(key)) return key;
+  const kind = params.get("kind");
+  if (EMAIL_TEMPLATE_GROUPS.some((g) => g.kind === kind)) return firstTemplateKey(kind as EmailTemplateKind);
+  return "job_started";
+}
+
 export default function EmailTemplatesPage() {
   const alerts = useAlerts();
   const { hasPermission, user } = useAuth();
   const canManage = hasPermission("work_orders:update");
+  const [searchParams] = useSearchParams();
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
-  const [selectedKey, setSelectedKey] = useState<EmailTemplateKey>("job_started");
+  const [selectedKey, setSelectedKey] = useState<EmailTemplateKey>(() => initialTemplateKey(searchParams));
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [testRecipient, setTestRecipient] = useState("");
@@ -119,6 +145,22 @@ export default function EmailTemplatesPage() {
     setSubject(selectedTemplate?.subject_template ?? fallback.subject_template);
     setBody(selectedTemplate?.body_template ?? fallback.body_template);
   }, [selectedKey, selectedTemplate]);
+
+  const selectedKind = emailTemplateKind(selectedTemplate ?? DEFAULT_EMAIL_TEMPLATES[selectedKey]);
+  const variables = TEMPLATE_VARIABLES_BY_KIND[selectedKind];
+  const hasJobCards = selectedKind !== "customer";
+
+  // Groups in the fixed order; only templates the API returned (so Save never hits an unknown key).
+  const groups = useMemo(
+    () =>
+      EMAIL_TEMPLATE_GROUPS.map((group) => ({
+        ...group,
+        items: templates
+          .filter((t) => emailTemplateKind(t) === group.kind)
+          .sort((a, b) => group.keys.indexOf(a.key) - group.keys.indexOf(b.key))
+      })).filter((group) => group.items.length > 0),
+    [templates]
+  );
 
   const dirty = selectedTemplate ? subject !== selectedTemplate.subject_template || body !== selectedTemplate.body_template : false;
 
@@ -197,8 +239,9 @@ export default function EmailTemplatesPage() {
   return (
     <section className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold">Email Templates</h1>
-        <p className="text-sm text-muted-foreground">Customize customer emails with work order fields.</p>
+        {/* The phone topbar already shows the title. */}
+        <h1 className="text-2xl font-semibold max-[500px]:hidden">Email Templates</h1>
+        <p className="text-sm text-muted-foreground">Customize Customer, Supplier, and Shop emails. Fields you insert fill in from the job.</p>
       </div>
 
       {loading && <p className="text-sm text-muted-foreground">Loading email templates...</p>}
@@ -206,38 +249,48 @@ export default function EmailTemplatesPage() {
       {!loading && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="rounded-lg border border-border bg-white p-3">
-            <p className="mb-2 text-sm font-medium text-muted-foreground">Templates</p>
-            <div className="space-y-1">
-              {templates.map((template) => (
-                <button
-                  key={template.key}
-                  type="button"
-                  onClick={() => setSelectedKey(template.key)}
-                  className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm ${
-                    selectedKey === template.key ? "bg-accent text-accent-foreground" : "hover:bg-muted"
-                  }`}
-                >
-                  <span className="truncate">{template.label}</span>
-                  {selectedKey === template.key && dirty && <Badge className="bg-amber-100 text-amber-800">Unsaved</Badge>}
-                </button>
+            <p id="email-templates-list-label" className="mb-2 text-sm font-medium text-muted-foreground">
+              Templates
+            </p>
+            <nav aria-labelledby="email-templates-list-label" className="space-y-3">
+              {groups.map((group) => (
+                <div key={group.kind} role="group" aria-label={group.label} className="space-y-1">
+                  <p aria-hidden className="px-3 pt-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {group.label}
+                  </p>
+                  {group.items.map((template) => (
+                    <button
+                      key={template.key}
+                      type="button"
+                      aria-current={selectedKey === template.key ? "true" : undefined}
+                      onClick={() => setSelectedKey(template.key)}
+                      className={`flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm ${
+                        selectedKey === template.key ? "bg-accent text-accent-foreground" : "hover:bg-muted"
+                      }`}
+                    >
+                      <span className="truncate">{template.label}</span>
+                      {selectedKey === template.key && dirty && <Badge className="bg-amber-100 text-amber-800">Unsaved</Badge>}
+                    </button>
+                  ))}
+                </div>
               ))}
-            </div>
+            </nav>
           </aside>
 
           <article className="rounded-lg border border-border bg-white p-4">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h2 className="font-semibold">{selectedTemplate?.label ?? DEFAULT_EMAIL_TEMPLATES[selectedKey].label}</h2>
-                <p className="text-sm text-muted-foreground">Type @ to search and insert work order fields.</p>
+                <p className="text-sm text-muted-foreground">{EDITOR_HINTS[selectedKind]}</p>
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2 max-[500px]:w-full">
                 <Button type="button" variant="outline" size="sm" onClick={() => setTestDialogOpen(true)} disabled={saving}>
                   Send Test Email
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={resetToDefault} disabled={saving}>
                   Reset Default
                 </Button>
-                <Button type="button" size="sm" onClick={() => void saveTemplate()} disabled={saving}>
+                <Button type="button" size="sm" className="max-[500px]:w-full" onClick={() => void saveTemplate()} disabled={saving}>
                   {saving ? "Saving..." : "Save"}
                 </Button>
               </div>
@@ -246,21 +299,22 @@ export default function EmailTemplatesPage() {
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-sm text-muted-foreground">Subject</label>
-                <TemplateFieldEditor
-                  value={subject}
-                  onChange={setSubject}
-                  variables={EMAIL_TEMPLATE_VARIABLES}
-                  singleLine
-                />
+                <TemplateFieldEditor value={subject} onChange={setSubject} variables={variables} singleLine />
               </div>
               <div>
                 <label className="mb-1 block text-sm text-muted-foreground">Message</label>
-                <MarkdownTemplateFieldEditor
-                  key={selectedKey}
-                  value={body}
-                  onChange={setBody}
-                  variables={EMAIL_TEMPLATE_VARIABLES}
-                />
+                {hasJobCards ? (
+                  <JobCardsBodyEditor
+                    key={selectedKey}
+                    templateKey={selectedKey}
+                    value={body}
+                    onChange={setBody}
+                    variables={variables}
+                  />
+                ) : (
+                  <MarkdownTemplateFieldEditor key={selectedKey} value={body} onChange={setBody} variables={variables} />
+                )}
+                {JOB_CARDS_NOTES[selectedKey] && <p className="mt-2 text-sm text-muted-foreground">{JOB_CARDS_NOTES[selectedKey]}</p>}
               </div>
             </div>
           </article>
@@ -306,6 +360,67 @@ export default function EmailTemplatesPage() {
   );
 }
 
+/**
+ * Supplier / Shop body: the words before and after a locked job-card slot are
+ * edited separately, so the slot can't be deleted or typed into. Saved as
+ * `before\n\n{{job_cards}}\n\nafter`.
+ */
+function JobCardsBodyEditor({
+  templateKey,
+  value,
+  onChange,
+  variables
+}: {
+  templateKey: EmailTemplateKey;
+  value: string;
+  onChange: (value: string) => void;
+  variables: EmailTemplateVariable[];
+}) {
+  const [parts, setParts] = useState(() => splitJobCards(value));
+  const emitted = useRef(joinJobCards(parts.before, parts.after));
+
+  // Load / Reset Default / Save replace the body from outside.
+  useEffect(() => {
+    if (value === emitted.current) return;
+    const next = splitJobCards(value);
+    emitted.current = joinJobCards(next.before, next.after);
+    setParts(next);
+  }, [value]);
+
+  const update = (patch: Partial<typeof parts>) => {
+    const next = { ...parts, ...patch };
+    setParts(next);
+    emitted.current = joinJobCards(next.before, next.after);
+    onChange(emitted.current);
+  };
+
+  return (
+    <div className="space-y-2">
+      <MarkdownTemplateFieldEditor
+        value={parts.before}
+        onChange={(before) => update({ before })}
+        variables={variables}
+        minHeightClassName="min-h-[140px]"
+      />
+      <div
+        role="note"
+        aria-label="Job cards slot"
+        contentEditable={false}
+        className="select-none rounded-md border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-3"
+      >
+        <p className="text-sm font-semibold text-slate-700">Job cards — added automatically from the jobs you pick</p>
+        {JOB_CARDS_HINTS[templateKey] && <p className="text-xs text-muted-foreground">{JOB_CARDS_HINTS[templateKey]}</p>}
+      </div>
+      <MarkdownTemplateFieldEditor
+        value={parts.after}
+        onChange={(after) => update({ after })}
+        variables={variables}
+        minHeightClassName="min-h-[140px]"
+      />
+    </div>
+  );
+}
+
 type TemplateFieldEditorProps = {
   value: string;
   onChange: (value: string) => void;
@@ -321,7 +436,17 @@ type TriggerState = {
   query: string;
 };
 
-function MarkdownTemplateFieldEditor({ value, onChange, variables }: { value: string; onChange: (value: string) => void; variables: EmailTemplateVariable[] }) {
+function MarkdownTemplateFieldEditor({
+  value,
+  onChange,
+  variables,
+  minHeightClassName = "min-h-[420px]"
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  variables: EmailTemplateVariable[];
+  minHeightClassName?: string;
+}) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<MDXEditorMethods | null>(null);
   const currentMarkdownRef = useRef(value);
@@ -420,7 +545,7 @@ function MarkdownTemplateFieldEditor({ value, onChange, variables }: { value: st
           markdown={editorMarkdown}
           onChange={handleChange}
           plugins={emailBodyEditorPlugins}
-          contentEditableClassName={emailBodyEditorContentClassName}
+          contentEditableClassName={`${minHeightClassName} ${emailBodyEditorContentClassName}`}
         />
       </div>
       {trigger && dropdownPosition && filteredVariables.length > 0 && (
@@ -616,7 +741,7 @@ function TemplateVariableDropdown({
 
 function renderTemplateEditorValue(editor: HTMLDivElement, value: string, variables: EmailTemplateVariable[]) {
   editor.replaceChildren();
-  const variableByKey = new Map(variables.map((variable) => [templateVariableKey(variable.token), variable]));
+  const variableByKey = new Map([...ALL_TEMPLATE_VARIABLES, ...variables].map((variable) => [templateVariableKey(variable.token), variable]));
   const pattern = /\{\{\s*([^{}]+?)\s*\}\}/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
@@ -741,7 +866,7 @@ function insertPlainText(text: string) {
 }
 
 function templateTokensToDirectives(markdown: string, variables: EmailTemplateVariable[]) {
-  const variableByKey = new Map(variables.map((variable) => [templateVariableKey(variable.token), variable]));
+  const variableByKey = new Map([...ALL_TEMPLATE_VARIABLES, ...variables].map((variable) => [templateVariableKey(variable.token), variable]));
   return markdown.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_match, rawKey: string) => {
     const key = normalizeTemplateVariableKey(rawKey);
     return templateVariableDirective(variableByKey.get(key) ?? { token: `{{${key}}}`, label: key });

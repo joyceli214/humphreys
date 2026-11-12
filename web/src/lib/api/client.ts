@@ -371,7 +371,8 @@ export class APIClient {
   sendWorkOrderCustomerEmail(
     referenceID: number,
     payload: {
-      template: EmailTemplateKey;
+      /** Server send path only knows the customer keys; supplier / shop sends use job_started. */
+      template: Extract<EmailTemplateKey, "job_started" | "job_completed">;
       to: string;
       subject: string;
       body: string;

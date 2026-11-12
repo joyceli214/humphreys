@@ -4,14 +4,19 @@
 
 import type { PartsPurchaseRequest, WorkOrderDetail } from "@/lib/api/generated/types";
 import type { EmailDraftType } from "@/lib/ai-tools/types";
-import { renderEmailTemplate, type EmailTemplate } from "@/lib/email-templates";
+import {
+  renderEmailTemplate,
+  type EmailTemplate,
+  type ShopEmailTemplateKey,
+  type SupplierEmailTemplateKey
+} from "@/lib/email-templates";
 import { workOrderTotals } from "@/lib/work-order-totals";
 
 /** Existing portal pages linked from Management (email config, common contacts). */
 export const EMAIL_TEMPLATES_PATH = "/email-templates";
 export const COMMON_CONTACTS_PATH = "/email-common-contacts";
 
-type TemplateText = Pick<EmailTemplate, "subject_template" | "body_template">;
+export type TemplateText = Pick<EmailTemplate, "subject_template" | "body_template">;
 export type CustomerTemplates = { job_started: TemplateText; job_completed: TemplateText };
 
 /** A picked job. `detail` is null while loading or when it could not be loaded. */
@@ -45,11 +50,30 @@ export const CUSTOMER_DRAFTS: Array<{ value: EmailDraftType; label: string; hint
 
 export type SupplierDraftType = "parts_inquiry" | "order_followup" | "custom";
 
+/** Labels are the fallback; the Draft step shows the Email Templates page label. */
 export const SUPPLIER_DRAFTS: Array<{ value: SupplierDraftType; label: string; hint: string }> = [
   { value: "parts_inquiry", label: "Parts inquiry", hint: "Price and stock for parts" },
   { value: "order_followup", label: "Order follow-up", hint: "Where is my order?" },
   { value: "custom", label: "Custom", hint: "Start blank" }
 ];
+
+export const SUPPLIER_TEMPLATE_KEYS: Record<Exclude<SupplierDraftType, "custom">, SupplierEmailTemplateKey> = {
+  parts_inquiry: "supplier_parts_inquiry",
+  order_followup: "supplier_order_followup"
+};
+
+export type ShopDraftType = "approval" | "update" | "custom";
+
+export const SHOP_DRAFTS: Array<{ value: ShopDraftType; label: string; hint: string }> = [
+  { value: "approval", label: "Ask for approval", hint: "Parts or work that need a yes." },
+  { value: "update", label: "Ask for an update", hint: "How are these jobs going?" },
+  { value: "custom", label: "Custom", hint: "Start blank" }
+];
+
+export const SHOP_TEMPLATE_KEYS: Record<Exclude<ShopDraftType, "custom">, ShopEmailTemplateKey> = {
+  approval: "shop_approval",
+  update: "shop_update"
+};
 
 type PartsStatus = PartsPurchaseRequest["status"];
 
@@ -82,7 +106,14 @@ export function partsStatusWord(status: string) {
 /** "Includes parts that are waiting for approval or approved." */
 export function supplierStatusHint(type: SupplierDraftType): string {
   if (type === "custom") return "";
-  return `Includes parts that are ${SUPPLIER_PART_STATUSES[type].map(partsStatusWord).join(" or ")}.`;
+  return partsStatusHint(SUPPLIER_PART_STATUSES[type]);
+}
+
+/** Ask for approval lists parts that still need a yes; not ordered / arrived / used / cancelled. */
+export const SHOP_APPROVAL_PART_STATUSES: PartsStatus[] = ["draft", "waiting_approval"];
+
+export function partsStatusHint(statuses: readonly string[]): string {
+  return `Includes parts that are ${statuses.map(partsStatusWord).join(" or ")}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -367,33 +398,173 @@ export function partsTableText(rows: SupplierPartRow[], showNames: boolean): str
   return [header, ...body].join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Supplier / Shop drafts from the Email Templates page
+// ---------------------------------------------------------------------------
+
+/** Values for Supplier / Shop template fields. `job_cards` is the expanded slot. */
+export type GroupTemplateValues = {
+  job_numbers: string;
+  recipient_name: string;
+  supplier_name: string;
+  /** No bill-to / account setting exists in the portal, so this is a blank. */
+  account_number: string;
+  job_cards: string;
+};
+
+/** Undo MDXEditor markdown escapes (e.g. `\_`, `\*`) in a saved template; keep the text plain. */
+function unescapeTemplate(text: string) {
+  return text.replace(/\r\n?/g, "\n").replace(/\\([\\`*_[\]()#+\-.!>])/g, "$1");
+}
+
+/** Renders `{{token}}`s; unknown fields (e.g. a per-job customer field) become a `{Label}` blank. */
+export function renderGroupTemplate(text: string, values: GroupTemplateValues): string {
+  return unescapeTemplate(text).replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_m, raw: string) => {
+    const key = raw.trim().replace(/\\/g, "");
+    if (Object.prototype.hasOwnProperty.call(values, key)) return values[key as keyof GroupTemplateValues];
+    return `{${blankLabel(key)}}`;
+  });
+}
+
+const groupJobNos = (jobs: Array<{ referenceId: number }>) => (jobs.length > 0 ? jobNos(jobs) : "{Job #}");
+
 /**
- * Supplier email. Customer names are left out unless showNames. There is no
- * bill-to / account setting in the portal, so the account number is always a
- * blank; the shop name comes from the live template sign-off.
+ * Supplier email from the supplier template. `{{job_cards}}` becomes the merged
+ * Part / Qty / For job # table; customer names are left out unless showNames.
  */
 export function buildSupplierDraft({
   type,
+  template,
   supplierName,
   jobs,
   showNames,
   signOff
 }: {
   type: SupplierDraftType;
+  template: TemplateText | null;
   supplierName: string | null;
   jobs: JobParts[];
   showNames: boolean;
   signOff: string;
 }): { subject: string; body: string; excluded: number; excludedStatuses: string[] } {
-  const greeting = `Hello ${supplierName?.trim() || "team"},`;
-  if (type === "custom") {
-    return { subject: "{Subject}", body: `${greeting}\n\n{Your message}\n\n${signOff}`, excluded: 0, excludedStatuses: [] };
+  const name = supplierName?.trim() || "team";
+  if (type === "custom" || !template) {
+    return { subject: "{Subject}", body: `Hello ${name},\n\n{Your message}\n\n${signOff}`, excluded: 0, excludedStatuses: [] };
   }
-  const label = type === "parts_inquiry" ? "Parts inquiry" : "Order follow-up";
-  const subject = jobs.length > 0 ? `${label} – jobs ${jobNos(jobs)}` : label;
-  const ask = type === "parts_inquiry" ? "Could you send price and stock for these parts?" : "Could you tell me the status of this order?";
-  const shop = shopNameFromSignOff(signOff) ?? "{Shop name}";
   const merged = mergeSupplierParts(jobs, SUPPLIER_PART_STATUSES[type]);
-  const body = [greeting, "", ask, "", `Bill to: ${shop} · Account {Account #}`, "", partsTableText(merged.rows, showNames), "", signOff].join("\n");
-  return { subject, body, excluded: merged.excluded, excludedStatuses: merged.excludedStatuses };
+  const values: GroupTemplateValues = {
+    job_numbers: groupJobNos(jobs),
+    recipient_name: name,
+    supplier_name: name,
+    account_number: "{Account #}",
+    job_cards: partsTableText(merged.rows, showNames)
+  };
+  return {
+    subject: renderGroupTemplate(template.subject_template, values),
+    body: renderGroupTemplate(template.body_template, values),
+    excluded: merged.excluded,
+    excludedStatuses: merged.excludedStatuses
+  };
+}
+
+/** A picked job for a Shop email; customer names are shown (internal email). */
+export type ShopJob = {
+  referenceId: number;
+  customerName: string;
+  equipment: string;
+  status: string;
+  /** null when parts could not be read (403 / error): cards fall back to blanks. */
+  parts: PartsPurchaseRequest[] | null;
+};
+
+function shopCardHead(job: ShopJob) {
+  return [`#${job.referenceId} · ${job.equipment.trim() || `{Item for #${job.referenceId}}`}`, job.customerName.trim() || "{Customer}"];
+}
+
+/**
+ * Ask for approval: one card per part waiting for a yes (draft / waiting for
+ * approval). Cost is the part's price only when the job has exactly one such
+ * part and it has a price; otherwise a {Cost} blank. No parts → one card of blanks.
+ */
+export function shopApprovalCards(jobs: ShopJob[]): { text: string; excluded: number; excludedStatuses: string[] } {
+  let excluded = 0;
+  const excludedStatuses = new Set<string>();
+  const cards: string[] = [];
+  for (const job of jobs) {
+    const included = (job.parts ?? []).filter((p) => {
+      if (SHOP_APPROVAL_PART_STATUSES.includes(p.status)) return true;
+      excluded++;
+      excludedStatuses.add(p.status);
+      return false;
+    });
+    if (included.length === 0) {
+      cards.push([...shopCardHead(job), "Part: {Part}", "Qty: {Qty}", "Cost: {Cost}"].join("\n"));
+      continue;
+    }
+    for (const p of included) {
+      const price = included.length === 1 && Number.isFinite(p.total_price) && p.total_price > 0 ? money(p.total_price) : "{Cost}";
+      const partName = p.item_name.trim().replace(/\s+/g, " ") || "{Part}";
+      cards.push([...shopCardHead(job), `Part: ${partName}`, `Qty: ${p.quantity > 0 ? p.quantity : "{Qty}"}`, `Cost: ${price}`].join("\n"));
+    }
+  }
+  if (cards.length === 0) cards.push("{Jobs and parts}");
+  const statusOrder = Object.keys(STATUS_WORDS);
+  return {
+    text: cards.join("\n\n"),
+    excluded,
+    excludedStatuses: [...excludedStatuses].sort((a, b) => statusOrder.indexOf(a) - statusOrder.indexOf(b))
+  };
+}
+
+/** Ask for an update: one card per job with its status and an {Update} blank. */
+export function shopUpdateCards(jobs: ShopJob[]): string {
+  if (jobs.length === 0) return ["{Job #} · {Item}", "Status: {Status}", "Update: {Update}"].join("\n");
+  return jobs
+    .map((job) => [...shopCardHead(job), `Status: ${job.status.trim() || "{Status}"}`, "Update: {Update}"].join("\n"))
+    .join("\n\n");
+}
+
+const DEFAULT_SIGN_OFF = /(^|\n)(Thanks,\n)(Justin|Dave)(\nHumphreys Electronics)(?=\s*$)/;
+
+/**
+ * Who signs a Shop email: if To is Justin, Dave signs; otherwise Justin. Only
+ * swaps the name line of the default sign-off ("Thanks,\nJustin|Dave\nHumphreys
+ * Electronics"); a customised sign-off is left alone.
+ */
+export function applyShopSignature(body: string, toName: string | null | undefined): string {
+  const signer = /^\s*justin\b/i.test(toName ?? "") ? "Dave" : "Justin";
+  return body.replace(DEFAULT_SIGN_OFF, (_m, lead: string, thanks: string, _name: string, shop: string) => `${lead}${thanks}${signer}${shop}`);
+}
+
+export function buildShopDraft({
+  type,
+  template,
+  recipientName,
+  jobs,
+  signOff
+}: {
+  type: ShopDraftType;
+  template: TemplateText | null;
+  recipientName: string | null;
+  jobs: ShopJob[];
+  signOff: string;
+}): { subject: string; body: string; excluded: number; excludedStatuses: string[] } {
+  const name = recipientName?.trim() || "{Name}";
+  if (type === "custom" || !template) {
+    return { subject: "{Subject}", body: `Hi ${name},\n\n{Your message}\n\n${signOff}`, excluded: 0, excludedStatuses: [] };
+  }
+  const approval = type === "approval" ? shopApprovalCards(jobs) : null;
+  const values: GroupTemplateValues = {
+    job_numbers: groupJobNos(jobs),
+    recipient_name: name,
+    supplier_name: name,
+    account_number: "{Account #}",
+    job_cards: approval ? approval.text : shopUpdateCards(jobs)
+  };
+  return {
+    subject: renderGroupTemplate(template.subject_template, values),
+    body: applyShopSignature(renderGroupTemplate(template.body_template, values), recipientName),
+    excluded: approval?.excluded ?? 0,
+    excludedStatuses: approval?.excludedStatuses ?? []
+  };
 }

@@ -59,7 +59,7 @@ func (h *Handler) Update(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	if errors.Is(err, ErrSubjectRequired) || errors.Is(err, ErrBodyRequired) {
+	if errors.Is(err, ErrSubjectRequired) || errors.Is(err, ErrBodyRequired) || errors.Is(err, ErrJobCardsSlot) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -158,4 +158,10 @@ var testTemplateValues = map[string]string{
 	"total_payable":        "$150.15",
 	"payment_method_names": "Visa",
 	"worker_names":         "Technician",
+	// Supplier / Shop templates (migration 044).
+	"job_numbers":    "#1001, #1002",
+	"recipient_name": "Test Recipient",
+	"supplier_name":  "Test Supplier",
+	"account_number": "TEST-0001",
+	"job_cards":      "Job #1001 · Sample item\nPart: Sample part\nQty: 1\n\nJob #1002 · Sample item\nPart: Sample part\nQty: 2",
 }

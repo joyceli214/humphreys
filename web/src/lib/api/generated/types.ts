@@ -33,10 +33,20 @@ export interface AuthResponse {
   user: User;
 }
 
-export type EmailTemplateKey = "job_started" | "job_completed";
+export type EmailTemplateKey =
+  | "job_started"
+  | "job_completed"
+  | "supplier_parts_inquiry"
+  | "supplier_order_followup"
+  | "shop_approval"
+  | "shop_update";
+
+export type EmailTemplateKind = "customer" | "supplier" | "shop";
 
 export interface EmailTemplate {
   key: EmailTemplateKey;
+  /** Missing only from an API that predates migration 044 (treat as customer). */
+  kind?: EmailTemplateKind;
   label: string;
   subject_template: string;
   body_template: string;
