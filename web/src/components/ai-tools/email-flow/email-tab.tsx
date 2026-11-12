@@ -28,7 +28,8 @@ import {
   type JobParts,
   type ShopDraftType,
   type SupplierDraftType,
-  type TemplateText
+  type TemplateText,
+  joinRecipientNames
 } from "@/lib/ai-tools/email-flow";
 import { countBlanks, sendButtonState } from "@/lib/ai-tools/email-blanks";
 import { buildMailto, draftClipboardText, mailtoNavigator } from "@/lib/mailto";
@@ -105,13 +106,15 @@ type Draft = {
   body: string;
   /** Body as last generated; differs from body once the user edits it. */
   basis: string;
+  /** Subject as last generated; a subject the user changed is not regenerated. */
+  subjectBasis: string;
   edited: boolean;
   recipients: RecipientSelection;
   hasCustomerEmail: boolean;
   customerHint: string;
   customerEmail: string;
-  /** Supplier / Shop To: picked common contact + typed addresses (work_orders:update only). */
-  contactId: number | null;
+  /** Supplier / Shop To: picked common contacts in pick order + typed addresses (work_orders:update only). */
+  contactIds: number[];
   typedTo: string[];
   photoIds: string[];
   sent: boolean;
@@ -482,9 +485,14 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     return null;
   };
 
-  // Supplier / Shop body follows parts, names and the current To (signature) until edited.
-  const writeContactId = drafts.length > 0 ? drafts[0].contactId : toContactId;
-  const writeContactName = writeContactId != null ? contactById.get(writeContactId)?.name ?? null : null;
+  // Supplier / Shop body + subject follow parts, names and the current To (greeting, signature) until edited.
+  const writeContactIds = drafts.length > 0 ? drafts[0].contactIds : toContactId != null ? [toContactId] : [];
+  const writeContactNameKey = writeContactIds
+    .map((id) => contactById.get(id)?.name?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n");
+  // Names in pick order; keyed by a string so the memo below only reruns when they change.
+  const writeContactNames = useMemo(() => (writeContactNameKey ? writeContactNameKey.split("\n") : []), [writeContactNameKey]);
   const groupGenerated = useMemo(() => {
     if (kind === "customer" || !draftType) return null;
     const key = templateKeyFor(draftType);
@@ -495,18 +503,18 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
     };
     if (kind === "supplier") {
       const jobParts: JobParts[] = jobs.map((j) => ({ referenceId: j.referenceId, customerName: j.customerName, parts: partsOf(j.referenceId) }));
-      return buildSupplierDraft({ type: draftType as SupplierDraftType, template, supplierName: writeContactName, jobs: jobParts, showNames, signOff });
+      return buildSupplierDraft({ type: draftType as SupplierDraftType, template, supplierName: writeContactNames, jobs: jobParts, showNames, signOff });
     }
     return buildShopDraft({
       type: draftType as ShopDraftType,
       template,
-      recipientName: writeContactName,
+      recipientName: writeContactNames,
       jobs: jobs.map((j) => ({ referenceId: j.referenceId, customerName: j.customerName, equipment: j.equipment, status: j.status, parts: partsOf(j.referenceId) })),
       signOff
     });
     // templateKeyFor only reads kind.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, draftType, jobs, parts, writeContactName, showNames, signOff, templates.value]);
+  }, [kind, draftType, jobs, parts, writeContactNames, showNames, signOff, templates.value]);
 
   const buildCustomerDrafts = (type: EmailDraftType): Draft[] => {
     const sets = split
@@ -523,12 +531,13 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
         subject: built.subject,
         body: built.body,
         basis: built.body,
+        subjectBasis: built.subject,
         edited: false,
         recipients: split ? { ...EMPTY_RECIPIENTS } : { ...EMPTY_RECIPIENTS, toCustomer, contactIds },
         hasCustomerEmail: hint !== "",
         customerHint: hint,
         customerEmail: hint ? email : "",
-        contactId: null,
+        contactIds: [],
         typedTo: [],
         photoIds: [],
         sent: false,
@@ -561,12 +570,13 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
             subject: groupGenerated.subject,
             body: groupGenerated.body,
             basis: groupGenerated.body,
+            subjectBasis: groupGenerated.subject,
             edited: false,
             recipients: { ...EMPTY_RECIPIENTS, toCustomer: false },
             hasCustomerEmail: false,
             customerHint: "",
             customerEmail: "",
-            contactId: toContactId,
+            contactIds: toContactId != null ? [toContactId] : [],
             typedTo: [],
             photoIds: [],
             sent: false,
@@ -575,8 +585,11 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
         ];
       }
       const d = list[0];
-      if (d.edited || d.sent || d.basis === groupGenerated.body) return list;
-      return [{ ...d, body: groupGenerated.body, basis: groupGenerated.body }];
+      if (d.edited || d.sent || d.body !== d.basis) return list;
+      if (d.basis === groupGenerated.body && d.subjectBasis === groupGenerated.subject) return list;
+      // Subject follows too (e.g. a new To name), unless the user changed it.
+      const subject = d.subject === d.subjectBasis ? groupGenerated.subject : d.subject;
+      return [{ ...d, body: groupGenerated.body, basis: groupGenerated.body, subject, subjectBasis: groupGenerated.subject }];
     });
   }, [kind, groupGenerated, partsReady, templatesReady, jobs, toContact?.name, toContactId]);
 
@@ -586,8 +599,11 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
   // --- recipients / send ---
   const toLabels = (d: Draft): { to: string[]; cc: string[] } => {
     if (kind !== "customer") {
-      const s = d.contactId != null ? contactById.get(d.contactId) : null;
-      return { to: [...(s ? [contactLabel(s)] : []), ...d.typedTo], cc: [] };
+      const picked = d.contactIds.flatMap((id) => {
+        const c = contactById.get(id);
+        return c ? [contactLabel(c)] : [];
+      });
+      return { to: [...picked, ...d.typedTo], cc: [] };
     }
     const named = d.hasCustomerEmail ? `${d.title} <${d.customerHint}>` : "";
     return recipientLabels(d.recipients, d.hasCustomerEmail, named, contacts.contacts);
@@ -626,7 +642,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
           template: "job_started",
           ...base,
           to_customer: false,
-          ...(draft.contactId != null ? { to_contact_ids: [draft.contactId] } : {}),
+          ...(draft.contactIds.length > 0 ? { to_contact_ids: draft.contactIds } : {}),
           ...(draft.typedTo.length > 0 ? { to_emails: draft.typedTo } : {})
         });
       }
@@ -645,8 +661,11 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
 
   const mailtoTo = (d: Draft) => {
     if (kind !== "customer") {
-      const s = d.contactId != null ? contactById.get(d.contactId) : null;
-      return [...(s ? [s.email] : []), ...d.typedTo].join(",");
+      const picked = d.contactIds.flatMap((id) => {
+        const c = contactById.get(id);
+        return c ? [c.email] : [];
+      });
+      return [...picked, ...d.typedTo].join(",");
     }
     const list: string[] = [];
     if (d.recipients.toCustomer && d.customerEmail) list.push(d.customerEmail);
@@ -677,7 +696,7 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
   // Render pieces
 
   const summary = (() => {
-    const toLabel = toContact?.name ?? (kind === "shop" ? "No one yet" : "No supplier yet");
+    const toLabel = joinRecipientNames(writeContactNames) ?? (kind === "shop" ? "No one yet" : "No supplier yet");
     let label: string;
     if (kind !== "customer") label = `${toLabel} · ${jobs.length} job${jobs.length === 1 ? "" : "s"}`;
     else if (split) label = `${jobs.length} jobs · ${groups.length} customers`;
@@ -1070,31 +1089,54 @@ export function EmailTab({ target }: { target: EmailDraftTarget | null }) {
         </div>
       );
     }
-    const s = d.contactId != null ? contactById.get(d.contactId) : null;
+    const picked = d.contactIds.flatMap((id) => {
+      const c = contactById.get(id);
+      return c ? [c] : [];
+    });
+    // Already-picked contacts are left out; the list stays until everyone is picked or To is full.
+    const remaining = kindContacts.filter((c) => !d.contactIds.includes(c.id));
+    const toCount = picked.length + d.typedTo.length;
+    const toFull = toCount >= contacts.maxTo;
+    const pickContact = (id: number) => {
+      if (d.contactIds.includes(id) || toFull) return;
+      updateDraft({ contactIds: [...d.contactIds, id] });
+    };
     return (
       <div>
         <p className="mb-1 text-[16px] font-semibold">To</p>
         <div className="flex flex-col gap-2">
-          {s && (
+          {picked.map((c) => (
             <ToChip
-              label={s.name}
-              sub={s.email}
-              removeLabel={kind === "shop" ? "Remove shop contact" : "Remove supplier"}
-              onRemove={d.sent ? undefined : () => updateDraft({ contactId: null })}
+              key={c.id}
+              label={c.name}
+              sub={c.email}
+              removeLabel={`Remove ${kind === "shop" ? "shop contact" : "supplier"} ${c.name}`}
+              onRemove={d.sent ? undefined : () => updateDraft({ contactIds: d.contactIds.filter((id) => id !== c.id) })}
             />
-          )}
+          ))}
           {d.typedTo.map((email) => (
             <ToChip key={email} label={email} removeLabel={`Remove ${email}`} onRemove={d.sent ? undefined : () => updateDraft({ typedTo: d.typedTo.filter((e) => e !== email) })} />
           ))}
-          {!s && kindContacts.length > 0 && !d.sent && (
+          {remaining.length > 0 && !d.sent && (
             <select
               aria-label={kind === "shop" ? "Shop contact" : "Supplier"}
               className={INPUT_CLASS}
               value=""
-              onChange={(e) => e.target.value && updateDraft({ contactId: Number(e.target.value) })}
+              disabled={toFull || sending}
+              onChange={(e) => e.target.value && pickContact(Number(e.target.value))}
             >
-              <option value="">{kind === "shop" ? "Pick a shop contact…" : "Pick a supplier…"}</option>
-              {kindContacts.map((c) => (
+              <option value="">
+                {toFull
+                  ? `To is full (max ${contacts.maxTo})`
+                  : picked.length > 0
+                    ? kind === "shop"
+                      ? "Add another shop contact…"
+                      : "Add another supplier…"
+                    : kind === "shop"
+                      ? "Pick a shop contact…"
+                      : "Pick a supplier…"}
+              </option>
+              {remaining.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} ({c.email})
                 </option>

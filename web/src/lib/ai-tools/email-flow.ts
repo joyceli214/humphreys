@@ -442,12 +442,13 @@ export function buildSupplierDraft({
 }: {
   type: SupplierDraftType;
   template: TemplateText | null;
-  supplierName: string | null;
+  /** One name or the To contact names (joined "A, B" for the greeting). */
+  supplierName: string | readonly string[] | null;
   jobs: JobParts[];
   showNames: boolean;
   signOff: string;
 }): { subject: string; body: string; excluded: number; excludedStatuses: string[] } {
-  const name = supplierName?.trim() || "team";
+  const name = joinRecipientNames(supplierName) || "team";
   if (type === "custom" || !template) {
     return { subject: "{Subject}", body: `Hello ${name},\n\n{Your message}\n\n${signOff}`, excluded: 0, excludedStatuses: [] };
   }
@@ -526,13 +527,26 @@ export function shopUpdateCards(jobs: ShopJob[]): string {
 
 const DEFAULT_SIGN_OFF = /(^|\n)(Thanks,\n)(Justin|Dave)(\nHumphreys Electronics)(?=\s*$)/;
 
+/** Names of the To contacts, from one name or a list; blanks dropped. */
+function recipientNameList(names: string | readonly string[] | null | undefined): string[] {
+  const list = typeof names === "string" ? [names] : names ?? [];
+  return list.map((n) => n.trim()).filter(Boolean);
+}
+
+/** Display name for several To contacts: "Dave, Justin" in pick order; null when none. */
+export function joinRecipientNames(names: string | readonly string[] | null | undefined): string | null {
+  const list = recipientNameList(names);
+  return list.length > 0 ? list.join(", ") : null;
+}
+
 /**
- * Who signs a Shop email: if To is Justin, Dave signs; otherwise Justin. Only
- * swaps the name line of the default sign-off ("Thanks,\nJustin|Dave\nHumphreys
- * Electronics"); a customised sign-off is left alone.
+ * Who signs a Shop email: if any To is Justin, Dave signs; otherwise Justin.
+ * Takes one name or the list of To names (each tested on its own, never the
+ * joined string). Only swaps the name line of the default sign-off
+ * ("Thanks,\nJustin|Dave\nHumphreys Electronics"); a customised sign-off is left alone.
  */
-export function applyShopSignature(body: string, toName: string | null | undefined): string {
-  const signer = /^\s*justin\b/i.test(toName ?? "") ? "Dave" : "Justin";
+export function applyShopSignature(body: string, toNames: string | readonly string[] | null | undefined): string {
+  const signer = recipientNameList(toNames).some((n) => /^\s*justin\b/i.test(n)) ? "Dave" : "Justin";
   return body.replace(DEFAULT_SIGN_OFF, (_m, lead: string, thanks: string, _name: string, shop: string) => `${lead}${thanks}${signer}${shop}`);
 }
 
@@ -545,11 +559,12 @@ export function buildShopDraft({
 }: {
   type: ShopDraftType;
   template: TemplateText | null;
-  recipientName: string | null;
+  /** One name or the To contact names: joined "A, B" for the greeting; each checked for the signer. */
+  recipientName: string | readonly string[] | null;
   jobs: ShopJob[];
   signOff: string;
 }): { subject: string; body: string; excluded: number; excludedStatuses: string[] } {
-  const name = recipientName?.trim() || "{Name}";
+  const name = joinRecipientNames(recipientName) || "{Name}";
   if (type === "custom" || !template) {
     return { subject: "{Subject}", body: `Hi ${name},\n\n{Your message}\n\n${signOff}`, excluded: 0, excludedStatuses: [] };
   }

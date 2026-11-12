@@ -42,6 +42,7 @@ vi.mock("@/lib/api/client", () => ({
 
 import { EmailTab } from "@/components/ai-tools/email-flow/email-tab";
 import { DEFAULT_EMAIL_TEMPLATES } from "@/lib/email-templates";
+import { mailtoNavigator } from "@/lib/mailto";
 
 type Cust = { id: number; first: string; last: string; email: string | null };
 const CUST_A: Cust = { id: 1, first: "Testa", last: "Alpha", email: "testa@customer.test" };
@@ -476,7 +477,7 @@ describe("EmailTab — shop", () => {
     expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("Please update – Jobs #21, #22");
     expect(screen.getByRole("button", { name: "Fill 2 blanks" })).toBeDisabled();
     // Changing To in Write re-signs the untouched draft.
-    fireEvent.click(screen.getByRole("button", { name: "Remove shop contact" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove shop contact Justin Tech" }));
     fireEvent.change(screen.getByLabelText("Shop contact"), { target: { value: "92" } });
     await waitFor(() => expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value.endsWith("Thanks,\nJustin\nHumphreys Electronics")).toBe(true));
   });
@@ -530,5 +531,166 @@ describe("Who search stays open (§12.4)", () => {
     expect(await screen.findByRole("option", { name: /Test Supplier .*Added$/ })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: "Remove supplier" }));
     expect(await screen.findByRole("option", { name: /Test Supplier parts@supplier\.test$/ })).not.toHaveAttribute("aria-disabled");
+  });
+});
+
+describe("Write To: pick several contacts from the list (Supplier / Shop)", () => {
+  const SUPPLIER_B = { id: 95, name: "Second Supplier", email: "b@supplier.test", role: "supplier", is_pinned: false };
+  const SUPPLIER_C = { id: 96, name: "Third Supplier", email: "c@supplier.test", role: "supplier", is_pinned: false };
+  beforeEach(() => {
+    listEmailPickerContacts.mockResolvedValue({ items: [SUPPLIER, SUPPLIER_B, SUPPLIER_C, HELPER, BOSS, JUSTIN, OTHER], max_to: 10, max_cc: 10 });
+  });
+
+  const optionNames = (select: HTMLElement) => within(select).getAllByRole("option").map((o) => o.textContent);
+  const message = () => (screen.getByLabelText("Message") as HTMLTextAreaElement).value;
+  const subject = () => (screen.getByLabelText("Subject") as HTMLInputElement).value;
+
+  it("Supplier: pick two from the list, the list stays, picked ones are not offered, remove makes it pickable again; send + mailto go to all", async () => {
+    const open = vi.spyOn(mailtoNavigator, "open").mockImplementation(() => undefined);
+    renderTab();
+    fireEvent.click(screen.getByRole("radio", { name: "Supplier" }));
+    await pickJobs(21);
+    fireEvent.click(next());
+    fireEvent.click(await screen.findByRole("button", { name: /Parts inquiry/ }));
+    await screen.findByLabelText("Message");
+
+    const select = () => screen.getByLabelText("Supplier");
+    // Kind filter: suppliers only.
+    expect(optionNames(select())).toEqual([
+      "Pick a supplier…",
+      "Test Supplier (parts@supplier.test)",
+      "Second Supplier (b@supplier.test)",
+      "Third Supplier (c@supplier.test)"
+    ]);
+    fireEvent.change(select(), { target: { value: "90" } });
+    expect(await screen.findByRole("button", { name: "Remove supplier Test Supplier" })).toBeInTheDocument();
+    // Still there after one pick, without the picked one.
+    expect(optionNames(select())).toEqual(["Add another supplier…", "Second Supplier (b@supplier.test)", "Third Supplier (c@supplier.test)"]);
+    fireEvent.change(select(), { target: { value: "95" } });
+    expect(await screen.findByRole("button", { name: "Remove supplier Second Supplier" })).toBeInTheDocument();
+    expect(screen.getByText("parts@supplier.test")).toBeInTheDocument();
+    expect(screen.getByText("b@supplier.test")).toBeInTheDocument();
+    expect(optionNames(select())).toEqual(["Add another supplier…", "Third Supplier (c@supplier.test)"]);
+    await waitFor(() => expect(message().startsWith("Hi Test Supplier, Second Supplier,")).toBe(true));
+
+    // Remove one: pickable again; add it back.
+    fireEvent.click(screen.getByRole("button", { name: "Remove supplier Second Supplier" }));
+    expect(optionNames(select())).toContain("Second Supplier (b@supplier.test)");
+    await waitFor(() => expect(message().startsWith("Hi Test Supplier,")).toBe(true));
+    fireEvent.change(select(), { target: { value: "95" } });
+    await screen.findByRole("button", { name: "Remove supplier Second Supplier" });
+
+    // Typed Add works alongside picked contacts.
+    fireEvent.change(screen.getByLabelText("Add email address"), { target: { value: "typed@supplier.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByRole("button", { name: "Remove typed@supplier.test" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open in email app" }));
+    expect(open).toHaveBeenCalledTimes(1);
+    const href = decodeURIComponent(String(open.mock.calls[0][0]));
+    expect(href.startsWith("mailto:parts@supplier.test,b@supplier.test,typed@supplier.test?")).toBe(true);
+    open.mockRestore();
+
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: subject().replace("{Account #}", "A-1") } });
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: message().replace(/\{[^{}]+\}/g, "1") } });
+    fireEvent.click(screen.getByRole("button", { name: "Send email" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(confirm).toHaveTextContent("Test Supplier <parts@supplier.test>, Second Supplier <b@supplier.test>, typed@supplier.test");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendWorkOrderCustomerEmail).toHaveBeenCalledTimes(1));
+    expect(sendWorkOrderCustomerEmail.mock.calls[0][1]).toMatchObject({ to_customer: false, to_contact_ids: [90, 95], to_emails: ["typed@supplier.test"] });
+  });
+
+  it("Supplier: the list is disabled once To is full", async () => {
+    listEmailPickerContacts.mockResolvedValue({ items: [SUPPLIER, SUPPLIER_B, SUPPLIER_C], max_to: 2, max_cc: 10 });
+    renderTab();
+    fireEvent.click(screen.getByRole("radio", { name: "Supplier" }));
+    await pickJobs(21);
+    fireEvent.click(next());
+    fireEvent.click(await screen.findByRole("button", { name: /Parts inquiry/ }));
+    await screen.findByLabelText("Message");
+    fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "90" } });
+    fireEvent.change(await screen.findByLabelText("Supplier"), { target: { value: "95" } });
+    await screen.findByRole("button", { name: "Remove supplier Second Supplier" });
+    expect(screen.getByLabelText("Supplier")).toBeDisabled();
+    expect(optionNames(screen.getByLabelText("Supplier"))[0]).toBe("To is full (max 2)");
+  });
+
+  it("Shop: a contact picked on Who shows on Write and another can be picked from the list; Dave signs when Justin is among To", async () => {
+    listEmailTemplates.mockResolvedValue({
+      items: Object.values(DEFAULT_EMAIL_TEMPLATES).map((t) =>
+        t.key === "shop_update" ? { ...t, subject_template: "Update for {{recipient_name}} – Jobs {{job_numbers}}", updated_at: "" } : { ...t, updated_at: "" }
+      )
+    });
+    renderTab();
+    fireEvent.click(screen.getByRole("radio", { name: "Shop" }));
+    await pick("boss", /Boss Person/);
+    await pickJobs(21);
+    fireEvent.click(next());
+    fireEvent.click(await screen.findByRole("button", { name: /Ask for an update/ }));
+    await screen.findByLabelText("Message");
+
+    // Who's pick is a chip on Write, and the list is still offered (boss / staff only, minus the picked one).
+    expect(screen.getByRole("button", { name: "Remove shop contact Boss Person" })).toBeInTheDocument();
+    const select = () => screen.getByLabelText("Shop contact");
+    expect(optionNames(select())).toEqual(["Add another shop contact…", "Front Desk (desk@shop.test)", "Justin Tech (tech@shop.test)"]);
+    await waitFor(() => expect(message().endsWith("Thanks,\nJustin\nHumphreys Electronics")).toBe(true));
+    expect(subject()).toBe("Update for Boss Person – Jobs #21");
+
+    fireEvent.change(select(), { target: { value: "93" } });
+    expect(await screen.findByRole("button", { name: "Remove shop contact Justin Tech" })).toBeInTheDocument();
+    expect(screen.getByText("tech@shop.test")).toBeInTheDocument();
+    expect(optionNames(select())).toEqual(["Add another shop contact…", "Front Desk (desk@shop.test)"]);
+    // Greeting + subject list both; Justin is among To, so Dave signs.
+    await waitFor(() => expect(message().startsWith("Hi Boss Person, Justin Tech,")).toBe(true));
+    expect(message().endsWith("Thanks,\nDave\nHumphreys Electronics")).toBe(true);
+    expect(subject()).toBe("Update for Boss Person, Justin Tech – Jobs #21");
+
+    // Remove Justin: pickable again, Justin signs again.
+    fireEvent.click(screen.getByRole("button", { name: "Remove shop contact Justin Tech" }));
+    expect(optionNames(select())).toContain("Justin Tech (tech@shop.test)");
+    await waitFor(() => expect(message().endsWith("Thanks,\nJustin\nHumphreys Electronics")).toBe(true));
+    expect(subject()).toBe("Update for Boss Person – Jobs #21");
+    fireEvent.change(select(), { target: { value: "93" } });
+    await waitFor(() => expect(message().endsWith("Thanks,\nDave\nHumphreys Electronics")).toBe(true));
+
+    // Once the body is edited, To changes leave body and subject alone.
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: message().replace("{Update}", "Any news?") } });
+    const editedBody = message();
+    const editedSubject = subject();
+    fireEvent.change(select(), { target: { value: "91" } });
+    await screen.findByRole("button", { name: "Remove shop contact Front Desk" });
+    expect(message()).toBe(editedBody);
+    expect(subject()).toBe(editedSubject);
+
+    fireEvent.change(screen.getByLabelText("Add email address"), { target: { value: "typed@shop.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Send email" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(confirm).toHaveTextContent(
+      "Boss Person <boss@shop.test>, Justin Tech <tech@shop.test>, Front Desk <desk@shop.test>, typed@shop.test"
+    );
+    fireEvent.click(within(confirm).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(sendWorkOrderCustomerEmail).toHaveBeenCalledTimes(1));
+    expect(sendWorkOrderCustomerEmail.mock.calls[0][1]).toMatchObject({ to_contact_ids: [92, 93, 91], to_emails: ["typed@shop.test"] });
+  });
+
+  it("Shop: a user-edited subject is not regenerated when To changes", async () => {
+    listEmailTemplates.mockResolvedValue({
+      items: Object.values(DEFAULT_EMAIL_TEMPLATES).map((t) =>
+        t.key === "shop_update" ? { ...t, subject_template: "Update for {{recipient_name}}", updated_at: "" } : { ...t, updated_at: "" }
+      )
+    });
+    renderTab();
+    fireEvent.click(screen.getByRole("radio", { name: "Shop" }));
+    await pick("boss", /Boss Person/);
+    await pickJobs(21);
+    fireEvent.click(next());
+    fireEvent.click(await screen.findByRole("button", { name: /Ask for an update/ }));
+    await screen.findByLabelText("Message");
+    fireEvent.change(screen.getByLabelText("Subject"), { target: { value: "My own subject" } });
+    fireEvent.change(screen.getByLabelText("Shop contact"), { target: { value: "93" } });
+    await waitFor(() => expect(message().startsWith("Hi Boss Person, Justin Tech,")).toBe(true));
+    expect(subject()).toBe("My own subject");
   });
 });

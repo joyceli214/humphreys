@@ -8,6 +8,7 @@ import {
   buildCustomerDraft,
   buildShopDraft,
   buildSupplierDraft,
+  joinRecipientNames,
   shopApprovalCards,
   shopUpdateCards,
   type ShopJob,
@@ -217,6 +218,18 @@ describe("buildSupplierDraft", () => {
   });
 });
 
+describe("several supplier To", () => {
+  it("joins supplier names for the greeting and supplier_name", () => {
+    const template = { ...DEFAULT_EMAIL_TEMPLATES.supplier_parts_inquiry, subject_template: "To {{supplier_name}}", body_template: "Hello {{supplier_name}}" };
+    const out = buildSupplierDraft({ type: "parts_inquiry", template, supplierName: ["Parts A", "Parts B"], jobs: [], showNames: false, signOff: "Thanks" });
+    expect(out.subject).toBe("To Parts A, Parts B");
+    expect(out.body).toBe("Hello Parts A, Parts B");
+    expect(buildSupplierDraft({ type: "custom", template: null, supplierName: [], jobs: [], showNames: false, signOff: "Thanks" }).body.startsWith("Hello team,")).toBe(true);
+    expect(joinRecipientNames(["  A ", "", "B"])).toBe("A, B");
+    expect(joinRecipientNames([])).toBeNull();
+  });
+});
+
 describe("Shop drafts", () => {
   const shopJob = (referenceId: number, parts: PartsPurchaseRequest[] | null, status = "In Progress"): ShopJob => ({
     referenceId,
@@ -285,6 +298,31 @@ describe("Shop drafts", () => {
     expect(applyShopSignature("Hi\n\nThanks,\nJustin\nHumphreys Electronics", "justin")).toBe("Hi\n\nThanks,\nDave\nHumphreys Electronics");
     expect(applyShopSignature("Hi\n\nCheers,\nJustin", "Justin")).toBe("Hi\n\nCheers,\nJustin");
     expect(applyShopSignature("Thanks,\nDave\nHumphreys Electronics\nP.S. call me", null)).toBe("Thanks,\nDave\nHumphreys Electronics\nP.S. call me");
+  });
+
+  it("several To: Dave signs when any To name is Justin's (never tested on the joined string)", () => {
+    const sig = (name: string) => `Hi\n\nThanks,\n${name}\nHumphreys Electronics`;
+    expect(applyShopSignature(sig("Justin"), ["Dave", "Justin"])).toBe(sig("Dave"));
+    expect(applyShopSignature(sig("Justin"), ["Dave Boss", "justin tech"])).toBe(sig("Dave"));
+    expect(applyShopSignature(sig("Dave"), ["Dave", "Front Desk"])).toBe(sig("Justin"));
+    expect(applyShopSignature(sig("Dave"), [])).toBe(sig("Justin"));
+    // The joined string "Dave, Justin" does not start with Justin; a list is what decides.
+    expect(applyShopSignature(sig("Justin"), "Dave, Justin")).toBe(sig("Justin"));
+    // Customised sign-off left alone with several To too.
+    expect(applyShopSignature("Hi\n\nCheers,\nJustin", ["Dave", "Justin"])).toBe("Hi\n\nCheers,\nJustin");
+  });
+
+  it("several To: greeting / subject join names in pick order and Dave signs when Justin is among them", () => {
+    const jobs = [shopJob(275, null, "Waiting on parts")];
+    const template = { ...update, subject_template: "For {{recipient_name}} – Jobs {{job_numbers}}" };
+    const both = buildShopDraft({ type: "update", template, recipientName: ["Dave", "Justin"], jobs, signOff });
+    expect(both.subject).toBe("For Dave, Justin – Jobs #275");
+    expect(both.body.startsWith("Hi Dave, Justin,")).toBe(true);
+    expect(both.body.endsWith("Thanks,\nDave\nHumphreys Electronics")).toBe(true);
+    const single = buildShopDraft({ type: "update", template, recipientName: ["Front Desk"], jobs, signOff });
+    expect(single.body.endsWith("Thanks,\nJustin\nHumphreys Electronics")).toBe(true);
+    expect(buildShopDraft({ type: "update", template, recipientName: [], jobs, signOff }).body.startsWith("Hi {Name},")).toBe(true);
+    expect(buildShopDraft({ type: "custom", template: null, recipientName: ["Dave", "Justin"], jobs: [], signOff }).body.startsWith("Hi Dave, Justin,")).toBe(true);
   });
 
   it("Custom starts blank with the recipient name", () => {
