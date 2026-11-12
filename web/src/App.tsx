@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/lib/auth/auth-context";
 import { firstReadableRoute } from "@/lib/auth/authorization";
@@ -15,9 +16,12 @@ import EmailCommonContactsPage from "@/pages/email-common-contacts-page";
 import EmailTemplatesPage from "@/pages/email-templates-page";
 import AISettingsPage from "@/pages/ai-settings-page";
 import WorkOrderLayoutPage from "@/pages/work-order-layout-page";
-import AIToolsPage from "@/pages/ai-tools-page";
 import { AIToolsGuard } from "@/components/ai-tools/ai-tools-guard";
 import { AI_TOOLS_PATH } from "@/lib/ai-tools/access";
+
+// Management (/ai-tools) loads as its own chunk: it only opens in the split pane
+// or pop-out, and keeps the main bundle under the PWA precache size limit.
+const AIToolsPage = lazy(() => import("@/pages/ai-tools-page"));
 
 function HomeRedirect() {
   const { loading, scope } = useAuth();
@@ -130,7 +134,9 @@ export default function App() {
         path={AI_TOOLS_PATH}
         element={
           <AIToolsGuard>
-            <AIToolsPage />
+            <Suspense fallback={<p className="p-6 text-sm text-neutral-500">Loading Management…</p>}>
+              <AIToolsPage />
+            </Suspense>
           </AIToolsGuard>
         }
       />

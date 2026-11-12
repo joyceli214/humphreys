@@ -3,7 +3,8 @@ import type { EmailCommonContactRole } from "@/lib/api/generated/types";
 export const EMAIL_CONTACT_ROLES: Array<{ value: EmailCommonContactRole; label: string; zh: string }> = [
   { value: "boss", label: "Boss", zh: "老闆" },
   { value: "staff", label: "Staff", zh: "員工" },
-  { value: "other", label: "Other", zh: "其他" }
+  { value: "other", label: "Other", zh: "其他" },
+  { value: "supplier", label: "Supplier", zh: "供應商" }
 ];
 
 export const EMAIL_CONTACT_NAME_MAX = 120;
@@ -19,6 +20,8 @@ export function roleBadgeClass(role: string): string {
       return "bg-amber-100 text-amber-800";
     case "staff":
       return "bg-sky-100 text-sky-800";
+    case "supplier":
+      return "bg-teal-100 text-teal-900";
     default:
       return "bg-muted text-muted-foreground";
   }

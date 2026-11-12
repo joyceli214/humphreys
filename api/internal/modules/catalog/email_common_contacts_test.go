@@ -224,3 +224,21 @@ func TestEmailCommonContactCap(t *testing.T) {
 		t.Fatalf("cap status = %d", status)
 	}
 }
+
+func TestEmailCommonContactSupplierRole(t *testing.T) {
+	router := contactsRouter(&contactsRepo{})
+	res := contactsRequest(t, router, http.MethodPost, "/catalog/email-common-contacts", `{"name":"Test Supplier A","email":"parts@supplier.test","role":"Supplier"}`, adminScope)
+	if res.Code != http.StatusCreated && res.Code != http.StatusOK {
+		t.Fatalf("create supplier: got %d %s", res.Code, res.Body)
+	}
+	var created EmailCommonContact
+	if err := json.Unmarshal(res.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Role != "supplier" {
+		t.Fatalf("role = %q, want supplier", created.Role)
+	}
+	if !strings.Contains(ErrEmailContactRoleInvalid.Error(), "supplier") {
+		t.Fatalf("role error should list supplier: %q", ErrEmailContactRoleInvalid.Error())
+	}
+}

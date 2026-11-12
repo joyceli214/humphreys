@@ -26,6 +26,9 @@ import type {
   AISearchFilters,
   AISearchInterpretResponse,
   AISearchResponse,
+  AskInterpretResponse,
+  EmailRewriteAction,
+  EmailRewriteResponse,
   EmailDraftResponse,
   EmailDraftType,
   JobSummaryResponse,
@@ -761,6 +764,22 @@ export class APIClient {
     return this.request<AISearchResponse>("/ai-tools/search", {
       method: "POST",
       body: JSON.stringify({ filters })
+    });
+  }
+
+  /** Management Ask: classify a chat message. Never writes; reads go through the normal endpoints. */
+  interpretAsk(message: string) {
+    return this.request<AskInterpretResponse>("/ai-tools/ask/interpret", {
+      method: "POST",
+      body: JSON.stringify({ message })
+    });
+  }
+
+  /** Management Email ✎ AI help: rewrite a draft body; the server rejects replies that change any {blank}. */
+  rewriteEmail(payload: { action: EmailRewriteAction; subject: string; body: string }) {
+    return this.request<EmailRewriteResponse>("/ai-tools/email-rewrite", {
+      method: "POST",
+      body: JSON.stringify(payload)
     });
   }
 

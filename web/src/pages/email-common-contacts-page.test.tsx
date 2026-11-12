@@ -89,6 +89,22 @@ describe("EmailCommonContactsPage", () => {
     expect(await screen.findByText("books@shop.test")).toBeInTheDocument();
   });
 
+  it("offers a Supplier role and saves it", async () => {
+    createEmailCommonContact.mockResolvedValue(contact(4, "Test Supplier", "parts@supplier.test", { role: "supplier" }));
+    render(<EmailCommonContactsPage />);
+    await screen.findByText("Zed");
+    fireEvent.click(screen.getByRole("button", { name: "Add contact" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(within(dialog).getByLabelText("Role")).getByRole("option", { name: /Supplier/ })).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "Test Supplier" } });
+    fireEvent.change(within(dialog).getByLabelText("Email"), { target: { value: "parts@supplier.test" } });
+    fireEvent.change(within(dialog).getByLabelText("Role"), { target: { value: "supplier" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(createEmailCommonContact).toHaveBeenCalledWith({ name: "Test Supplier", email: "parts@supplier.test", role: "supplier", sort_order: 0, is_pinned: false })
+    );
+  });
+
   it("shows the server error (e.g. duplicate email) inside the dialog", async () => {
     createEmailCommonContact.mockRejectedValue(new Error("a common contact with this email already exists (409 /catalog/email-common-contacts)"));
     render(<EmailCommonContactsPage />);

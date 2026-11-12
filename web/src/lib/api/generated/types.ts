@@ -289,7 +289,7 @@ export interface StaffContact {
   full_name: string;
 }
 
-export type EmailCommonContactRole = "boss" | "staff" | "other";
+export type EmailCommonContactRole = "boss" | "staff" | "other" | "supplier";
 
 /** Common contact (常用聯絡人) as managed on the Common contacts page. */
 export interface EmailCommonContact {

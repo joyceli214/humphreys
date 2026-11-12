@@ -111,6 +111,24 @@ export type JobSummaryResponse = JobSummaryStaleResponse & {
   model: string;
 };
 
+/** POST /ai-tools/ask/interpret: the Management Ask chat classifies a message (no data, no writes). */
+export type AskIntent = "customer_jobs" | "update_jobs" | "parts_requests" | "charges_summary" | "unknown";
+
+export type AskInterpretResponse = {
+  intent: AskIntent;
+  customer_query: string;
+  reference_ids: number[];
+  parts_query: string;
+  parts_statuses: string[];
+  reply: string;
+  model: string;
+};
+
+/** ✎ AI help actions for POST /ai-tools/email-rewrite. */
+export type EmailRewriteAction = "fix_grammar" | "more_detail" | "shorter" | "friendlier";
+
+export type EmailRewriteResponse = { body: string; model: string };
+
 export type EmailDraftType = "estimate" | "progress_update" | "ready_for_pickup" | "custom";
 
 export type EmailDraftResponse = {

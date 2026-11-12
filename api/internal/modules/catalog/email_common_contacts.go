@@ -27,7 +27,9 @@ const (
 	MaxEmailCommonContactSortAbs = 100000
 )
 
-var EmailCommonContactRoles = []string{"boss", "staff", "other"}
+// "supplier" contacts are offered only in the Management Supplier email flow,
+// never as customer email recipients (filtered on the front end).
+var EmailCommonContactRoles = []string{"boss", "staff", "other", "supplier"}
 
 var (
 	ErrEmailContactNotFound      = errors.New("common contact not found")
@@ -37,7 +39,7 @@ var (
 	ErrEmailContactNameTooLong   = errors.New("name is too long (max 120 characters)")
 	ErrEmailContactEmailRequired = errors.New("email is required")
 	ErrEmailContactEmailInvalid  = errors.New("email must be a plain address like name@example.com")
-	ErrEmailContactRoleInvalid   = errors.New("role must be boss, staff, or other")
+	ErrEmailContactRoleInvalid   = errors.New("role must be boss, staff, other, or supplier")
 	ErrEmailContactSortInvalid   = errors.New("sort_order is out of range")
 )
 
