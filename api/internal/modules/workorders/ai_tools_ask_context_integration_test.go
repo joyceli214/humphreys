@@ -55,6 +55,7 @@ func askContextTestDB(t *testing.T) *pgxpool.Pool {
 		"001_init.sql", "005_repair_logs_and_parts_purchase_requests.sql",
 		"043_ask_context.sql", "043_ask_context.sql", // twice: idempotent
 		"045_ask_context_topic.sql", "045_ask_context_topic.sql",
+		"046_ask_context_turns.sql", "046_ask_context_turns.sql",
 	} {
 		migration, err := os.ReadFile("../../../migrations/" + file)
 		if err != nil {
@@ -114,6 +115,19 @@ func TestAskContextPostgres(t *testing.T) {
 	if !ok || len(got.ReferenceIDs) != 0 || got.Topic != askTopicParts {
 		t.Fatalf("parts topic = %+v ok=%v", got, ok)
 	}
+	// Turns round-trip (JSONB) and are capped at askMaxTurns on save.
+	many := []askTurn{}
+	for i := 0; i < askMaxTurns+3; i++ {
+		many = appendAskTurn(many, "q", "a")
+	}
+	many = append(many, askTurn{User: "update their status", Assistant: "Opened a preview to change jobs #275, #27501 (nothing saved until Apply)."})
+	if err := store.SaveAskContext(ctx, userA, askContext{ReferenceIDs: []int64{}, Topic: askTopicParts, Turns: many}); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ = store.LoadAskContext(ctx, userA)
+	if len(got.Turns) != askMaxTurns || got.Turns[askMaxTurns-1].User != "update their status" {
+		t.Fatalf("turns = %+v", got.Turns)
+	}
 	if _, err := db.Exec(ctx, `UPDATE ai_ask_context SET topic = 'other' WHERE user_id = $1`, userA); err == nil {
 		t.Fatal("topic check constraint should reject unknown topics")
 	}
@@ -123,7 +137,7 @@ func TestAskContextPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &Handler{askContext: store, askJobs: store}
-	if ac := h.loadAskContext(ctx, userA, time.Now()); len(ac.ReferenceIDs) != 0 {
+	if ac, _ := h.loadAskContext(ctx, userA, time.Now()); len(ac.ReferenceIDs) != 0 || len(ac.Turns) != 0 {
 		t.Fatalf("expired context should be empty: %+v", ac)
 	}
 	if _, ok, _ := store.LoadAskContext(ctx, userA); ok {

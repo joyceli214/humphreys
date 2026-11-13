@@ -132,4 +132,3 @@ func TestAskInterpretForbiddenWithoutPermission(t *testing.T) {
 		t.Fatalf("got %d %s", resp.Code, resp.Body.String())
 	}
 }
-

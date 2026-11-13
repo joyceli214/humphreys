@@ -131,10 +131,16 @@ func TestIsAskFollowUp(t *testing.T) {
 		"move them to shelf A", "the ones I just asked", "the ones you showed", "same jobs, labour $80",
 		"that job", "set it to Finished", "sum up charges for them", "Update Both",
 		"呢啲改做完成", "嗰啲", "兩張都改做完成", "啱啱嗰啲",
+		"update their status to picked up", "they are picked up", "change its status", "update the jobs to Finished",
+		"update all to Finished", "mark all as Finished", "set all to pending", "all of them", "all jobs to Finished",
+		"the same", "the last ones", "previous jobs", "the ones above", "全部改做完成", "個狀態改做完成",
+		"what parts do they need",
 	}
 	no := []string{
 		"set job 15 to Finished", "show all jobs for Jane", "show parts requests", "what is it",
 		"is it raining", "hello", "Sum up the charges on job #", "item", "bother",
+		"show all jobs for Jordan Demo", "show all parts requests", "Show all jobs for #31121 #7", "全部工單", "一個",
+		"theirs", "allow", "all jobs for Jane",
 	}
 	for _, s := range yes {
 		if !isAskFollowUp(s) {
@@ -149,12 +155,13 @@ func TestIsAskFollowUp(t *testing.T) {
 }
 
 func TestIsAskUpdateVerb(t *testing.T) {
-	for _, s := range []string{"set those", "Update both", "change them", "move them", "add labour", "mark it done", "改做完成"} {
+	for _, s := range []string{"set those", "Update both", "change them", "move them", "add labour", "mark it done", "改做完成",
+		"make them Finished", "finish them", "close those jobs", "complete job 7", "mark as finished"} {
 		if !isAskUpdateVerb(s) {
 			t.Errorf("%q: want update verb", s)
 		}
 	}
-	for _, s := range []string{"show them", "sum up charges for those", "settings", "reset"} {
+	for _, s := range []string{"show them", "sum up charges for those", "settings", "reset", "show jobs for Mark Lee", "completed jobs", "makeup"} {
 		if isAskUpdateVerb(s) {
 			t.Errorf("%q: want no update verb", s)
 		}

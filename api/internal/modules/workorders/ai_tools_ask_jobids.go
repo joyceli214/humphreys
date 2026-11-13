@@ -355,33 +355,138 @@ func (p askParser) listJoined(a, b int) bool {
 // Follow-up detection ("update both", "those jobs", "呢啲")
 // ---------------------------------------------------------------------------
 
+// The model reads the conversation and resolves follow-ups itself; these word
+// lists are the server's backup when it does not.
 var (
-	askFollowUpEN = regexp.MustCompile(`(?i)\b(?:both|those|these|them|same jobs?|that job|this job|that one|this one|all of them|the above|above jobs?|the ones?\s+(?:i|you|we)\s+(?:just\s+)?(?:asked(?:\s+about)?|showed|shown|mentioned|listed|found|looked\s+up|had|got))\b`)
+	askFollowUpEN = regexp.MustCompile(`(?i)\b(?:both|those|these|them|their|they|its|the jobs|the same|same jobs?|that job|this job|that one|this one|all of them|the above|above jobs?|the last ones?|(?:the\s+)?previous jobs?|the ones above|the ones?\s+(?:i|you|we)\s+(?:just\s+)?(?:asked(?:\s+about)?|showed|shown|mentioned|listed|found|looked\s+up|had|got))\b`)
 	// "it" only counts right after an action verb ("set it to Finished").
 	askFollowUpIt = regexp.MustCompile(`(?i)\b(?:set|update|change|move|mark|put|make|sum\s+up|total|show|open)\s+it\b`)
+	// "all" only counts right after an update verb ("update all to Finished").
+	askFollowUpAll = regexp.MustCompile(`(?i)\b(?:set|update|change|move|mark|put|make|finish|close|complete)\s+all\b`)
+	// "all jobs" counts unless it starts a new search ("show all jobs for X").
+	askAllJobs     = regexp.MustCompile(`(?i)\ball\s+jobs\b(\s+[a-z]+)?`)
+	askAllJobsNext = map[string]bool{
+		"for": true, "of": true, "from": true, "with": true, "by": true, "where": true,
+		"that": true, "in": true, "on": true, "at": true, "since": true, "named": true, "under": true,
+	}
 	askFollowUpZH = []string{
 		"呢啲", "嗰啲", "啱啱嗰啲", "啱啱", "頭先", "兩張", "兩單", "兩部", "兩個", "两张", "两单",
 		"這些", "这些", "那些", "佢哋", "呢張", "嗰張", "呢單", "嗰單", "上面",
 	}
-	// "their" counts as a follow-up only for parts questions ("show their parts").
-	askFollowUpTheir = regexp.MustCompile(`(?i)\btheir\b`)
-	askUpdateVerb    = regexp.MustCompile(`(?i)\b(?:set|update|change|move|add|mark|remove|put)\b|改|設|设|更新|轉|转|搬|加|標|标`)
+	// 全部 and 個 (個狀態) count only together with an update verb.
+	askFollowUpZHWithVerb = regexp.MustCompile(`全部|^個|佢個|\s個`)
+	askUpdateVerb         = regexp.MustCompile(`(?i)\b(?:set|update|change|move|add|remove|put|make|finish|close|complete)\b|\bmark\s+(?:(?:as|it|them|those|these|both|all|the|this|that|jobs?|done|finished)\b|[#＃0-9])|改|設|设|更新|轉|转|搬|加|標|标`)
+	askAddUp              = regexp.MustCompile(`(?i)\badd\s+(?:it\s+|them\s+|those\s+)?up\b`)
+	// Customer follow-ups ("show her other jobs", "that customer").
+	askCustomerRefEN = regexp.MustCompile(`(?i)\b(?:her|his|that customer|this customer|the same customer|same customer)\b`)
+	askJobWord       = regexp.MustCompile(`(?i)\bjobs?\b|工單|工单|單|单`)
+	// Parts request statuses as typed (draft … cancelled, plus "pending").
+	askPartsStatusWords = regexp.MustCompile(`(?i)\b(?:draft|waiting[\s_-]*(?:for\s+)?approval|approved|ordered|arrived|used|cancell?ed|pending)\b`)
 )
 
 // isAskFollowUp reports whether a message refers back to earlier jobs.
 func isAskFollowUp(message string) bool {
-	if askFollowUpEN.MatchString(message) || askFollowUpIt.MatchString(message) {
+	if askFollowUpEN.MatchString(message) || askFollowUpIt.MatchString(message) || askFollowUpAll.MatchString(message) {
 		return true
+	}
+	for _, m := range askAllJobs.FindAllStringSubmatch(message, -1) {
+		if next := strings.ToLower(strings.TrimSpace(m[1])); !askAllJobsNext[next] {
+			return true
+		}
 	}
 	for _, phrase := range askFollowUpZH {
 		if strings.Contains(message, phrase) {
 			return true
 		}
 	}
+	return askFollowUpZHWithVerb.MatchString(message) && isAskUpdateVerb(message)
+}
+
+func isAskUpdateVerb(message string) bool {
+	return askUpdateVerb.MatchString(askAddUp.ReplaceAllString(message, " "))
+}
+
+// isAskCustomerFollowUp reports whether a message refers back to the saved
+// customer ("her other jobs", "that customer", 佢 but not 佢哋).
+func isAskCustomerFollowUp(message string) bool {
+	if askCustomerRefEN.MatchString(message) {
+		return true
+	}
+	return strings.Contains(strings.ReplaceAll(strings.ReplaceAll(message, "佢哋", ""), "佢個", ""), "佢")
+}
+
+// isAskBothTyped reports whether "both" is the only follow-up word and names
+// at least two typed job numbers ("set both #275 and #15 to Finished").
+func isAskBothTyped(message string, explicit []int64) bool {
+	if len(explicit) < 2 {
+		return false
+	}
+	without := regexp.MustCompile(`(?i)\bboth\b`).ReplaceAllString(message, " ")
+	return without != message && !isAskFollowUp(without)
+}
+
+// isAskBareJobNumbers reports whether the message is only job numbers and
+// separators: "#31121 #7", "jobs 31121 and 7", "#31121 同 #7".
+func isAskBareJobNumbers(message string) bool {
+	toks := tokenizeAsk(message)
+	nums := 0
+	for _, t := range toks {
+		switch {
+		case t.is(askTokNum):
+			nums++
+		case t.is(askTokPunct) && (askListPuncts[t.text] || t.text == ":" || t.text == "." || t.text == "：" || t.text == "？" || t.text == "?"):
+		case t.is(askTokWord) && (askListWords[t.text] || t.text == "job" || t.text == "jobs" || t.text == "工" || t.text == "單" || t.text == "单" || t.text == "号" || t.text == "號"):
+		default:
+			return false
+		}
+	}
+	return nums > 0 && len(parseAskJobIDs(message)) > 0
+}
+
+// askStandaloneNumbers returns every number token in the message (a model id
+// is trusted when the user typed it, even unmarked: "show 275").
+func askStandaloneNumbers(message string) map[int64]bool {
+	out := map[int64]bool{}
+	for _, t := range tokenizeAsk(message) {
+		if t.is(askTokNum) {
+			if n, err := strconv.ParseInt(t.text, 10, 64); err == nil {
+				out[n] = true
+			}
+		}
+	}
+	return out
+}
+
+// askTextHasWords reports whether every word of phrase appears in text
+// (case-insensitive): a customer name the user actually typed.
+func askTextHasWords(text, phrase string) bool {
+	words := strings.Fields(strings.ToLower(phrase))
+	if len(words) == 0 {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for _, w := range words {
+		if !strings.Contains(lower, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// askNamesAny reports whether text names one of names as a whole phrase
+// (case-insensitive): a job status or location.
+func askNamesAny(text string, names []string) bool {
+	lower := " " + strings.ToLower(strings.Join(strings.FieldsFunc(text, askNotWordRune), " ")) + " "
+	for _, name := range names {
+		n := strings.ToLower(strings.Join(strings.FieldsFunc(name, askNotWordRune), " "))
+		if n != "" && strings.Contains(lower, " "+n+" ") {
+			return true
+		}
+	}
 	return false
 }
 
-func isAskUpdateVerb(message string) bool { return askUpdateVerb.MatchString(message) }
+func askNotWordRune(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }
 
 // ---------------------------------------------------------------------------
 // Wording
@@ -425,5 +530,22 @@ func askPreviewInstruction(ids []int64, message string) string {
 	if len(ids) == 1 {
 		label = "Job "
 	}
-	return label + strings.Join(parts, ", ") + ": " + message
+	return label + strings.Join(parts, ", ") + ": " + askOneLine(message, aiToolsMaxTextChars)
+}
+
+// askRefList renders "#1, #2, #3" (at most max ids, then "and N more").
+func askRefList(ids []int64, max int) string {
+	shown := ids
+	if max > 0 && len(ids) > max {
+		shown = ids[:max]
+	}
+	parts := make([]string, len(shown))
+	for i, id := range shown {
+		parts[i] = "#" + strconv.FormatInt(id, 10)
+	}
+	out := strings.Join(parts, ", ")
+	if len(shown) < len(ids) {
+		out += " and " + strconv.Itoa(len(ids)-len(shown)) + " more"
+	}
+	return out
 }

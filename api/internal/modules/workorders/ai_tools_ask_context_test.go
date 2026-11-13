@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -20,13 +21,16 @@ import (
 
 // memAskStore is an in-memory askContextStore + askJobLookup.
 type memAskStore struct {
-	mu      sync.Mutex
-	rows    map[string]askContext
-	jobs    map[int64]bool
-	parts   map[int64]int // parts requests per job
-	saves   int
-	deletes int
-	loadErr error
+	mu    sync.Mutex
+	rows  map[string]askContext
+	jobs  map[int64]bool
+	parts map[int64]int // parts requests per job
+	// customers maps a customer name to their jobs (newest first), for the
+	// customer search and the job → customer lookup.
+	customers map[string][]int64
+	saves     int
+	deletes   int
+	loadErr   error
 }
 
 func newMemAskStore(jobs ...int64) *memAskStore {
@@ -51,6 +55,7 @@ func (s *memAskStore) SaveAskContext(_ context.Context, userID string, ac askCon
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ac.ReferenceIDs = append([]int64{}, ac.ReferenceIDs...)
+	ac.Turns = append([]askTurn{}, ac.Turns...)
 	ac.UpdatedAt = time.Now()
 	s.rows[userID] = ac
 	s.saves++
@@ -83,6 +88,45 @@ func (s *memAskStore) PartsRequestCount(_ context.Context, ids []int64) (int, er
 		n += s.parts[id]
 	}
 	return n, nil
+}
+
+func (s *memAskStore) customerNames() []string {
+	names := make([]string, 0, len(s.customers))
+	for name := range s.customers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (s *memAskStore) SearchJobIDs(_ context.Context, query string, _ bool, limit int) ([]int64, error) {
+	out := []int64{}
+	q := strings.ToLower(strings.TrimSpace(query))
+	for _, name := range s.customerNames() {
+		if q == "" || !strings.Contains(strings.ToLower(name), q) {
+			continue
+		}
+		for _, id := range s.customers[name] {
+			if len(out) < limit {
+				out = append(out, id)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *memAskStore) JobCustomers(_ context.Context, ids []int64) (map[int64]askJobCustomer, error) {
+	out := map[int64]askJobCustomer{}
+	for i, name := range s.customerNames() {
+		for _, job := range s.customers[name] {
+			for _, id := range ids {
+				if id == job {
+					out[id] = askJobCustomer{ID: int64(i + 1), Name: name}
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 func (s *memAskStore) row(userID string) (askContext, bool) {
@@ -226,14 +270,9 @@ func TestAskContextFollowUpResolvesPreviousJobs(t *testing.T) {
 	if second.Notice != "" {
 		t.Fatalf("notice = %q", second.Notice)
 	}
-	// Only the message reaches the model; no saved ids are sent.
-	if len(llm.prompts) == 0 {
-		t.Fatal("model was not called")
-	}
-	for _, p := range llm.prompts {
-		if strings.Contains(p, "275") {
-			t.Fatalf("model prompt leaked context: %q", p)
-		}
+	// The model sees the saved jobs and the last turn.
+	if p := llm.lastUserPrompt(t); !strings.Contains(p, "SAVED_JOBS: 275, 27501\n") || !strings.Contains(p, "USER: show jobs 275、15 and 27501\n") {
+		t.Fatalf("model prompt lacks context: %q", p)
 	}
 }
 
@@ -248,8 +287,9 @@ func TestAskContextExpiredIsClearedAndIgnored(t *testing.T) {
 	if resp.Intent != askIntentUnknown || resp.Reply != askNoContextReply || resp.ContextUsed || resp.PreviewInstruction != "" {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if _, ok := store.row(askUserA); ok || store.deletes != 1 {
-		t.Fatalf("expired context should be deleted (deletes=%d)", store.deletes)
+	// The expired row is deleted; the new row only holds this turn.
+	if row, ok := store.row(askUserA); !ok || store.deletes != 1 || len(row.ReferenceIDs) != 0 || len(row.Turns) != 1 {
+		t.Fatalf("expired context should be deleted (deletes=%d, row=%+v)", store.deletes, row)
 	}
 
 	// Just inside the window still counts and slides forward.
@@ -464,6 +504,7 @@ func TestAskJobsQuestionReplacesPartsContext(t *testing.T) {
 func TestAskContextCustomerFollowUp(t *testing.T) {
 	llm := newAskLLM(t)
 	store := newMemAskStore()
+	// The customer search finds no jobs: only the customer is remembered.
 	router := askContextRouter(t, store)
 	llm.answerCustomer("Test Customer A")
 	askAs(t, router, askUserA, "show all jobs for Test Customer A")

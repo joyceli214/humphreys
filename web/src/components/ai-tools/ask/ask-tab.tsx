@@ -58,12 +58,17 @@ function Answer(props: { answer: AskInterpretResponse; text: string; onStarter: 
   );
 }
 
-function AnswerBody({ answer, text, onStarter }: { answer: AskInterpretResponse; text: string; onStarter: (prompt: string) => void }) {
+const NO_JOBS_REPLY = "I don't have recent jobs to refer to. Tell me the job numbers.";
+
+function AnswerBody({ answer, onStarter }: { answer: AskInterpretResponse; text: string; onStarter: (prompt: string) => void }) {
   switch (answer.intent) {
     case "customer_jobs":
       return <CustomerJobsAnswer customerQuery={answer.customer_query} referenceIds={answer.reference_ids ?? []} />;
     case "update_jobs":
-      return <UpdatePreviewAnswer message={answer.preview_instruction || text} />;
+      // Only the server-built instruction (it names the jobs) is ever previewed;
+      // the typed text alone may be a follow-up with no job numbers.
+      if (!answer.preview_instruction) return <p>{NO_JOBS_REPLY}</p>;
+      return <UpdatePreviewAnswer message={answer.preview_instruction} />;
     case "parts_requests":
       return <PartsAnswer query={answer.parts_query} statuses={answer.parts_statuses ?? []} referenceIds={answer.reference_ids ?? []} />;
     case "charges_summary":

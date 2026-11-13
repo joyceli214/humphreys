@@ -78,13 +78,13 @@ describe("AskTab", () => {
   });
 
   it("previews job updates and only applies after Apply", async () => {
-    interpretAsk.mockResolvedValue(intent({ intent: "update_jobs", reference_ids: [31] }));
+    interpretAsk.mockResolvedValue(intent({ intent: "update_jobs", reference_ids: [31], preview_instruction: "Job #31: set job 31 to Finished" }));
     previewAIMassUpdate.mockResolvedValue({ rows: [previewRow], model: "m" });
     applyAIMassUpdate.mockResolvedValue({ results: [{ reference_id: 31, success: true, applied: ["Status → Finished"] }] });
     render(<AskTab />);
     ask("set job 31 to Finished");
     expect(await screen.findByRole("button", { name: "Apply" })).toBeInTheDocument();
-    expect(previewAIMassUpdate).toHaveBeenCalledWith("set job 31 to Finished");
+    expect(previewAIMassUpdate).toHaveBeenCalledWith("Job #31: set job 31 to Finished");
     expect(applyAIMassUpdate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() =>
@@ -155,8 +155,16 @@ describe("AskTab", () => {
     expect(previewAIMassUpdate).not.toHaveBeenCalled();
   });
 
+  it("never previews the typed text when the server sent no preview_instruction", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "update_jobs", reference_ids: [] }));
+    render(<AskTab />);
+    ask("update their status to picked up");
+    expect(await screen.findByText("I don't have recent jobs to refer to. Tell me the job numbers.")).toBeInTheDocument();
+    expect(previewAIMassUpdate).not.toHaveBeenCalled();
+  });
+
   it("Cancel discards the preview without applying", async () => {
-    interpretAsk.mockResolvedValue(intent({ intent: "update_jobs", reference_ids: [31] }));
+    interpretAsk.mockResolvedValue(intent({ intent: "update_jobs", reference_ids: [31], preview_instruction: "Job #31: set job 31 to Finished" }));
     previewAIMassUpdate.mockResolvedValue({ rows: [previewRow], model: "m" });
     render(<AskTab />);
     ask("set job 31 to Finished");
