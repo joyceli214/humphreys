@@ -297,6 +297,24 @@ func (r *askResolver) resolve() {
 		r.resp.Intent = askIntentUpdateJobs
 	}
 
+	// A parts-status change ("set their parts to ordered"), or an update right
+	// after a parts answer that does not clearly target the jobs ("set them to
+	// pending"), stays on the parts path even when the model already resolved
+	// the job numbers: Ask cannot change parts request status.
+	if len(explicit) == 0 && (partsUpdate ||
+		(isUpdate && normalizeAskTopic(prev.Topic) == askTopicParts && !r.targetsJobs(msg))) {
+		target := ids
+		if len(target) == 0 {
+			target = prev.ReferenceIDs
+		}
+		if len(target) == 0 {
+			r.plain(askNoContextReply)
+			return
+		}
+		r.resp, r.save = r.h.askPartsUpdateFollowUp(r.ctx, r.resp, target)
+		return
+	}
+
 	if len(ids) == 0 {
 		switch {
 		case partsUpdate:

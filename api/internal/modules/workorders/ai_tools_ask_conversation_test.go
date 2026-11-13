@@ -391,6 +391,17 @@ func TestAskPartsTopicRouting(t *testing.T) {
 		t.Fatalf("pending = %+v", resp)
 	}
 
+	// The model already resolved the jobs (update_jobs or parts_requests with
+	// ids): "set them to pending" still never becomes a job preview.
+	for _, intent := range []string{askIntentUpdateJobs, askIntentPartsRequests} {
+		llm, ask := partsOn275and15(t)
+		llm.answer(intent, 275, 15)
+		resp := ask("set them to pending")
+		if resp.Intent != askIntentPartsRequests || resp.PreviewInstruction != "" || resp.Notice != askPartsStatusNotice {
+			t.Fatalf("pending with model %s ids = %+v", intent, resp)
+		}
+	}
+
 	for _, msg := range []string{"set those jobs to Finished", "set them to Finished", "update their status to picked up"} {
 		llm, ask := partsOn275and15(t)
 		llm.answer(askIntentUpdateJobs)
