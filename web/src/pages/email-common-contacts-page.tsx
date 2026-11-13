@@ -145,7 +145,7 @@ export default function EmailCommonContactsPage() {
     <section className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold">
-          Common contacts <span className="text-lg font-normal text-muted-foreground">常用聯絡人</span>
+          Common contacts
         </h1>
         <p className="text-sm text-muted-foreground">
           People you often copy on customer emails. Active contacts appear in the Management email drafts recipient picker.
@@ -293,7 +293,7 @@ export default function EmailCommonContactsPage() {
                   >
                     {EMAIL_CONTACT_ROLES.map((role) => (
                       <option key={role.value} value={role.value}>
-                        {role.label} {role.zh}
+                        {role.label}
                       </option>
                     ))}
                   </select>

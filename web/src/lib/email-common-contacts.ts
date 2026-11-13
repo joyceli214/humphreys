@@ -1,17 +1,17 @@
 import type { EmailCommonContactRole } from "@/lib/api/generated/types";
 
-export const EMAIL_CONTACT_ROLES: Array<{ value: EmailCommonContactRole; label: string; zh: string }> = [
-  { value: "boss", label: "Boss", zh: "老闆" },
-  { value: "staff", label: "Staff", zh: "員工" },
-  { value: "other", label: "Other", zh: "其他" },
-  { value: "supplier", label: "Supplier", zh: "供應商" }
+export const EMAIL_CONTACT_ROLES: Array<{ value: EmailCommonContactRole; label: string }> = [
+  { value: "boss", label: "Boss" },
+  { value: "staff", label: "Staff" },
+  { value: "other", label: "Other" },
+  { value: "supplier", label: "Supplier" }
 ];
 
 export const EMAIL_CONTACT_NAME_MAX = 120;
 
 export function roleLabel(role: string): string {
   const entry = EMAIL_CONTACT_ROLES.find((r) => r.value === role);
-  return entry ? `${entry.label} ${entry.zh}` : role;
+  return entry ? entry.label : role;
 }
 
 export function roleBadgeClass(role: string): string {
