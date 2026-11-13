@@ -1,22 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowLeft, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MassUpdateTab } from "@/components/ai-tools/mass-update-tab";
 import { AdvancedSearchTab } from "@/components/ai-tools/advanced-search-tab";
-import { EmailDraftsTab } from "@/components/ai-tools/email-drafts-tab";
+import { AskTab } from "@/components/ai-tools/ask/ask-tab";
+import { EmailTab } from "@/components/ai-tools/email-flow/email-tab";
+import { COMMON_CONTACTS_PATH, EMAIL_TEMPLATES_PATH } from "@/lib/ai-tools/email-flow";
 import { DockBackButton } from "@/components/ai-tools/dock-back-button";
+import { FOCUS } from "@/components/ai-tools/mgmt-ui";
 import { PENDING_EMAIL_DRAFT_KEY, takePendingEmailDraft } from "@/lib/ai-tools/open-email-drafts";
 import type { EmailDraftTarget } from "@/lib/ai-tools/types";
 
 // The former "Job Summary" tab (components/ai-tools/job-summary-tab.tsx) is
 // intentionally kept in the repo, unused, for reuse on the dashboard later.
 
-type TabKey = "mass-update" | "advanced-search" | "email-drafts";
+type MainTab = "ask" | "email";
+type View = MainTab | "mass-update" | "advanced-search";
 
-const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: "mass-update", label: "Mass Update" },
-  { key: "advanced-search", label: "Advanced Search" },
-  { key: "email-drafts", label: "Customer Email Drafts" }
+const TABS: Array<{ key: MainTab; label: string }> = [
+  { key: "ask", label: "Ask" },
+  { key: "email", label: "Email" }
 ];
+
+const MORE_TITLES: Record<"mass-update" | "advanced-search", string> = {
+  "mass-update": "Mass Update",
+  "advanced-search": "Advanced Search"
+};
 
 // The active panel grows to fill the remaining height. Inactive panels use the
 // `hidden` class too, because a `flex` class would otherwise override [hidden].
@@ -24,23 +33,30 @@ function panelClass(active: boolean) {
   return active ? "flex min-w-0 flex-1 flex-col" : "hidden";
 }
 
+const MENU_ITEM = cn("flex min-h-[46px] w-full items-center rounded-lg px-3.5 text-left text-[17px] text-[#1f2328] hover:bg-[#f2eee9]", FOCUS);
+
 export default function AIToolsPage() {
-  const [tab, setTab] = useState<TabKey>("mass-update");
+  const [view, setView] = useState<View>("ask");
+  const [lastTab, setLastTab] = useState<MainTab>("ask");
   const [emailTarget, setEmailTarget] = useState<EmailDraftTarget | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     document.title = "Management";
   }, []);
 
-  // "Draft email" on a work-order page queues a job for the email drafts tab.
-  // Take it on load, and when this page is already open (split pane or
-  // pop-out) via the cross-document storage event / regaining focus.
+  // "Draft email" on a work-order page queues a job for the Email tab (Customer,
+  // job added to Who). Take it on load, and when this page is already open
+  // (split pane or pop-out) via the cross-document storage event / regaining focus.
   useEffect(() => {
     const take = () => {
       const target = takePendingEmailDraft();
       if (!target) return;
       setEmailTarget(target);
-      setTab("email-drafts");
+      setView("email");
+      setLastTab("email");
     };
     const onStorage = (event: StorageEvent) => {
       if (event.key === PENDING_EMAIL_DRAFT_KEY && event.newValue != null) take();
@@ -59,74 +75,160 @@ export default function AIToolsPage() {
     };
   }, []);
 
+  // Close the More menu on outside click.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (event: MouseEvent) => {
+      const t = event.target as Node;
+      if (!menuRef.current?.contains(t) && !moreButton.current?.contains(t)) setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [moreOpen]);
+
+  useEffect(() => {
+    if (moreOpen) menuRef.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
+  }, [moreOpen]);
+
+  const closeMore = (refocus = true) => {
+    setMoreOpen(false);
+    if (refocus) moreButton.current?.focus();
+  };
+
+  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMore();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
+      const i = items.indexOf(document.activeElement as HTMLElement);
+      const next = event.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+      items[next]?.focus();
+    }
+  };
+
+  const openView = (next: "mass-update" | "advanced-search") => {
+    setView(next);
+    closeMore(false);
+  };
+
+  const showTab = (tab: MainTab) => {
+    setView(tab);
+    setLastTab(tab);
+  };
+
+  const inMore = view === "mass-update" || view === "advanced-search";
+
   return (
-    <div className="flex min-h-[100dvh] flex-col bg-[#faf7f4] text-neutral-800">
-      {/* Fills the whole window / pane width and height; each tab lays itself out responsively. */}
-      <div className="flex w-full min-w-0 flex-1 flex-col px-4 pb-6 sm:px-7">
+    <div className="flex min-h-[100dvh] flex-col bg-[#f7f4f1] text-[#1f2328]">
+      {/* Fills the whole window / pane width and height; each panel lays itself out responsively. */}
+      <div className="flex w-full min-w-0 flex-1 flex-col px-4 sm:px-7">
         {/* Header + tab bar stay visible; the page itself scrolls without any height cap. */}
-        <div data-testid="ai-tools-sticky-header" className="sticky top-0 z-20 bg-[#faf7f4] pt-6">
-          <header className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold">Management</h1>
-              <p className="mt-0.5 text-sm text-neutral-500">Admin and owner only. The AI proposes, you approve.</p>
+        <div data-testid="ai-tools-sticky-header" className="sticky top-0 z-20 -mx-4 border-b border-[#d5d9de] bg-[#f7f4f1] px-4 pt-[max(8px,env(safe-area-inset-top))] sm:-mx-7 sm:px-7">
+          <header className="relative flex min-h-[48px] items-center justify-between gap-3">
+            <h1 className="text-[17px] font-bold text-[#b8501a]">Management</h1>
+            <div className="flex items-center gap-1">
+              <button
+                ref={moreButton}
+                type="button"
+                aria-label="More"
+                title="More"
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                aria-controls="mgmt-more-menu"
+                onClick={() => setMoreOpen((v) => !v)}
+                className={cn("grid h-11 w-11 place-items-center rounded-[10px] text-[#3b424b] hover:bg-[#ebe6e1]", FOCUS)}
+              >
+                <MoreHorizontal className="h-5 w-5" aria-hidden />
+              </button>
+              <DockBackButton />
             </div>
-            <DockBackButton />
+            {moreOpen && (
+              <div
+                ref={menuRef}
+                id="mgmt-more-menu"
+                role="menu"
+                aria-label="More"
+                onKeyDown={onMenuKeyDown}
+                className="absolute right-0 top-full z-30 min-w-[230px] rounded-xl border border-[#d5d9de] bg-white p-1.5 shadow-lg"
+              >
+                <button type="button" role="menuitem" className={MENU_ITEM} onClick={() => openView("mass-update")}>
+                  Mass Update
+                </button>
+                <button type="button" role="menuitem" className={MENU_ITEM} onClick={() => openView("advanced-search")}>
+                  Advanced Search
+                </button>
+                <a role="menuitem" href={EMAIL_TEMPLATES_PATH} target="_blank" rel="noopener noreferrer" className={MENU_ITEM} onClick={() => closeMore(false)}>
+                  Email templates
+                </a>
+                <a role="menuitem" href={COMMON_CONTACTS_PATH} target="_blank" rel="noopener noreferrer" className={MENU_ITEM} onClick={() => closeMore(false)}>
+                  Common contacts
+                </a>
+              </div>
+            )}
           </header>
 
-          <div role="tablist" aria-label="AI tools" className="mt-4 flex gap-1 border-b border-[#e0d9d1]">
-            {TABS.map((entry) => {
-              const active = entry.key === tab;
-              return (
-                <button
-                  key={entry.key}
-                  type="button"
-                  role="tab"
-                  id={`ai-tab-${entry.key}`}
-                  aria-selected={active}
-                  aria-controls={`ai-panel-${entry.key}`}
-                  onClick={() => setTab(entry.key)}
-                  className={cn(
-                    "-mb-px border-b-2 px-3.5 py-2 text-sm",
-                    active
-                      ? "border-[#c2571a] font-semibold text-neutral-900"
-                      : "border-transparent text-neutral-500 hover:text-neutral-800"
-                  )}
-                >
-                  {entry.label}
-                </button>
-              );
-            })}
-          </div>
+          {inMore ? (
+            <div className="flex min-h-[56px] items-center gap-2 pb-2">
+              <button
+                type="button"
+                onClick={() => showTab(lastTab)}
+                className={cn("inline-flex min-h-[44px] items-center gap-1.5 rounded-[10px] px-2 text-[16px] font-bold text-[#135f6f] hover:bg-[#ebe6e1]", FOCUS)}
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden />
+                Back to {lastTab === "ask" ? "Ask" : "Email"}
+              </button>
+              <span className="text-[17px] font-semibold">{MORE_TITLES[view]}</span>
+            </div>
+          ) : (
+            <div role="tablist" aria-label="Management" className="mb-3 mt-0.5 grid grid-cols-2 rounded-[12px] bg-[#e7e2dc] p-1">
+              {TABS.map((entry) => {
+                const active = entry.key === view;
+                return (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    role="tab"
+                    id={`ai-tab-${entry.key}`}
+                    aria-selected={active}
+                    aria-controls={`ai-panel-${entry.key}`}
+                    onClick={() => showTab(entry.key)}
+                    className={cn(
+                      "min-h-[44px] rounded-[9px] text-[17px] font-semibold",
+                      active ? "bg-white text-[#b8501a] shadow" : "text-[#4a5260] hover:text-[#1f2328]",
+                      FOCUS
+                    )}
+                  >
+                    {entry.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Panels stay mounted so switching tabs keeps in-progress work. */}
+        {/* Panels stay mounted so switching keeps in-progress work. */}
         <div className="mt-4 flex min-w-0 flex-1 flex-col">
-          <section
-            role="tabpanel"
-            id="ai-panel-mass-update"
-            aria-labelledby="ai-tab-mass-update"
-            hidden={tab !== "mass-update"}
-            className={panelClass(tab === "mass-update")}
-          >
+          {TABS.map((entry) => (
+            <section
+              key={entry.key}
+              role="tabpanel"
+              id={`ai-panel-${entry.key}`}
+              aria-labelledby={`ai-tab-${entry.key}`}
+              hidden={view !== entry.key}
+              className={panelClass(view === entry.key)}
+            >
+              {entry.key === "ask" ? <AskTab /> : <EmailTab target={emailTarget} />}
+            </section>
+          ))}
+          <section aria-label="Mass Update" hidden={view !== "mass-update"} className={cn(panelClass(view === "mass-update"), "pb-6")}>
             <MassUpdateTab />
           </section>
-          <section
-            role="tabpanel"
-            id="ai-panel-advanced-search"
-            aria-labelledby="ai-tab-advanced-search"
-            hidden={tab !== "advanced-search"}
-            className={panelClass(tab === "advanced-search")}
-          >
+          <section aria-label="Advanced Search" hidden={view !== "advanced-search"} className={cn(panelClass(view === "advanced-search"), "pb-6")}>
             <AdvancedSearchTab />
-          </section>
-          <section
-            role="tabpanel"
-            id="ai-panel-email-drafts"
-            aria-labelledby="ai-tab-email-drafts"
-            hidden={tab !== "email-drafts"}
-            className={panelClass(tab === "email-drafts")}
-          >
-            <EmailDraftsTab target={emailTarget} />
           </section>
         </div>
       </div>

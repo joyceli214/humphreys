@@ -63,7 +63,9 @@ const CHIP = "inline-flex items-center gap-1 rounded-full bg-[#efebe7] px-2 py-0
  * portal staff (Cc) and — for owners/admins — a typed address. The server
  * re-checks everything when sending.
  */
-export function EmailRecipientPicker({ value, onChange, customerHint, contacts, canType, disabled = false }: Props) {
+export function EmailRecipientPicker({ value, onChange, customerHint, contacts: allContacts, canType, disabled = false }: Props) {
+  // Supplier contacts belong to the Supplier email flow only; never offer them to customers.
+  const contacts = { ...allContacts, contacts: allContacts.contacts.filter((contact) => contact.role !== "supplier") };
   const [typedInput, setTypedInput] = useState("");
   const [typedError, setTypedError] = useState("");
   const hasCustomerEmail = customerHint !== "";

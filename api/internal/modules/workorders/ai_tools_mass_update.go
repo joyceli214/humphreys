@@ -267,6 +267,21 @@ func (h *Handler) MassUpdateApply(c *gin.Context) {
 		results = append(results, MassUpdateApplyResult{ReferenceID: ref, Success: true, Applied: applied})
 	}
 
+	// Let a later Ask follow-up know the change was applied.
+	appliedIDs := make([]int64, 0, len(results))
+	for _, res := range results {
+		if res.Success {
+			appliedIDs = append(appliedIDs, int64(res.ReferenceID))
+		}
+	}
+	if len(appliedIDs) > 0 {
+		label := "jobs "
+		if len(appliedIDs) == 1 {
+			label = "job "
+		}
+		h.recordAskTurn(c.Request.Context(), userID, "(Apply)", "Applied changes to "+label+askRefList(appliedIDs, askSummaryRefs)+".", time.Now())
+	}
+
 	c.JSON(http.StatusOK, massUpdateApplyResponse{Results: results})
 }
 
@@ -682,7 +697,8 @@ func massUpdateSystemPrompt() string {
 	return "You convert a shop manager's instruction into structured work-order edits. " +
 		"You never write to the database; you only propose edits that a human will review and approve. " +
 		"Respond with STRICT JSON only (no prose, no markdown fences). " +
-		"Only use the allowed operation types. If the instruction is ambiguous or references data you were not given, return an empty operations array."
+		"Only use the allowed operation types. If the instruction is ambiguous or references data you were not given, return an empty operations array. " +
+		"Never add labour, prices, shipping or line items the instruction does not ask for."
 }
 
 // buildMassUpdatePrompt describes the allowed operations plus the valid status

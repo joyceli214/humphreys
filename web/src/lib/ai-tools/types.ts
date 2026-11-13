@@ -111,6 +111,33 @@ export type JobSummaryResponse = JobSummaryStaleResponse & {
   model: string;
 };
 
+/** POST /ai-tools/ask/interpret: the Management Ask chat classifies a message (no data, no writes). */
+export type AskIntent = "customer_jobs" | "update_jobs" | "parts_requests" | "charges_summary" | "unknown";
+
+export type AskInterpretResponse = {
+  intent: AskIntent;
+  customer_query: string;
+  reference_ids: number[];
+  parts_query: string;
+  parts_statuses: string[];
+  reply: string;
+  model: string;
+  /** Server-built Mass Update instruction naming the resolved jobs. update_jobs is previewed only with this (never the typed text). */
+  preview_instruction?: string;
+  /** True when the jobs (or customer) came from this account's last Ask answer. */
+  context_used?: boolean;
+  /** Set when the server checked which job numbers exist. */
+  found_ids?: number[];
+  missing_ids?: number[];
+  /** Short line shown above the answer, e.g. "Found #275. No job #15." */
+  notice?: string;
+};
+
+/** ✎ AI help actions for POST /ai-tools/email-rewrite. */
+export type EmailRewriteAction = "fix_grammar" | "more_detail" | "shorter" | "friendlier";
+
+export type EmailRewriteResponse = { body: string; model: string };
+
 export type EmailDraftType = "estimate" | "progress_update" | "ready_for_pickup" | "custom";
 
 export type EmailDraftResponse = {

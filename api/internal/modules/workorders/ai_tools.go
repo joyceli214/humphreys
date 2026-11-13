@@ -135,6 +135,10 @@ func RegisterAIToolsRoutes(authed *gin.RouterGroup, h *Handler) {
 	group.POST("/job-summary", perm, llm, h.JobSummary)
 	group.GET("/job-summary/stale", perm, h.JobSummaryStale)
 	group.POST("/email-draft", perm, llm, h.EmailDraft)
+	// Management Ask chat: classify only; reads/writes go through existing endpoints.
+	group.POST("/ask/interpret", perm, llm, h.AskInterpret)
+	// Management Email pen helper: rewrite on request, blanks must survive.
+	group.POST("/email-rewrite", perm, llm, h.EmailRewrite)
 }
 
 // aiToolsActor returns the authenticated user id or "" when absent.

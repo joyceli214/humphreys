@@ -3,6 +3,8 @@
 
 /** aiToolsMaxTextChars (ai_tools_limits.go): mass-update instruction, email notes. */
 export const AI_TEXT_MAX = 2000;
+/** emailRewriteMaxBody (ai_tools_email_rewrite.go): body sent to the ✎ AI help rewrite. */
+export const EMAIL_REWRITE_BODY_MAX = 6000;
 /** aiInterpretMaxQuestion (ai_tools_search_interpret.go). */
 export const SEARCH_QUESTION_MAX = 500;
 /** aiSearchMaxText (ai_tools_search.go): every free-text search filter. */

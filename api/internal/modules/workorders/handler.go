@@ -37,6 +37,10 @@ type Handler struct {
 	// workDoneGenerator overrides the Mass Update batch Work Done generator in
 	// tests; nil uses generateWorkDoneTextBatch.
 	workDoneGenerator func(ctx context.Context, settings aisettings.Settings, referenceID int) (string, error)
+	// askContext remembers each user's last Ask jobs/customer for follow-ups;
+	// askJobs checks which job numbers exist. Both nil degrade gracefully.
+	askContext askContextStore
+	askJobs    askJobLookup
 }
 
 type updateEquipmentRequest struct {
@@ -230,12 +234,16 @@ func New(db *pgxpool.Pool) *Handler {
 	go aiCache.Start()
 	httpClient := &http.Client{Timeout: 25 * time.Second}
 
+	askStore := &pgAskStore{db: db}
+
 	return &Handler{
 		service:        NewService(NewRepository(db)),
 		emailClient:    mailer.NewGraphClientFromEnv(httpClient),
 		aiSettings:     aisettings.NewService(aisettings.NewRepository(db)),
 		httpClient:     httpClient,
 		aiSummaryCache: aiCache,
+		askContext:     askStore,
+		askJobs:        askStore,
 	}
 }
 

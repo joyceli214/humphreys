@@ -50,3 +50,34 @@ describe("renderEmailTemplate work_done bullets", () => {
     expect(body).toBe("Problem: CD not playable");
   });
 });
+
+describe("job-card slot helpers", () => {
+  it("round-trips every Supplier / Shop default through split + join", async () => {
+    const { DEFAULT_EMAIL_TEMPLATES, EMAIL_TEMPLATE_GROUPS, joinJobCards, splitJobCards } = await import("./email-templates");
+    for (const group of EMAIL_TEMPLATE_GROUPS.filter((g) => g.kind !== "customer")) {
+      for (const key of group.keys) {
+        const body = DEFAULT_EMAIL_TEMPLATES[key].body_template;
+        expect(body.match(/\{\{job_cards\}\}/g)).toHaveLength(1);
+        const { before, after } = splitJobCards(body);
+        expect(joinJobCards(before, after)).toBe(body);
+      }
+    }
+    for (const key of ["job_started", "job_completed"] as const) {
+      expect(DEFAULT_EMAIL_TEMPLATES[key].body_template).not.toContain("job_cards");
+    }
+  });
+
+  it("keeps exactly one slot even if the text around it is emptied or has an escaped copy", async () => {
+    const { joinJobCards, splitJobCards } = await import("./email-templates");
+    expect(joinJobCards("", "")).toBe("{{job_cards}}");
+    expect(joinJobCards("Hi {{job\\_cards}}", "Bye")).toBe("Hi\n\n{{job_cards}}\n\nBye");
+    expect(splitJobCards("No slot")).toEqual({ before: "No slot", after: "" });
+    expect(splitJobCards("A\n\n{{ job\\_cards }}\n\nB {{job_cards}}")).toEqual({ before: "A", after: "B" });
+  });
+
+  it("ships no preview example data in the defaults", async () => {
+    const { DEFAULT_EMAIL_TEMPLATES } = await import("./email-templates");
+    const all = JSON.stringify(DEFAULT_EMAIL_TEMPLATES);
+    for (const bad of ["HE-2207", "555", "example.test", "10421", "Alex Martin"]) expect(all).not.toContain(bad);
+  });
+});
