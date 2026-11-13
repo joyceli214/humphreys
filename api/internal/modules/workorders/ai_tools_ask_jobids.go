@@ -403,7 +403,7 @@ func isAskFollowUp(message string) bool {
 }
 
 func isAskUpdateVerb(message string) bool {
-	return askUpdateVerb.MatchString(askAddUp.ReplaceAllString(message, " "))
+	return askUpdateVerb.MatchString(askMakeModel.ReplaceAllString(askAddUp.ReplaceAllString(message, " "), " "))
 }
 
 // isAskCustomerFollowUp reports whether a message refers back to the saved

@@ -15,7 +15,7 @@ export const CHARGES_JOB_CAP = 10;
 const LIST_FETCH_SIZE = 100;
 
 /** Loads with honest loading / error-with-retry state. */
-function useLoad<T>(load: () => Promise<T>) {
+export function useLoad<T>(load: () => Promise<T>) {
   const [state, setState] = useState<{ status: "loading" | "ok" | "error"; data?: T; error?: unknown }>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -34,7 +34,7 @@ function useLoad<T>(load: () => Promise<T>) {
   return { ...state, retry };
 }
 
-const itemLabel = (row: Pick<WorkOrderListItem, "brand_names" | "item_name" | "model_number">) =>
+export const itemLabel = (row: Pick<WorkOrderListItem, "brand_names" | "item_name" | "model_number">) =>
   [row.brand_names?.join(" "), row.item_name, row.model_number].map((p) => (p ?? "").trim()).filter(Boolean).join(" ");
 
 async function searchJobs(query: string): Promise<WorkOrderListItem[]> {
@@ -283,7 +283,7 @@ export function PartsAnswer({ query, statuses, referenceIds = [] }: { query: str
 // 4. Sum up charges
 // ---------------------------------------------------------------------------
 
-const money = (value: number) => new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
+export const money = (value: number) => new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value);
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
 async function loadCharges(referenceIds: number[], customerQuery: string) {

@@ -112,7 +112,69 @@ export type JobSummaryResponse = JobSummaryStaleResponse & {
 };
 
 /** POST /ai-tools/ask/interpret: the Management Ask chat classifies a message (no data, no writes). */
-export type AskIntent = "customer_jobs" | "update_jobs" | "parts_requests" | "charges_summary" | "unknown";
+export type AskIntent =
+  | "customer_jobs"
+  | "update_jobs"
+  | "parts_requests"
+  | "charges_summary"
+  | "parts_update"
+  | "jobs_waiting_parts"
+  | "job_details"
+  | "repair_history"
+  | "add_repair_log"
+  | "add_labour"
+  | "complete_job"
+  | "unknown";
+
+export type AskPartsStatus = "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
+
+/** One parts request change (before → after). Apply PATCHes the request with updated_at. */
+export type AskPartsChange = {
+  parts_purchase_request_id: number;
+  reference_id: number;
+  item_name: string;
+  quantity: number;
+  source: "online" | "supplier";
+  old_status: AskPartsStatus;
+  new_status: AskPartsStatus;
+  old_price: number;
+  new_price: number;
+  old_source_url: string | null;
+  new_source_url: string | null;
+  updated_at: string | null;
+  valid: boolean;
+  error?: string;
+};
+
+export type AskPartsChoice = {
+  parts_purchase_request_id: number;
+  reference_id: number;
+  item_name: string;
+  quantity: number;
+  status: AskPartsStatus;
+  total_price: number;
+};
+
+export type AskPartsPreview = {
+  action: "" | "approve" | "order" | "arrive" | "cancel" | "set_price";
+  changes: AskPartsChange[];
+  /** Set when Ask needs the user to say which request (no changes then). */
+  choices?: AskPartsChoice[];
+};
+
+export type AskRepairLogPreview = { reference_id: number; details: string; hours_used: number };
+
+export type AskLabourPreview = {
+  reference_id: number;
+  hours: number;
+  rate: number;
+  amount: number;
+  /** Mass Update row (set_labour_total); Apply sends row.operation to /ai-tools/mass-update/apply. */
+  row: MassUpdatePreviewRow;
+  note?: string;
+};
+
+export type AskWaitingParts = { status_id: number; status_name: string; total: number };
 
 export type AskInterpretResponse = {
   intent: AskIntent;
@@ -131,6 +193,10 @@ export type AskInterpretResponse = {
   missing_ids?: number[];
   /** Short line shown above the answer, e.g. "Found #275. No job #15." */
   notice?: string;
+  parts_preview?: AskPartsPreview;
+  repair_log_preview?: AskRepairLogPreview;
+  labour_preview?: AskLabourPreview;
+  waiting_parts?: AskWaitingParts;
 };
 
 /** ✎ AI help actions for POST /ai-tools/email-rewrite. */

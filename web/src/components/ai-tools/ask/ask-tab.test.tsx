@@ -305,13 +305,16 @@ const key = (k: string, extra: Record<string, unknown> = {}) => fireEvent.keyDow
 const flush = () => act(async () => { await vi.advanceTimersByTimeAsync(300); });
 
 describe("Ask shortcuts: / skills", () => {
-  it("lists the five chip actions and filters as you type", () => {
+  it("lists the chip actions plus the other skills and filters as you type", () => {
     render(<AskTab />);
     expect(screen.getByText("Type / for skills, @ for people, # for jobs.")).toBeInTheDocument();
     type("/");
     const list = screen.getByRole("listbox", { name: "Skills" });
     expect(within(list).getAllByRole("option").map((o) => o.textContent?.replace("Skill", ""))).toEqual([
-      "Jobs for a customer", "Update a job", "Parts requests", "Update many jobs", "Sum up charges"
+      "Jobs for a customer", "Update a job", "Parts requests", "Update many jobs", "Sum up charges",
+      "Jobs waiting on parts", "Approve parts request",
+      "Parts waiting approval", "Mark parts ordered", "Mark parts arrived", "Cancel parts request", "Set parts price",
+      "Add repair log", "Add labour", "Repair history", "Make and model"
     ]);
     expect(box()).toHaveAttribute("aria-expanded", "true");
     type("/upd");

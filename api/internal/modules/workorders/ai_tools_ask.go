@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,9 +16,10 @@ import (
 
 // Ask (Management chat) intents. The model only classifies the request; the
 // front end then calls the existing read endpoints (job search, parts list,
-// work order detail) or the Mass Update preview. The model never writes SQL
-// and never changes data: every write still goes through Mass Update preview
-// and an explicit Apply.
+// work order detail, repair logs) or shows a preview. The model never writes
+// SQL and never changes data: every write is a preview (Mass Update, or the
+// parts / repair log / labour previews in ai_tools_ask_skills.go) applied only
+// by an explicit Apply through the existing endpoints.
 const (
 	askIntentCustomerJobs  = "customer_jobs"
 	askIntentUpdateJobs    = "update_jobs"
@@ -65,6 +67,14 @@ type askInterpretResult struct {
 	PartsQuery    string   `json:"parts_query"`
 	PartsStatuses []string `json:"parts_statuses"`
 	Reply         string   `json:"reply"`
+	// Skill fields (see ai_tools_ask_skills.go). parts_request_ids are parts
+	// request ids, never job numbers.
+	PartsRequestIDs []int64  `json:"parts_request_ids"`
+	PartsAction     string   `json:"parts_action"`
+	TotalPrice      *float64 `json:"total_price"`
+	SourceURL       string   `json:"source_url"`
+	LogText         string   `json:"log_text"`
+	Hours           *float64 `json:"hours"`
 }
 
 type askInterpretResponse struct {
@@ -82,6 +92,12 @@ type askInterpretResponse struct {
 	MissingIDs []int64 `json:"missing_ids,omitempty"`
 	// Notice is a short line shown above the answer ("No job #15.").
 	Notice string `json:"notice,omitempty"`
+	// Skill previews: nothing is written until the user taps Apply, which
+	// calls the existing endpoints.
+	PartsPreview     *askPartsPreview     `json:"parts_preview,omitempty"`
+	RepairLogPreview *askRepairLogPreview `json:"repair_log_preview,omitempty"`
+	LabourPreview    *askLabourPreview    `json:"labour_preview,omitempty"`
+	WaitingParts     *askWaitingParts     `json:"waiting_parts,omitempty"`
 }
 
 // AskInterpret classifies one Management chat message into an intent plus a few
@@ -127,21 +143,49 @@ func (h *Handler) AskInterpret(c *gin.Context) {
 		c.JSON(status, gin.H{"error": msg})
 	}
 
-	text, model, err := h.generateOpenRouterTextOnce(c, settings, askSystemPrompt(), buildAskUserPrompt(prev, message), 500)
+	userPrompt := buildAskUserPrompt(prev, message)
+	text, model, err := h.generateOpenRouterTextOnce(c, settings, askSystemPrompt(), userPrompt, 500)
 	if err != nil {
 		fail(http.StatusBadGateway, aiErrorMessage(err))
 		return
 	}
 	result, err := parseAskInterpretOutput(text)
 	if err != nil {
-		fail(http.StatusBadGateway, err.Error())
+		// Retry once with a stricter reminder (it costs one more slot of the
+		// per-user AI limit); then answer kindly instead of failing.
+		log.Printf("[ai] ask: model returned invalid JSON: %v", err)
+		if h.chargeAskRetry(c) {
+			if text2, model2, err2 := h.generateOpenRouterTextOnce(c, settings, askSystemPrompt(), userPrompt+askJSONReminder, 500); err2 == nil {
+				if result2, err3 := parseAskInterpretOutput(text2); err3 == nil {
+					result, model, err = result2, model2, nil
+				} else {
+					log.Printf("[ai] ask: retry returned invalid JSON: %v", err3)
+				}
+			}
+		}
+	}
+	if err != nil {
+		resp := askPlainReply(askInterpretResponse{askInterpretResult: askInterpretResult{
+			ReferenceIDs: []int64{}, PartsStatuses: []string{}, PartsRequestIDs: []int64{},
+		}}, askNotUnderstoodReply)
+		resp.Model = model
+		if canSave {
+			next := prev
+			next.Turns = appendAskTurn(prev.Turns, message, "Said: "+askNotUnderstoodReply)
+			h.saveAskContext(ctx, userID, next)
+		}
+		c.JSON(http.StatusOK, resp)
 		return
 	}
 	out := h.resolveAsk(ctx, askResolveInput{
-		Message:          message,
-		Result:           result,
-		Prev:             prev,
-		IncludeSensitive: hasPermission(c, permSensitiveRead),
+		Message:             message,
+		Result:              result,
+		Prev:                prev,
+		IncludeSensitive:    hasPermission(c, permSensitiveRead),
+		CanReadParts:        hasPermission(c, permPartsRead),
+		CanUpdateParts:      hasPermission(c, permPartsUpdate),
+		CanApproveParts:     hasPermission(c, permPartsApprove),
+		CanCreateRepairLogs: hasPermission(c, permRepairLogsCreate),
 	})
 	if canSave {
 		next := prev
@@ -206,6 +250,11 @@ type askResolveInput struct {
 	Result           askInterpretResult
 	Prev             askContext
 	IncludeSensitive bool
+	// The caller's permissions for the skill previews (Apply re-checks them).
+	CanReadParts        bool
+	CanUpdateParts      bool
+	CanApproveParts     bool
+	CanCreateRepairLogs bool
 }
 
 // askOutcome is the resolved answer, what to remember (nil keeps the saved
@@ -247,7 +296,12 @@ func (h *Handler) resolveAsk(ctx context.Context, in askResolveInput) askOutcome
 	if r.resp.PartsStatuses == nil {
 		r.resp.PartsStatuses = []string{}
 	}
-	r.resolve()
+	if r.resp.PartsRequestIDs == nil {
+		r.resp.PartsRequestIDs = []int64{}
+	}
+	if !r.resolveSkill() {
+		r.resolve()
+	}
 	// Invariant: never an update without job numbers and an instruction.
 	if r.resp.Intent == askIntentUpdateJobs && (r.resp.PreviewInstruction == "" || len(r.resp.ReferenceIDs) == 0) {
 		r.plain(askNoContextReply)
@@ -260,7 +314,8 @@ func (r *askResolver) resolve() {
 	explicit := parseAskJobIDs(msg)
 	followUp := isAskFollowUp(msg)
 	customerRef := isAskCustomerFollowUp(msg)
-	updateVerb := isAskUpdateVerb(msg)
+	// A question ("what's the make and model on #31178") never updates.
+	updateVerb := isAskUpdateVerb(msg) && !isAskQuestion(msg)
 	bare := len(explicit) > 0 && isAskBareJobNumbers(msg)
 
 	if bare && (r.resp.Intent == askIntentUnknown || r.resp.Intent == askIntentUpdateJobs) {
@@ -300,7 +355,9 @@ func (r *askResolver) resolve() {
 	// A parts-status change ("set their parts to ordered"), or an update right
 	// after a parts answer that does not clearly target the jobs ("set them to
 	// pending"), stays on the parts path even when the model already resolved
-	// the job numbers: Ask cannot change parts request status.
+	// the job numbers. (Approve / ordered / arrived / cancel / price were
+	// already handled by resolveSkill; what is left, e.g. "pending", is a
+	// parts status Ask can't set.)
 	if len(explicit) == 0 && (partsUpdate ||
 		(isUpdate && normalizeAskTopic(prev.Topic) == askTopicParts && !r.targetsJobs(msg))) {
 		target := ids
@@ -569,6 +626,13 @@ func (r *askResolver) summary() string {
 		return "jobs " + askRefList(ids, askSummaryRefs)
 	}
 	var s string
+	if skill := r.skillSummary(); skill != "" {
+		s = skill
+		if resp.Notice != "" {
+			s += " Notice: " + resp.Notice
+		}
+		return askOneLine(s, askMaxTurnRunes)
+	}
 	switch resp.Intent {
 	case askIntentUpdateJobs:
 		s = "Opened a preview to change " + jobs(ids) + " (nothing saved until Apply)."
@@ -595,7 +659,7 @@ func (r *askResolver) summary() string {
 		reply := strings.TrimSpace(resp.Reply)
 		if reply == "" {
 			// What the front end shows for an empty reply.
-			reply = "I can find jobs, update jobs, list parts requests, or sum up charges."
+			reply = "I can find jobs, update jobs, change parts requests, add repair logs or labour, or sum up charges."
 		}
 		s = "Said: " + reply
 	}
@@ -676,8 +740,8 @@ func askSameIDs(a, b []int64) bool {
 }
 
 // askPartsUpdateFollowUp answers an update follow-up ("set them to pending")
-// whose saved context is a parts answer (or that names a parts status). Ask
-// cannot change parts request status, so it never returns update_jobs or a
+// whose saved context is a parts answer (or that names a parts status Ask
+// can't set, e.g. "pending"), so it never returns update_jobs or a
 // preview instruction: with no parts requests on those jobs it says there is
 // nothing to change, otherwise it shows those jobs' parts requests with a
 // notice.
@@ -750,8 +814,33 @@ func parseAskInterpretOutput(text string) (askInterpretResult, error) {
 		ReferenceIDs:  make([]int64, 0),
 		PartsStatuses: make([]string, 0),
 	}
-	if !askIntents[out.Intent] {
+	if !askIntents[out.Intent] && !askSkillIntents[out.Intent] {
 		out.Intent = askIntentUnknown
+	}
+	out.PartsRequestIDs = make([]int64, 0)
+	seenReq := make(map[int64]bool)
+	for _, id := range raw.PartsRequestIDs {
+		if id > 0 && id <= 1<<31-1 && !seenReq[id] && len(out.PartsRequestIDs) < askMaxReferenceIDs {
+			seenReq[id] = true
+			out.PartsRequestIDs = append(out.PartsRequestIDs, id)
+		}
+	}
+	if action := strings.ToLower(strings.TrimSpace(raw.PartsAction)); action != "" {
+		if _, ok := askPartsActions[action]; ok {
+			out.PartsAction = action
+		}
+	}
+	if raw.TotalPrice != nil && askValidPrice(*raw.TotalPrice) {
+		v := *raw.TotalPrice
+		out.TotalPrice = &v
+	}
+	if u := strings.TrimSpace(raw.SourceURL); strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		out.SourceURL = capRunes(u, 1000)
+	}
+	out.LogText = capRunes(strings.TrimSpace(raw.LogText), askMaxLogText)
+	if raw.Hours != nil && !math.IsNaN(*raw.Hours) && !math.IsInf(*raw.Hours, 0) && *raw.Hours >= 0 && *raw.Hours <= askMaxHours {
+		v := *raw.Hours
+		out.Hours = &v
 	}
 	seen := make(map[int64]bool)
 	for _, id := range raw.ReferenceIDs {
@@ -784,15 +873,24 @@ func capRunes(s string, max int) string {
 
 func askSystemPrompt() string {
 	return "You classify a repair-shop management request typed by the shop owner. " +
-		"You only classify: you never write SQL and never change data. Any data change happens later in a separate Mass Update preview that the user must review and Apply. " +
+		"You only classify: you never write SQL and never change data. Any data change happens later in a preview that the user must review and Apply. " +
 		"Respond with STRICT JSON only (no prose, no markdown) of the form " +
-		`{"intent":"...","customer_query":"","reference_ids":[],"parts_query":"","parts_statuses":[],"reply":""}. ` +
+		`{"intent":"...","customer_query":"","reference_ids":[],"parts_query":"","parts_statuses":[],"reply":"","parts_request_ids":[],"parts_action":"","total_price":null,"source_url":"","log_text":"","hours":null}. ` +
 		"intent must be one of:\n" +
-		`- "customer_jobs": list or summarise jobs for a customer or for job numbers; put the customer name in customer_query or the job numbers in reference_ids\n` +
-		`- "update_jobs": change one or more jobs (status, location, labour, line items, work done); put the job numbers in reference_ids\n` +
-		`- "parts_requests": show parts purchase requests; optional parts_query text and parts_statuses from: draft, waiting_approval, approved, ordered, arrived, used, cancelled; put job numbers in reference_ids when the request is about specific jobs\n` +
+		`- "customer_jobs": list or summarise jobs for a customer or for job numbers, or answer "what's the status of #X"; put the customer name in customer_query or the job numbers in reference_ids\n` +
+		`- "job_details": a question about a job's item: make, brand, model or serial number; job numbers in reference_ids\n` +
+		`- "repair_history": what was done on a job, its repair logs or repair history; job numbers in reference_ids\n` +
+		`- "update_jobs": change one or more jobs' status, location, labour total in dollars, line items or work done; put the job numbers in reference_ids\n` +
+		`- "add_repair_log": add a repair log to one job; the job number in reference_ids, the log text exactly as typed in log_text, hours (number) in hours\n` +
+		`- "add_labour": add labour hours to one job ("add 1 hour labour to #X"); the job number in reference_ids, the hours (number) in hours\n` +
+		`- "complete_job": complete or close a job ("complete job #X", "mark #X complete"); job numbers in reference_ids. There is no Complete status; the user must tap Complete Job on the job page\n` +
+		`- "parts_requests": show parts purchase requests; optional parts_query text and parts_statuses from: draft, waiting_approval, approved, ordered, arrived, used, cancelled (only the statuses asked about); put job numbers in reference_ids when the request is about specific jobs\n` +
+		`- "parts_update": change parts requests: parts_action is one of approve, order (mark ordered), arrive (mark arrived), cancel, set_price; put parts request ids (from "request 480", "parts request #480", "PR 480") in parts_request_ids and job numbers in reference_ids; total_price for a new price, source_url for a link typed by the user, parts_query for a part name\n` +
+		`- "jobs_waiting_parts": which jobs are waiting on parts (the jobs, not the parts requests)\n` +
 		`- "charges_summary": sum up labour, parts, deposit and balance for jobs; put job numbers in reference_ids or the customer in customer_query\n` +
 		`- "unknown": anything else; put one short, plain sentence in reply\n` +
+		"A question (what, which, show, is, did ...) never changes data: never answer a question with update_jobs, add_repair_log, add_labour or parts_update. " +
+		"Parts request ids and job numbers are both integers: a number after request, parts request or PR is a parts request id; a number after job or # is a job number. " +
 		"You receive the user's saved context (SAVED_TOPIC, SAVED_JOBS, SAVED_CUSTOMER) and the recent conversation (USER/ASSISTANT lines, oldest first), then the Request line. " +
 		"Use them to resolve pronouns and implicit references such as \"their\", \"they\", \"them\", \"the jobs\", \"both\", \"all\", \"it\", \"the same customer\", \"her jobs\", or Chinese 佢哋, 呢啲, 全部, and put the resolved job numbers in reference_ids. " +
 		"An update with no pronoun right after a job list (\"update status to Finished\", \"set to pending\") means those jobs. " +

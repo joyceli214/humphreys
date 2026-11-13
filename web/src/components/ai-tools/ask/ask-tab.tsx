@@ -7,7 +7,16 @@ import { errorMessage } from "@/components/ai-tools/ai-ui";
 import { FOCUS, MgmtChip, MgmtError, MgmtLoading, errorStatus } from "@/components/ai-tools/mgmt-ui";
 import { ChargesAnswer, CustomerJobsAnswer, PartsAnswer, UpdatePreviewAnswer } from "@/components/ai-tools/ask/ask-answers";
 import { AskMentionMenu, useShortcutResults, type MenuRow } from "@/components/ai-tools/ask/ask-mention-menu";
-import { appendMention, findTrigger, insertMention, type ShortcutKind, type ShortcutTrigger } from "@/components/ai-tools/ask/ask-shortcuts";
+import { ASK_SKILL_PROMPTS, appendMention, findTrigger, insertMention, type ShortcutKind, type ShortcutTrigger } from "@/components/ai-tools/ask/ask-shortcuts";
+import {
+  CompleteJobAnswer,
+  JobDetailsAnswer,
+  LabourPreviewAnswer,
+  PartsChangeAnswer,
+  RepairHistoryAnswer,
+  RepairLogPreviewAnswer,
+  WaitingPartsAnswer
+} from "@/components/ai-tools/ask/ask-skill-answers";
 import { cn } from "@/lib/utils";
 
 /** Starter chips put an editable example in the box; they never send by themselves. */
@@ -16,7 +25,15 @@ export const ASK_STARTERS: Array<{ label: string; prompt: string }> = [
   { label: "Update a job", prompt: "Job #: set status to " },
   { label: "Parts requests", prompt: "Show all parts requests" },
   { label: "Update many jobs", prompt: "Set jobs # and # to status " },
-  { label: "Sum up charges", prompt: "Sum up the charges on job #" }
+  { label: "Sum up charges", prompt: "Sum up the charges on job #" },
+  { label: "Jobs waiting on parts", prompt: "Which jobs are waiting on parts?" },
+  { label: "Approve parts request", prompt: "Approve parts request " }
+];
+
+/** Everything the "/" menu offers: the starters plus the other skills. */
+export const ASK_SKILLS: Array<{ label: string; prompt: string }> = [
+  ...ASK_STARTERS,
+  ...ASK_SKILL_PROMPTS.filter((s) => !ASK_STARTERS.some((t) => t.label === s.label))
 ];
 
 /**
@@ -73,10 +90,28 @@ function AnswerBody({ answer, onStarter }: { answer: AskInterpretResponse; text:
       return <PartsAnswer query={answer.parts_query} statuses={answer.parts_statuses ?? []} referenceIds={answer.reference_ids ?? []} />;
     case "charges_summary":
       return <ChargesAnswer referenceIds={answer.reference_ids ?? []} customerQuery={answer.customer_query} />;
+    case "parts_update":
+      if (!answer.parts_preview) return <p>{answer.reply || NO_JOBS_REPLY}</p>;
+      return <PartsChangeAnswer preview={answer.parts_preview} reply={answer.reply} />;
+    case "add_repair_log":
+      if (!answer.repair_log_preview) return <p>{answer.reply || NO_JOBS_REPLY}</p>;
+      return <RepairLogPreviewAnswer preview={answer.repair_log_preview} />;
+    case "add_labour":
+      if (!answer.labour_preview) return <p>{answer.reply || NO_JOBS_REPLY}</p>;
+      return <LabourPreviewAnswer preview={answer.labour_preview} />;
+    case "jobs_waiting_parts":
+      if (!answer.waiting_parts) return <p>{answer.reply || "I couldn't find the waiting-on-parts status."}</p>;
+      return <WaitingPartsAnswer waiting={answer.waiting_parts} />;
+    case "job_details":
+      return <JobDetailsAnswer referenceIds={answer.reference_ids ?? []} />;
+    case "repair_history":
+      return <RepairHistoryAnswer referenceIds={answer.reference_ids ?? []} />;
+    case "complete_job":
+      return <CompleteJobAnswer reply={answer.reply} referenceIds={answer.reference_ids ?? []} />;
     default:
       return (
         <div>
-          <p className="mb-2 whitespace-pre-wrap">{answer.reply || "I can find jobs, update jobs, list parts requests, or sum up charges."}</p>
+          <p className="mb-2 whitespace-pre-wrap">{answer.reply || "I can find jobs, update jobs, change parts requests, add repair logs or labour, or sum up charges."}</p>
           <Starters onPick={onStarter} />
         </div>
       );
@@ -112,7 +147,7 @@ export function AskTab() {
   const listId = useId();
   // A query still being typed (#15, @Name) is not itself an inserted mention.
   const pickedText = menu && !menu.sticky ? `${input.slice(0, menu.start)}${input.slice(menu.caret)}` : input;
-  const results = useShortcutResults(menu, pickedText, ASK_STARTERS);
+  const results = useShortcutResults(menu, pickedText, ASK_SKILLS);
   const activeIndex = active >= 0 && active < results.options.length ? active : -1;
   const optionId = (i: number) => `${listId}-o${i}`;
 

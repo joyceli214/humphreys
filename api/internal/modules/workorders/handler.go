@@ -41,6 +41,9 @@ type Handler struct {
 	// askJobs checks which job numbers exist. Both nil degrade gracefully.
 	askContext askContextStore
 	askJobs    askJobLookup
+	// askParts reads parts requests for Ask previews (nil: parts changes
+	// answer that the lookup is unavailable).
+	askParts askPartsLookup
 }
 
 type updateEquipmentRequest struct {
@@ -244,6 +247,7 @@ func New(db *pgxpool.Pool) *Handler {
 		aiSummaryCache: aiCache,
 		askContext:     askStore,
 		askJobs:        askStore,
+		askParts:       askStore,
 	}
 }
 

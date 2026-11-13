@@ -25,9 +25,10 @@ const askNoContextReply = "I don't have recent jobs to refer to. Tell me the job
 // askNoJobsReply answers when every job number named does not exist.
 const askNoJobsReply = "Check the job numbers and try again."
 
-// askPartsStatusNotice is shown when a follow-up asks to change the status of
-// parts requests: Ask has no parts-status write tool.
-const askPartsStatusNotice = "Ask can't change parts request status yet. Change it from each job's Parts list."
+// askPartsStatusNotice is shown when a follow-up asks to change parts requests
+// to a status Ask can't set (e.g. "pending"): Ask can approve, mark ordered,
+// mark arrived, cancel or price them (ai_tools_ask_skills.go).
+const askPartsStatusNotice = "Ask can approve, mark ordered, mark arrived or cancel parts requests, or set a price — e.g. “approve request 480”. Other changes: use each job's Parts list."
 
 // Context topics: what the last answer was about. A follow-up update after a
 // parts answer must never become a job-field Mass Update unless it clearly

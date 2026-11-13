@@ -25,6 +25,10 @@ type memAskStore struct {
 	rows  map[string]askContext
 	jobs  map[int64]bool
 	parts map[int64]int // parts requests per job
+	// partRows are full parts requests (Ask skills); statusJobs maps a status
+	// id to its jobs.
+	partRows   []askPartsRow
+	statusJobs map[int64][]int64
 	// customers maps a customer name to their jobs (newest first), for the
 	// customer search and the job → customer lookup.
 	customers map[string][]int64
@@ -200,7 +204,7 @@ func askContextRouter(t *testing.T, store *memAskStore) *gin.Engine {
 	group := router.Group("", middleware.Auth("test-secret"))
 	h := &Handler{service: NewService(searchStub()), httpClient: &http.Client{}}
 	if store != nil {
-		h.askContext, h.askJobs = store, store
+		h.askContext, h.askJobs, h.askParts = store, store, store
 	}
 	// A generous limiter so a multi-message test is not rate limited.
 	h.aiLimiter = newAIRateLimiter(1000, time.Minute)

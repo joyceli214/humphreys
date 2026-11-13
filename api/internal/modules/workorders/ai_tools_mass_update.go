@@ -152,7 +152,7 @@ func (h *Handler) MassUpdatePreview(c *gin.Context) {
 
 	// Validate caps before generating any Work Done so nothing over the cap
 	// spends LLM calls; Work Done text only ever comes from the repair logs.
-	ops := dedupeMassUpdateOps(clearLLMWorkDoneText(envelope.Operations))
+	ops := dropUnaskedMoneyOps(instruction, dedupeMassUpdateOps(clearLLMWorkDoneText(envelope.Operations)))
 	if err := validateMassUpdateOps(ops); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "The AI's suggested changes could not be previewed: " + err.Error()})
 		return
