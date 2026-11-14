@@ -252,6 +252,46 @@ func TestAskPartsCancelByPartName(t *testing.T) {
 	}
 }
 
+// The live model classified the cancel but left parts_query empty; the part
+// named in the user's text still narrows the job's requests.
+func TestAskPartsCancelByPartNameWithoutPartsQuery(t *testing.T) {
+	for _, intent := range []string{askIntentPartsRequests, askIntentPartsUpdate} {
+		llm, store, ask := skillSetup(t)
+		store.partRows = append(store.partRows, partRow(482, 31271, "Fuse 2A slow blow", "waiting_approval", 2))
+		llm.answerJSON(map[string]any{"intent": intent, "reference_ids": []int64{31271}, "parts_query": "", "parts_statuses": []string{"cancelled"}})
+		resp := ask("Jerry doesn't have the 10,000uF cap for #31271, cancel it")
+		if resp.PartsPreview != nil && len(resp.PartsPreview.Choices) > 0 {
+			t.Fatalf("[%s] want a single change, got choices %+v", intent, resp.PartsPreview.Choices)
+		}
+		ch := onlyChange(t, intent, resp)
+		if ch.PartsPurchaseRequestID != 480 || ch.NewStatus != "cancelled" || !ch.Valid {
+			t.Fatalf("[%s] change = %+v", intent, ch)
+		}
+	}
+}
+
+func TestAskMatchPartNameFallsBackToMessage(t *testing.T) {
+	rows := []askPartsRow{
+		partRow(1, 31221, "TEST Drive belt 3mm", "waiting_approval", 5),
+		partRow(2, 31221, "TEST Power switch", "waiting_approval", 5),
+	}
+	got := askMatchPartName(rows, "", "Jerry doesn't have the drive belt for #31221, cancel it")
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	// Nothing part-like in the message: every row stays.
+	if got := askMatchPartName(rows, "", "cancel it for #31221 please"); len(got) != 2 {
+		t.Fatalf("filler only: got %+v", got)
+	}
+}
+
+func TestAskPartWordsSkipsNumbersAndFiller(t *testing.T) {
+	got := askPartWords("Jerry doesn't have the 10,000uF cap for #31271, cancel it")
+	if !reflect.DeepEqual(got, []string{"10000uf", "cap"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestAskPartsSetPriceAndLink(t *testing.T) {
 	llm, _, ask := skillSetup(t)
 	llm.answer(askIntentPartsRequests, 480)

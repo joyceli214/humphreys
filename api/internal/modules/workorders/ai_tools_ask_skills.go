@@ -1125,9 +1125,13 @@ func askPartsExample(action string, id int64) string {
 }
 
 // askMatchPartName keeps the requests whose name best matches the part the
-// user named (all rows when nothing matches).
+// user named (all rows when nothing matches). When the model left parts_query
+// empty the words come from the user's message instead.
 func askMatchPartName(rows []askPartsRow, query, msg string) []askPartsRow {
 	words := askPartWords(query)
+	if len(words) == 0 {
+		words = askPartWords(msg)
+	}
 	if len(words) == 0 {
 		return rows
 	}
@@ -1156,18 +1160,43 @@ func askMatchPartName(rows []askPartsRow, query, msg string) []askPartsRow {
 var askPartStopWords = map[string]bool{
 	"the": true, "a": true, "an": true, "for": true, "on": true, "of": true, "part": true, "parts": true,
 	"request": true, "requests": true, "job": true, "it": true, "them": true, "and": true, "to": true,
+	// Filler and action words from shop phrasing, so the message fallback
+	// keeps only part-like words.
+	"cancel": true, "cancelled": true, "canceled": true, "approve": true, "approved": true,
+	"order": true, "ordered": true, "arrive": true, "arrived": true, "mark": true, "set": true,
+	"price": true, "status": true, "pending": true, "as": true, "is": true, "in": true, "at": true,
+	"with": true, "from": true, "by": true, "be": true, "not": true, "no": true, "or": true,
+	"have": true, "has": true, "had": true, "doesn't": true, "don't": true, "dont": true,
+	"doesnt": true, "isn't": true, "isnt": true, "can't": true, "cant": true, "won't": true,
+	"jerry": true, "please": true, "pls": true, "can": true, "could": true, "would": true,
+	"you": true, "me": true, "my": true, "we": true, "our": true, "us": true, "i": true,
+	"already": true, "still": true, "just": true, "this": true, "that": true, "those": true,
+	"these": true, "their": true, "they": true, "its": true, "one": true, "all": true,
+	"now": true, "need": true, "needs": true, "get": true, "got": true, "thanks": true,
+	"customer": true, "pr": true,
 }
 
 func askPartWords(query string) []string {
 	out := []string{}
-	for _, w := range strings.Fields(strings.ToLower(strings.ReplaceAll(query, ",", ""))) {
-		w = strings.Trim(w, ".:;!?()[]\"'#")
-		if len([]rune(w)) < 2 || askPartStopWords[w] {
+	text := strings.NewReplacer(",", "", "’", "'", "‘", "'").Replace(strings.ToLower(query))
+	for _, w := range strings.Fields(text) {
+		w = strings.Trim(w, ".:;!?()[]\"'#＃")
+		if len([]rune(w)) < 2 || askPartStopWords[w] || askAllDigits(w) {
 			continue
 		}
 		out = append(out, w)
 	}
 	return out
+}
+
+// askAllDigits is true for job/request numbers ("31271"), never part words.
+func askAllDigits(w string) bool {
+	for _, r := range w {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return w != ""
 }
 
 var askBareInt = regexp.MustCompile(`(?:^|[\s(])[#＃]?(\d{1,7})(?:[\s!?)]|[,.](?:\s|$)|$)`)
