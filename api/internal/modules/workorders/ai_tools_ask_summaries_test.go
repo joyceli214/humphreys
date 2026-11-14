@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"humphreys/api/internal/domain"
+	"humphreys/api/internal/modules/aisettings"
 	"humphreys/api/internal/modules/auth/security"
 
 	"github.com/gin-gonic/gin"
@@ -674,5 +675,42 @@ func TestAskPromptLiveJobsCapped(t *testing.T) {
 	lj := liveJobsBlock(llm.lastUserPrompt(t))
 	if n := strings.Count(lj, "\n- JOB #"); n != askMaxLiveJobs {
 		t.Fatalf("live jobs = %d, want %d:\n%s", n, askMaxLiveJobs, lj)
+	}
+}
+
+func TestAskCloseConversationIgnoresCanceledRequestContext(t *testing.T) {
+	llm := newAskLLM(t)
+	llm.setSummary("Job 31221: parts request 480 approval was previewed, not applied.")
+	store := newMemAskStore(31221)
+	row := idleRow(13)
+	store.rows[askUserA] = row
+
+	h := &Handler{service: NewService(searchStub()), httpClient: &http.Client{}, aiLimiter: newAIRateLimiter(1000, time.Minute)}
+	h.askContext, h.askJobs, h.askParts = store, store, store
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	reqCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c.Request = httptest.NewRequest(http.MethodPost, "/ai-tools/ask/interpret", nil).WithContext(reqCtx)
+
+	settings := aisettings.Settings{OpenRouterAPIKey: "test-key", HasOpenRouterAPIKey: true, OpenRouterModel: "mock-model"}
+	summarized, err := h.closeAskConversation(c, &settings, askUserA, row, row.UpdatedAt)
+	if err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if !summarized {
+		t.Fatal("expected the summary to be stored after the request context was canceled")
+	}
+	if _, n := llm.counts(); n != 1 {
+		t.Fatalf("summary calls = %d, want 1", n)
+	}
+	if got := store.userSummaries(askUserA); len(got) != 1 || got[0] != "Job 31221: parts request 480 approval was previewed, not applied." {
+		t.Fatalf("summaries = %q", got)
+	}
+	cleared, _ := store.row(askUserA)
+	if len(cleared.Turns) != 0 || len(cleared.ReferenceIDs) != 0 || cleared.CustomerQuery != "" {
+		t.Fatalf("context should have been cleared: %+v", cleared)
 	}
 }

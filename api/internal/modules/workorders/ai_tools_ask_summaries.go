@@ -54,6 +54,10 @@ const (
 	askSummaryMaxTokens = 300
 	// askCleanupEvery throttles the opportunistic global expiry.
 	askCleanupEvery = 10 * time.Minute
+	// askSummaryCallTimeout bounds the summary AI call and the save, even if
+	// the caller's request context is canceled (a client timeout must not
+	// abandon the close mid-flight and leave the old turns in place).
+	askSummaryCallTimeout = 45 * time.Second
 )
 
 // askSummaryMarker is a stable phrase in the summary system prompt (the local
@@ -200,14 +204,23 @@ func askConversationEnded(ac askContext, now time.Time) bool {
 	return len(ac.Turns) > 0 && !ac.UpdatedAt.IsZero() && now.Sub(ac.UpdatedAt) >= askConversationIdle
 }
 
+// askCloseContext is a request-independent deadline for summarizing and
+// clearing a conversation. The gin request context is canceled when the
+// client hangs up; we still want the close to finish.
+func askCloseContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), askSummaryCallTimeout)
+}
+
 // closeAskConversation summarizes ac's turns (best-effort: one AI call, one
 // rate-limit slot) and clears the turns, jobs, customer and topic of the
 // user's context row. It reports whether a summary was stored. It never
-// fails the caller; errors are logged.
+// fails the caller; errors are logged. The AI call and the save use a
+// detached deadline so a client timeout cannot leave the conversation open.
 func (h *Handler) closeAskConversation(c *gin.Context, settings *aisettings.Settings, userID string, ac askContext, createdAt time.Time) (summarized bool, err error) {
-	ctx := c.Request.Context()
+	ctx, cancel := askCloseContext()
+	defer cancel()
 	if len(ac.Turns) > 0 && settings != nil {
-		summarized = h.summarizeAskConversation(c, *settings, userID, ac, createdAt)
+		summarized = h.summarizeAskConversation(c, ctx, *settings, userID, ac, createdAt)
 	}
 	if h.askContext != nil && userID != "" && !ac.UpdatedAt.IsZero() {
 		err = h.askContext.SaveAskContext(ctx, userID, askContext{ReferenceIDs: []int64{}, Topic: askTopicJobs})
@@ -222,7 +235,7 @@ func (h *Handler) closeAskConversation(c *gin.Context, settings *aisettings.Sett
 // summarizeAskConversation makes the one summary call and stores the scrubbed
 // result. It returns false (and logs) when no rate-limit slot is left, the
 // call fails or the model returned nothing.
-func (h *Handler) summarizeAskConversation(c *gin.Context, settings aisettings.Settings, userID string, ac askContext, createdAt time.Time) bool {
+func (h *Handler) summarizeAskConversation(c *gin.Context, ctx context.Context, settings aisettings.Settings, userID string, ac askContext, createdAt time.Time) bool {
 	if h.askContext == nil || userID == "" || len(ac.Turns) == 0 {
 		return false
 	}
@@ -231,7 +244,7 @@ func (h *Handler) summarizeAskConversation(c *gin.Context, settings aisettings.S
 		return false
 	}
 	start := time.Now()
-	text, _, err := h.generateOpenRouterTextOnce(c, settings, askSummarySystemPrompt(), buildAskSummaryPrompt(ac), askSummaryMaxTokens)
+	text, _, err := h.generateOpenRouterTextCtx(ctx, settings, askSummarySystemPrompt(), buildAskSummaryPrompt(ac), askSummaryMaxTokens)
 	log.Printf("[ai] ask: conversation summary took %s", time.Since(start).Round(time.Millisecond))
 	if err != nil {
 		log.Printf("[ai] ask: conversation summary failed: %v", err)
@@ -242,7 +255,7 @@ func (h *Handler) summarizeAskConversation(c *gin.Context, settings aisettings.S
 		log.Printf("[ai] ask: conversation summary was empty")
 		return false
 	}
-	if err := h.askContext.InsertAskSummary(c.Request.Context(), userID, summary, createdAt); err != nil {
+	if err := h.askContext.InsertAskSummary(ctx, userID, summary, createdAt); err != nil {
 		log.Printf("[ai] ask: conversation summary save: %v", err)
 		return false
 	}
