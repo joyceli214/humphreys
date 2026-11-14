@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -130,8 +129,19 @@ func (h *Handler) AskInterpret(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	userID := aiToolsActor(c)
-	now := time.Now()
+	now := askNow()
+	h.cleanupAskMemory(ctx, now, false)
 	prev, canSave := h.loadAskContext(ctx, userID, now)
+	// After askConversationIdle without a message the conversation ends: it
+	// is summarized first (so this message can use the summary) and this
+	// message starts a new window. A failed or skipped summary never fails
+	// the question.
+	if canSave && askConversationEnded(prev, now) {
+		if _, err := h.closeAskConversation(c, &settings, userID, prev, prev.UpdatedAt); err != nil {
+			log.Printf("[ai] ask: closing conversation: %v", err)
+		}
+		prev = askContext{}
+	}
 	// fail records the turn (so the conversation shows what happened) and
 	// answers with an error.
 	fail := func(status int, msg string) {
@@ -143,7 +153,16 @@ func (h *Handler) AskInterpret(c *gin.Context) {
 		c.JSON(status, gin.H{"error": msg})
 	}
 
-	userPrompt := buildAskUserPrompt(prev, message)
+	broad := isAskBroadQuery(message)
+	liveJobs, hasLive := h.askLiveJobs(ctx, h.askLiveJobIDs(ctx, message, prev, broad))
+	userPrompt := buildAskUserPrompt(askPromptInput{
+		Prev:        prev,
+		Message:     message,
+		Summaries:   h.recentAskSummaries(ctx, userID, now),
+		LiveJobs:    liveJobs,
+		HasLiveJobs: hasLive,
+		Now:         now,
+	})
 	text, model, err := h.generateOpenRouterTextOnce(c, settings, askSystemPrompt(), userPrompt, 500)
 	if err != nil {
 		fail(http.StatusBadGateway, aiErrorMessage(err))
@@ -200,9 +219,14 @@ func (h *Handler) AskInterpret(c *gin.Context) {
 }
 
 // buildAskUserPrompt is the stable, line-based block the model (and the local
-// stand-in) parses. Every line is single-line; the Request line is last.
-func buildAskUserPrompt(prev askContext, message string) string {
+// stand-in) parses. Every line is single-line; the Request line is last:
+// PAST_CONVERSATIONS (summaries, a hint), the saved context and recent turns
+// of this conversation, LIVE_JOBS (fresh database records, the source of
+// truth; omitted when no lookup is configured), then Request.
+func buildAskUserPrompt(in askPromptInput) string {
+	prev, message := in.Prev, in.Message
 	var b strings.Builder
+	b.WriteString(askPastConversationsBlock(in.Summaries, in.Now))
 	topic := "none"
 	if !prev.UpdatedAt.IsZero() {
 		topic = normalizeAskTopic(prev.Topic)
@@ -230,6 +254,9 @@ func buildAskUserPrompt(prev askContext, message string) string {
 	for _, t := range prev.Turns {
 		line("USER:", askOneLine(t.User, askMaxTurnRunes))
 		line("ASSISTANT:", askOneLine(t.Assistant, askMaxTurnRunes))
+	}
+	if in.HasLiveJobs {
+		b.WriteString(askLiveJobsBlock(in.LiveJobs))
 	}
 	b.WriteString("Request: ")
 	b.WriteString(askOneLine(message, aiToolsMaxTextChars))
@@ -276,6 +303,9 @@ type askResolver struct {
 	// or the lookup is unavailable).
 	customerHits     []int64
 	customerSearched bool
+	// broad: a shop-wide question ("which parts requests are waiting for
+	// approval?") that must never use the remembered jobs or customer.
+	broad bool
 }
 
 // resolveAsk applies the server rules on top of the model's classification.
@@ -287,9 +317,13 @@ type askResolver struct {
 //   - an update with no job numbers uses the saved jobs, and after a parts
 //     answer stays on the parts path unless it clearly targets the jobs;
 //   - follow-ups never fall back to "everything" (whole shop, raw text);
+//   - shop-wide questions ("which jobs are waiting on parts?", "show all X")
+//     never use the remembered jobs: model job numbers the user did not type
+//     are dropped (isAskBroadQuery);
 //   - update_jobs is only returned with a preview instruction naming jobs.
 func (h *Handler) resolveAsk(ctx context.Context, in askResolveInput) askOutcome {
 	r := &askResolver{h: h, ctx: ctx, in: in, resp: askInterpretResponse{askInterpretResult: in.Result}}
+	r.broad = isAskBroadQuery(in.Message)
 	if r.resp.ReferenceIDs == nil {
 		r.resp.ReferenceIDs = []int64{}
 	}
@@ -302,6 +336,9 @@ func (h *Handler) resolveAsk(ctx context.Context, in askResolveInput) askOutcome
 	if !r.resolveSkill() {
 		r.resolve()
 	}
+	if r.broad {
+		r.dropUntypedIDs()
+	}
 	// Invariant: never an update without job numbers and an instruction.
 	if r.resp.Intent == askIntentUpdateJobs && (r.resp.PreviewInstruction == "" || len(r.resp.ReferenceIDs) == 0) {
 		r.plain(askNoContextReply)
@@ -312,7 +349,7 @@ func (h *Handler) resolveAsk(ctx context.Context, in askResolveInput) askOutcome
 func (r *askResolver) resolve() {
 	msg, prev := r.in.Message, r.in.Prev
 	explicit := parseAskJobIDs(msg)
-	followUp := isAskFollowUp(msg)
+	followUp := isAskFollowUp(msg) && !r.broad
 	customerRef := isAskCustomerFollowUp(msg)
 	// A question ("what's the make and model on #31178") never updates.
 	updateVerb := isAskUpdateVerb(msg) && !isAskQuestion(msg)
@@ -338,6 +375,10 @@ func (r *askResolver) resolve() {
 			customerFromContext = true
 		default:
 			r.resp.CustomerQuery = ""
+		}
+		if customerFromContext && r.broad {
+			r.resp.CustomerQuery = ""
+			customerFromContext = false
 		}
 	}
 	newCustomer := r.resp.CustomerQuery != "" && !customerFromContext
@@ -462,6 +503,10 @@ func (r *askResolver) pickIDs(explicit []int64, followUp, isUpdate bool) ([]int6
 		return explicit, false
 	}
 	allowed := map[int64]bool{}
+	if r.broad {
+		// Shop-wide question: only typed numbers count.
+		prev = askContext{}
+	}
 	for _, id := range prev.ReferenceIDs {
 		allowed[id] = true
 	}
@@ -486,6 +531,33 @@ func (r *askResolver) pickIDs(explicit []int64, followUp, isUpdate bool) ([]int6
 		}
 	}
 	return ids, fromContext
+}
+
+// dropUntypedIDs keeps only the job numbers the user typed in a shop-wide
+// question's answer, so the client never filters it to remembered jobs.
+// "Waiting on parts" keeps its ids: they come from the database query of
+// every job with that status, not from memory.
+func (r *askResolver) dropUntypedIDs() {
+	r.resp.ContextUsed = false
+	if r.resp.Intent == askIntentWaitingParts {
+		return
+	}
+	typed := askStandaloneNumbers(r.in.Message)
+	for _, id := range parseAskJobIDs(r.in.Message) {
+		typed[id] = true
+	}
+	ids := make([]int64, 0, len(r.resp.ReferenceIDs))
+	for _, id := range r.resp.ReferenceIDs {
+		if typed[id] {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) != len(r.resp.ReferenceIDs) {
+		r.resp.ReferenceIDs = ids
+		if r.save != nil {
+			r.save.ReferenceIDs = append([]int64{}, ids...)
+		}
+	}
 }
 
 // targetsJobs reports whether an update after a parts answer is clearly about
@@ -899,6 +971,13 @@ func askSystemPrompt() string {
 		"After a parts answer (SAVED_TOPIC: parts), \"set them to <parts status>\" is parts_requests, but \"set those jobs to <job status>\" (a job status, location or labour) is update_jobs. " +
 		"For a follow-up about the customer, put SAVED_CUSTOMER in customer_query. " +
 		"If a follow-up needs jobs but there is no saved context, return unknown with a reply asking for the job numbers. " +
+		"You may also receive PAST_CONVERSATIONS (short summaries of this user's earlier conversations from the last 2 days) and LIVE_JOBS (the jobs in question as they are in the database right now). " +
+		"Memory (PAST_CONVERSATIONS, the saved context and the recent conversation) is only a hint: LIVE_JOBS and the current database are the source of truth; when they disagree, follow LIVE_JOBS. " +
+		"Any change preview is built from live database records, never from a remembered status or price; never put a remembered status or price into a change. " +
+		"Never treat a preview as already done: a past preview (\"previewed\", \"nothing saved until Apply\") was not applied unless the conversation says it was applied. " +
+		"If it is unclear which job a pronoun (it, that one, them) refers to, return unknown and ask which job; do not guess. " +
+		"Questions about all jobs or all parts requests (what's waiting for approval, which jobs are waiting on parts, show all X, list all X) cover the whole shop: " +
+		"do not put remembered jobs from SAVED_JOBS, the conversation or PAST_CONVERSATIONS in reference_ids unless the user typed those numbers. " +
 		"reference_ids are job numbers as integers. Leave fields you do not need empty. " +
 		fmt.Sprintf("Keep reply under %d characters.", askMaxReply)
 }

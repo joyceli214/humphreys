@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const interpretAsk = vi.fn();
+const newAskConversation = vi.fn();
 const previewAIMassUpdate = vi.fn();
 const applyAIMassUpdate = vi.fn();
 const listAllPartsPurchaseRequests = vi.fn();
@@ -23,6 +24,7 @@ vi.mock("@/lib/api/client", () => ({
   APIError: FakeAPIError,
   apiClient: {
     interpretAsk: (...a: unknown[]) => interpretAsk(...a),
+    newAskConversation: (...a: unknown[]) => newAskConversation(...a),
     previewAIMassUpdate: (...a: unknown[]) => previewAIMassUpdate(...a),
     applyAIMassUpdate: (...a: unknown[]) => applyAIMassUpdate(...a),
     listAllPartsPurchaseRequests: (...a: unknown[]) => listAllPartsPurchaseRequests(...a),
@@ -67,6 +69,39 @@ describe("AskTab", () => {
     expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toMatch(/parts requests/i);
     expect(interpretAsk).not.toHaveBeenCalled();
     expect(screen.getByRole("log")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("New conversation resets the server memory, then clears the messages", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply: "I can help with jobs and parts." }));
+    newAskConversation.mockResolvedValue({ ok: true, summarized: true });
+    render(<AskTab />);
+    ask("hi");
+    expect(await screen.findByText("I can help with jobs and parts.")).toBeInTheDocument();
+    expect(screen.queryByText("Ask me to find or change jobs.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    expect(await screen.findByText("Ask me to find or change jobs.")).toBeInTheDocument();
+    expect(newAskConversation).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("I can help with jobs and parts.")).toBeNull();
+    expect(screen.queryByText("hi")).toBeNull();
+    expect(screen.getByRole("button", { name: "Jobs for a customer" })).toBeInTheDocument();
+  });
+
+  it("keeps the messages and says so when New conversation fails", async () => {
+    interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply: "I can help with jobs and parts." }));
+    newAskConversation.mockRejectedValueOnce(new FakeAPIError("boom (500 /ai-tools/ask/new-conversation)", 500));
+    newAskConversation.mockResolvedValueOnce({ ok: true, summarized: false });
+    render(<AskTab />);
+    ask("hi");
+    expect(await screen.findByText("I can help with jobs and parts.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }));
+    expect(await screen.findByText(/Couldn't start a new conversation/)).toBeInTheDocument();
+    expect(screen.getByText("I can help with jobs and parts.")).toBeInTheDocument();
+    expect(screen.queryByText("Ask me to find or change jobs.")).toBeNull();
+    // Retry works and then clears.
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Ask me to find or change jobs.")).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't start a new conversation/)).toBeNull();
+    expect(newAskConversation).toHaveBeenCalledTimes(2);
   });
 
   it("Shift+Enter does not send", () => {

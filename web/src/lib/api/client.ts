@@ -27,6 +27,7 @@ import type {
   AISearchInterpretResponse,
   AISearchResponse,
   AskInterpretResponse,
+  AskNewConversationResponse,
   EmailRewriteAction,
   EmailRewriteResponse,
   EmailDraftResponse,
@@ -773,6 +774,14 @@ export class APIClient {
     return this.request<AskInterpretResponse>("/ai-tools/ask/interpret", {
       method: "POST",
       body: JSON.stringify({ message })
+    });
+  }
+
+  /** Management Ask: end the current conversation on the server (summary + clear) so the next message starts fresh. */
+  newAskConversation() {
+    return this.request<AskNewConversationResponse>("/ai-tools/ask/new-conversation", {
+      method: "POST",
+      body: JSON.stringify({})
     });
   }
 

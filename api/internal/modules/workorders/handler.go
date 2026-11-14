@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"humphreys/api/internal/domain"
@@ -44,6 +45,8 @@ type Handler struct {
 	// askParts reads parts requests for Ask previews (nil: parts changes
 	// answer that the lookup is unavailable).
 	askParts askPartsLookup
+	// askCleanupAt is when the Ask memory expiry last ran (unix nanos).
+	askCleanupAt atomic.Int64
 }
 
 type updateEquipmentRequest struct {
@@ -239,7 +242,7 @@ func New(db *pgxpool.Pool) *Handler {
 
 	askStore := &pgAskStore{db: db}
 
-	return &Handler{
+	h := &Handler{
 		service:        NewService(NewRepository(db)),
 		emailClient:    mailer.NewGraphClientFromEnv(httpClient),
 		aiSettings:     aisettings.NewService(aisettings.NewRepository(db)),
@@ -249,6 +252,12 @@ func New(db *pgxpool.Pool) *Handler {
 		askJobs:        askStore,
 		askParts:       askStore,
 	}
+	// Delete Ask summaries and contexts past their 2-day retention in the
+	// background; startup does not wait for it.
+	if db != nil {
+		h.startAskMemoryCleanup()
+	}
+	return h
 }
 
 func NewWithService(service *Service) *Handler {

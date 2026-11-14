@@ -111,6 +111,13 @@ export type JobSummaryResponse = JobSummaryStaleResponse & {
   model: string;
 };
 
+/** POST /ai-tools/ask/new-conversation: the server summarizes and forgets the current Ask conversation. */
+export type AskNewConversationResponse = {
+  ok: boolean;
+  /** True when a short summary of the old conversation was saved (kept 2 days). */
+  summarized: boolean;
+};
+
 /** POST /ai-tools/ask/interpret: the Management Ask chat classifies a message (no data, no writes). */
 export type AskIntent =
   | "customer_jobs"

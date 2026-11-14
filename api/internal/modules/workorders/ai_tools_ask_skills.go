@@ -615,7 +615,7 @@ func (r *askResolver) skillJobs(explicit []int64, allowContext bool) ([]int64, b
 	prev := r.in.Prev
 	followUp := isAskFollowUp(r.in.Message)
 	ids, fromContext := r.pickIDs(explicit, followUp, false)
-	if len(ids) == 0 && (followUp || allowContext) && len(prev.ReferenceIDs) > 0 {
+	if len(ids) == 0 && (followUp || allowContext) && !r.broad && len(prev.ReferenceIDs) > 0 {
 		ids, fromContext = append([]int64{}, prev.ReferenceIDs...), true
 	}
 	if len(ids) == 0 {

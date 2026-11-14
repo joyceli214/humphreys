@@ -1,10 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type SyntheticEvent } from "react";
-import { SendHorizontal } from "lucide-react";
+import { MessageSquarePlus, SendHorizontal } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
 import type { AskInterpretResponse } from "@/lib/ai-tools/types";
 import { AI_TEXT_MAX } from "@/lib/ai-tools/limits";
 import { errorMessage } from "@/components/ai-tools/ai-ui";
-import { FOCUS, MgmtChip, MgmtError, MgmtLoading, errorStatus } from "@/components/ai-tools/mgmt-ui";
+import { FOCUS, MgmtButton, MgmtChip, MgmtError, MgmtLoading, errorStatus } from "@/components/ai-tools/mgmt-ui";
 import { ChargesAnswer, CustomerJobsAnswer, PartsAnswer, UpdatePreviewAnswer } from "@/components/ai-tools/ask/ask-answers";
 import { AskMentionMenu, useShortcutResults, type MenuRow } from "@/components/ai-tools/ask/ask-mention-menu";
 import { ASK_SKILL_PROMPTS, appendMention, findTrigger, insertMention, type ShortcutKind, type ShortcutTrigger } from "@/components/ai-tools/ask/ask-shortcuts";
@@ -48,6 +48,8 @@ type Turn = {
   text: string;
   state: { status: "loading" } | { status: "error"; message: string } | { status: "ok"; answer: AskInterpretResponse };
 };
+
+const NEW_CONVERSATION_ERROR = "Couldn't start a new conversation. Ask still remembers this one — try again.";
 
 function interpretError(err: unknown) {
   if (errorStatus(err) === 429) return "Too many AI requests. Wait a minute, then try again.";
@@ -134,6 +136,8 @@ function Starters({ onPick }: { onPick: (prompt: string) => void }) {
 export function AskTab() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState("");
   const nextId = useRef(1);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -183,6 +187,21 @@ export function AskTab() {
       setTurns((list) => list.map((t) => (t.id === id ? { ...t, state: { status: "ok", answer } } : t)));
     } catch (err) {
       setTurns((list) => list.map((t) => (t.id === id ? { ...t, state: { status: "error", message: interpretError(err) } } : t)));
+    }
+  };
+
+  /** Ends the conversation on the server first; the list is cleared only when that worked. */
+  const newConversation = async () => {
+    setResetting(true);
+    setResetError("");
+    try {
+      await apiClient.newAskConversation();
+      setTurns([]);
+      closeMenu();
+    } catch {
+      setResetError(NEW_CONVERSATION_ERROR);
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -317,6 +336,17 @@ export function AskTab() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col text-[17px] leading-normal text-[#1f2328]">
+      <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        <MgmtButton variant="ghost" className="min-h-[44px] gap-2 px-3 text-[16px]" disabled={resetting} onClick={() => void newConversation()}>
+          <MessageSquarePlus className="h-5 w-5" aria-hidden />
+          {resetting ? "Starting…" : "New conversation"}
+        </MgmtButton>
+      </div>
+      {resetError && (
+        <div className="mb-3">
+          <MgmtError onRetry={() => void newConversation()}>{resetError}</MgmtError>
+        </div>
+      )}
       <div role="log" aria-live="polite" aria-label="Ask messages" className="flex-1 space-y-3 pb-4">
         {turns.length === 0 && (
           <div>

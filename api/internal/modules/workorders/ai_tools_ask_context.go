@@ -13,10 +13,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// askContextTTL is the sliding window for Management Ask follow-ups: a saved
-// context counts only while it was updated within the last 5 days, and every
-// answer slides the window forward.
-const askContextTTL = 5 * 24 * time.Hour
+// askContextTTL is the retention of a saved Ask context row: it counts only
+// while it was updated within the last 2 days (every answer slides the window
+// forward), and older rows are deleted. Within that, a conversation's turns
+// and saved jobs are dropped after askConversationIdle without a message
+// (they are condensed into a summary first; see ai_tools_ask_summaries.go).
+const askContextTTL = 2 * 24 * time.Hour
 
 // askNoContextReply answers a follow-up ("update both") when there is nothing
 // recent to refer to.
@@ -98,6 +100,18 @@ type askContextStore interface {
 	// DeleteExpiredAskContext deletes the row only if it was last updated at or
 	// before cutoff (so a save from another device in between is kept).
 	DeleteExpiredAskContext(ctx context.Context, userID string, cutoff time.Time) error
+	// DeleteExpiredAskContexts deletes every user's row last updated at or
+	// before cutoff.
+	DeleteExpiredAskContexts(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// Conversation summaries (table ai_ask_conversation_summaries).
+	InsertAskSummary(ctx context.Context, userID, summary string, createdAt time.Time) error
+	// ListAskSummaries returns up to limit of the user's summaries created
+	// after since, newest first.
+	ListAskSummaries(ctx context.Context, userID string, since time.Time, limit int) ([]askSummary, error)
+	// DeleteExpiredAskSummaries deletes every user's summaries created at or
+	// before cutoff.
+	DeleteExpiredAskSummaries(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 // askJobCustomer is the customer a job belongs to.

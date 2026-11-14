@@ -145,4 +145,18 @@ describe("Management Ask API", () => {
     expect(fetchSpy).toHaveBeenLastCalledWith(expect.stringContaining("/ai-tools/ask/interpret"), expect.objectContaining({ method: "POST" }));
     expect(JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)).toEqual({ message: "update both to Finished" });
   });
+
+  it("starts a new conversation with a POST to new-conversation", async () => {
+    const client = new APIClient();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse(200, { ok: true, summarized: true }));
+    expect(await client.newAskConversation()).toEqual({ ok: true, summarized: true });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenLastCalledWith(expect.stringContaining("/ai-tools/ask/new-conversation"), expect.objectContaining({ method: "POST" }));
+  });
+
+  it("surfaces a failed new conversation as an error", async () => {
+    const client = new APIClient();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(mockResponse(500, { error: "could not start a new conversation" }));
+    await expect(client.newAskConversation()).rejects.toBeInstanceOf(APIError);
+  });
 });

@@ -35,6 +35,9 @@ type memAskStore struct {
 	saves     int
 	deletes   int
 	loadErr   error
+	// summaries are the closed-conversation summaries (all users).
+	summaries     []memAskSummary
+	nextSummaryID int64
 }
 
 func newMemAskStore(jobs ...int64) *memAskStore {
@@ -152,6 +155,11 @@ type askLLM struct {
 	prompts  []string
 	srv      *httptest.Server
 	callsOut int
+	// Conversation summary calls (system prompt has askSummaryMarker) are
+	// answered with summary and recorded apart from the classifications.
+	summary        string
+	summaryPrompts []string
+	summaryCalls   int
 }
 
 func newAskLLM(t *testing.T) *askLLM {
@@ -164,11 +172,26 @@ func newAskLLM(t *testing.T) *askLLM {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		l.mu.Lock()
+		isSummary := false
 		for _, m := range req.Messages {
-			l.prompts = append(l.prompts, m.Content)
+			if strings.Contains(m.Content, askSummaryMarker) {
+				isSummary = true
+			}
 		}
-		content := l.content
-		l.callsOut++
+		var content string
+		if isSummary {
+			for _, m := range req.Messages {
+				l.summaryPrompts = append(l.summaryPrompts, m.Content)
+			}
+			l.summaryCalls++
+			content = l.summary
+		} else {
+			for _, m := range req.Messages {
+				l.prompts = append(l.prompts, m.Content)
+			}
+			content = l.content
+			l.callsOut++
+		}
 		l.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"model":   "mock-model",
