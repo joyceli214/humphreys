@@ -294,7 +294,7 @@ async function loadCharges(referenceIds: number[], customerQuery: string) {
   return { details, total: ids.length };
 }
 
-export function ChargesAnswer({ referenceIds, customerQuery }: { referenceIds: number[]; customerQuery: string }) {
+export function ChargesAnswer({ referenceIds, customerQuery, focus }: { referenceIds: number[]; customerQuery: string; focus?: "labour" }) {
   const load = useLoad(() => loadCharges(referenceIds, customerQuery));
   if (referenceIds.length === 0 && !customerQuery) return <p>Tell me the job numbers or the customer to sum up.</p>;
   if (load.status === "loading") return <MgmtLoading>Adding up charges…</MgmtLoading>;
@@ -303,16 +303,18 @@ export function ChargesAnswer({ referenceIds, customerQuery }: { referenceIds: n
   if (details.length === 0) return <p>No match.</p>;
   const rows = details.map((d: WorkOrderDetail) => {
     const t = workOrderTotals(d);
-    return { id: d.reference_id, labour: t.netLabour, parts: round2((d.parts_total ?? 0) + (d.delivery_total ?? 0)), deposit: d.deposit ?? 0, balance: t.payable };
+    return { id: d.reference_id, grossLabour: d.labour_total ?? 0, labourDiscount: t.labourDiscount, labour: t.netLabour, parts: round2((d.parts_total ?? 0) + (d.delivery_total ?? 0)), deposit: d.deposit ?? 0, balance: t.payable };
   });
   const sum = (key: "labour" | "parts" | "deposit" | "balance") => round2(rows.reduce((acc, r) => acc + r[key], 0));
   return (
     <div>
+      {focus === "labour" && <p className="mb-2 font-semibold">Labour on these jobs: {money(sum("labour"))} total after discount.</p>}
       <div className="-mx-1 overflow-x-auto">
         <table className={TABLE_CLASS}>
           <thead>
             <tr>
               <th>Job #</th>
+              {focus === "labour" && <><th className="text-right">Labour before discount</th><th className="text-right">Labour discount</th></>}
               <th className="text-right">Labour</th>
               <th className="text-right">Parts</th>
               <th className="text-right">Deposit</th>
@@ -325,6 +327,7 @@ export function ChargesAnswer({ referenceIds, customerQuery }: { referenceIds: n
                 <td className="whitespace-nowrap font-semibold text-[#135f6f]">
                   <JobLink referenceId={r.id} />
                 </td>
+                {focus === "labour" && <><td className="text-right">{money(r.grossLabour)}</td><td className="text-right">−{money(r.labourDiscount)}</td></>}
                 <td className="text-right">{money(r.labour)}</td>
                 <td className="text-right">{money(r.parts)}</td>
                 <td className="text-right">{r.deposit ? `−${money(r.deposit)}` : money(0)}</td>
@@ -333,6 +336,7 @@ export function ChargesAnswer({ referenceIds, customerQuery }: { referenceIds: n
             ))}
             <tr className="font-bold">
               <td>Total</td>
+              {focus === "labour" && <><td className="text-right">{money(rows.reduce((n, r) => n + r.grossLabour, 0))}</td><td className="text-right">−{money(rows.reduce((n, r) => n + r.labourDiscount, 0))}</td></>}
               <td className="text-right">{money(sum("labour"))}</td>
               <td className="text-right">{money(sum("parts"))}</td>
               <td className="text-right">{sum("deposit") ? `−${money(sum("deposit"))}` : money(0)}</td>

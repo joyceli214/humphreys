@@ -35,7 +35,14 @@ const (
 	askIntentAddRepairLog  = "add_repair_log"
 	askIntentAddLabour     = "add_labour"
 	askIntentCompleteJob   = "complete_job"
+	// Admin Portal finish items (ai_tools_ask_actions.go).
+	askIntentPartsInvoice       = "parts_invoice"
+	askIntentCreatePartsRequest = "create_parts_request"
+	askIntentCreateJob          = "create_job"
 )
+
+// askChargesFocusLabour marks a charges answer to a labour question.
+const askChargesFocusLabour = "labour"
 
 // Parts actions the model may return in parts_action.
 const (
@@ -44,6 +51,9 @@ const (
 	askPartsArrive   = "arrive"
 	askPartsCancel   = "cancel"
 	askPartsSetPrice = "set_price"
+	// askPartsApproveOrder approves and marks ordered in one preview (two
+	// PATCHes on Apply: waiting_approval → approved → ordered).
+	askPartsApproveOrder = "approve_order"
 )
 
 var askPartsActions = map[string]string{
@@ -52,6 +62,8 @@ var askPartsActions = map[string]string{
 	askPartsArrive:   "arrived",
 	askPartsCancel:   "cancelled",
 	askPartsSetPrice: "",
+	// approve_order ends at ordered, through approved.
+	askPartsApproveOrder: "ordered",
 }
 
 const (
@@ -75,7 +87,8 @@ const askNotUnderstoodReply = "Sorry, I didn't catch that — try rephrasing, or
 
 // askJSONReminder is appended to the prompt when the model's first reply was
 // not valid JSON.
-const askJSONReminder = "\nYour previous reply was not valid JSON. Respond with the JSON object only: no prose, no markdown, no code fences."
+const askJSONReminder = "\nYour previous reply was not valid JSON. Respond with the JSON object only: ONE JSON object and nothing before or after it: no prose, no markdown, no code fences, no comments. " +
+	`It must include "intent" (string), "reference_ids" (array of integers) and "reply" (string), and every string must be in double quotes.`
 
 // ---------------------------------------------------------------------------
 // Response shapes
@@ -97,8 +110,11 @@ type askPartsChange struct {
 	OldSourceURL           *string    `json:"old_source_url"`
 	NewSourceURL           *string    `json:"new_source_url"`
 	UpdatedAt              *time.Time `json:"updated_at"`
-	Valid                  bool       `json:"valid"`
-	Error                  string     `json:"error,omitempty"`
+	// ViaStatus, when set, is applied first (with the new price/link), then
+	// new_status with the updated_at that first PATCH returned.
+	ViaStatus string `json:"via_status,omitempty"`
+	Valid     bool   `json:"valid"`
+	Error     string `json:"error,omitempty"`
 }
 
 // askPartsChoice is one request listed when Ask needs the user to pick.
@@ -160,6 +176,7 @@ type askPartsRow struct {
 
 // askPartsLookup reads parts requests and job ids by status for Ask.
 type askPartsLookup interface {
+	OpenPartsRequests(ctx context.Context, statuses []string, limit int) ([]askPartsRow, error)
 	PartsRequestsByID(ctx context.Context, ids []int64) ([]askPartsRow, error)
 	PartsRequestsForJobs(ctx context.Context, jobIDs []int64) ([]askPartsRow, error)
 	// JobIDsWithStatus returns up to limit job numbers with the status (newest
@@ -246,23 +263,25 @@ var (
 
 	// Parts request ids are named with a request word: "parts request #480",
 	// "request 480", "PR 480", "requests 480 and 481".
-	askPartsRequestRef  = regexp.MustCompile(`(?i)\b(?:parts?\s+(?:purchase\s+)?requests?|requests?|reqs?|prs?|ppr)\s*(?:no\.?|number|id)?\s*[#＃]?\s*(\d+(?:\s*(?:,|and|&|/|or)\s*[#＃]?\s*\d+)*)`)
-	askJobMarkedRef     = regexp.MustCompile(`(?i)\b(?:jobs?|wo|work\s+orders?)\s*(?:no\.?|number)?\s*[#＃]?\s*(\d+(?:\s*(?:,|and|&|/|or)\s*[#＃]?\s*\d+)*)`)
-	askDigits           = regexp.MustCompile(`\d+`)
-	askPartsWord        = regexp.MustCompile(`(?i)\bparts?\b|\bparts?\s+requests?\b`)
-	askPartsPlural      = regexp.MustCompile(`(?i)\bparts\b|\ball\b|\bboth\b|\bthem\b|\bthose\b|\bthese\b|\bevery\b|\brequests\b`)
-	askURL              = regexp.MustCompile(`https?://[^\s<>"']+`)
-	askPriceDollar      = regexp.MustCompile(`[$＄]\s*(\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?)\b`)
-	askPriceWord        = regexp.MustCompile(`(?i)\b(?:price|cost|total|priced)\b`)
-	askPriceTo          = regexp.MustCompile(`(?i)\bto\s*[$＄]?\s*(\d{1,6}(?:\.\d{1,2})?)(?:[^\d.]|$)`)
-	askPriceAt          = regexp.MustCompile(`(?i)(?:\b(?:at|is|as|of)|=)\s*[$＄]?\s*(\d{1,6}(?:\.\d{1,2})?)(?:[^\d.]|$)`)
-	askNumberRe         = regexp.MustCompile(`\d+(?:\.\d+)?`)
-	askHoursRe          = regexp.MustCompile(`(?i)(\d{1,2}(?:\.\d{1,2})?|\.\d{1,2})\s*(?:h|hr|hrs|hour|hours)\b`)
-	askHoursWords       = regexp.MustCompile(`(?i)\b(?:an|one)\s+hour\b|\bhalf\s+(?:an\s+)?hour\b|\b(?:a\s+)?quarter\s+(?:of\s+an\s+)?hour\b`)
-	askHoursParen       = regexp.MustCompile(`(?i)\s*[(\[]\s*(?:\d{1,2}(?:\.\d{1,2})?|\.\d{1,2})\s*(?:h|hr|hrs|hour|hours)\s*[)\]]\s*`)
-	askHoursTrail       = regexp.MustCompile(`(?i)[\s,;–—-]*\b(?:\d{1,2}(?:\.\d{1,2})?|\.\d{1,2})\s*(?:h|hr|hrs|hour|hours)\.?\s*$`)
-	askApproveWord      = regexp.MustCompile(`(?i)\bapprove\b|\b(?:set|mark|change|move|update|make)\b[^.?!]{0,60}\bapproved\b`)
-	askOrderedWord      = regexp.MustCompile(`(?i)\bordered\b|\bplaced?\s+(?:the\s+)?order\b`)
+	askPartsRequestRef = regexp.MustCompile(`(?i)\b(?:parts?\s+(?:purchase\s+)?requests?|requests?|reqs?|prs?|ppr)\s*(?:no\.?|number|id)?\s*[#＃]?\s*(\d+(?:\s*(?:,|and|&|/|or)\s*[#＃]?\s*\d+)*)`)
+	askJobMarkedRef    = regexp.MustCompile(`(?i)\b(?:jobs?|wo|work\s+orders?)\s*(?:no\.?|number)?\s*[#＃]?\s*(\d+(?:\s*(?:,|and|&|/|or)\s*[#＃]?\s*\d+)*)`)
+	askDigits          = regexp.MustCompile(`\d+`)
+	askPartsWord       = regexp.MustCompile(`(?i)\bparts?\b|\bparts?\s+requests?\b`)
+	askPartsPlural     = regexp.MustCompile(`(?i)\bparts\b|\ball\b|\bboth\b|\bthem\b|\bthose\b|\bthese\b|\bevery\b|\brequests\b`)
+	askURL             = regexp.MustCompile(`https?://[^\s<>"']+`)
+	askPriceDollar     = regexp.MustCompile(`[$＄]\s*(\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?)\b`)
+	askPriceWord       = regexp.MustCompile(`(?i)\b(?:price|cost|total|priced)\b`)
+	askPriceTo         = regexp.MustCompile(`(?i)\bto\s*[$＄]?\s*(\d{1,6}(?:\.\d{1,2})?)(?:[^\d.]|$)`)
+	askPriceAt         = regexp.MustCompile(`(?i)(?:\b(?:at|is|as|of)|=)\s*[$＄]?\s*(\d{1,6}(?:\.\d{1,2})?)(?:[^\d.]|$)`)
+	askNumberRe        = regexp.MustCompile(`\d+(?:\.\d+)?`)
+	askHoursRe         = regexp.MustCompile(`(?i)(\d{1,2}(?:\.\d{1,2})?|\.\d{1,2})\s*(?:h|hr|hrs|hour|hours)\b`)
+	askHoursWords      = regexp.MustCompile(`(?i)\b(?:an|one)\s+hour\b|\bhalf\s+(?:an\s+)?hour\b|\b(?:a\s+)?quarter\s+(?:of\s+an\s+)?hour\b`)
+	askHoursParen      = regexp.MustCompile(`(?i)\s*[(\[]\s*(?:\d{1,2}(?:\.\d{1,2})?|\.\d{1,2})\s*(?:h|hr|hrs|hour|hours)\s*[)\]]\s*`)
+	askHoursTrail      = regexp.MustCompile(`(?i)[\s,;–—-]*\b(?:\d{1,2}(?:\.\d{1,2})?|\.\d{1,2})\s*(?:h|hr|hrs|hour|hours)\.?\s*$`)
+	askApproveWord     = regexp.MustCompile(`(?i)\bapprove\b|\b(?:set|mark|change|move|update|make)\b[^.?!]{0,60}\bapproved\b`)
+	askOrderedWord     = regexp.MustCompile(`(?i)\bordered\b|\bplaced?\s+(?:the\s+)?order\b`)
+	// "approve and order request 5": the verb "order" after approve.
+	askAndOrderWord     = regexp.MustCompile(`(?i)\b(?:and|then|&)\s+order\b`)
 	askArrivedWord      = regexp.MustCompile(`(?i)\barrived\b|\b(?:came|come)\s+in\b`)
 	askCancelWord       = regexp.MustCompile(`(?i)\bcancel(?:l?ed|ling)?\b`)
 	askPriceWordPresent = regexp.MustCompile(`(?i)\b(?:price|cost|total|priced)\b|[$＄]\s*\d`)
@@ -297,6 +316,8 @@ func askPartsActionIn(msg string) string {
 	switch {
 	case askCancelWord.MatchString(text):
 		return askPartsCancel
+	case askApproveWord.MatchString(text) && (askOrderedWord.MatchString(text) || askAndOrderWord.MatchString(text)):
+		return askPartsApproveOrder
 	case askApproveWord.MatchString(text):
 		return askPartsApprove
 	case askOrderedWord.MatchString(text):
@@ -458,6 +479,8 @@ func askEligibleFrom(action, status string) bool {
 	switch action {
 	case askPartsApprove:
 		return status == "waiting_approval"
+	case askPartsApproveOrder:
+		return status == "waiting_approval" || status == "approved"
 	case askPartsOrder:
 		return status == "approved"
 	case askPartsArrive:
@@ -474,6 +497,8 @@ func askPartsVerb(action string) string {
 	switch action {
 	case askPartsApprove:
 		return "approved"
+	case askPartsApproveOrder:
+		return "approved and marked ordered"
 	case askPartsOrder:
 		return "marked ordered"
 	case askPartsArrive:
@@ -496,8 +521,19 @@ func (r *askResolver) skillFor() string {
 	model := r.resp.Intent
 	question := isAskQuestion(msg)
 	explicit := parseAskJobIDs(msg)
+	// "Did we already add labour on #X?" / "how much labour is on #X?" is a
+	// charges question (labour lines + total), never a repair log or a change.
+	if question && askLabourWord.MatchString(msg) && !askRepairLogAdd.MatchString(msg) {
+		return askIntentCharges
+	}
 	if !question {
 		switch {
+		case askCreateJob.MatchString(msg):
+			return askIntentCreateJob
+		case askInvoiceMessage(msg, model == askIntentPartsInvoice):
+			return askIntentPartsInvoice
+		case askIsPartsCreate(msg), r.modelCreatesParts():
+			return askIntentCreatePartsRequest
 		case askCompleteJob.MatchString(msg):
 			return askIntentCompleteJob
 		case askRepairLogAdd.MatchString(msg):
@@ -521,14 +557,25 @@ func (r *askResolver) skillFor() string {
 		}
 	}
 	switch model {
-	case askIntentWaitingParts, askIntentJobDetails, askIntentRepairHistory, askIntentCompleteJob:
+	case askIntentWaitingParts, askIntentJobDetails, askIntentRepairHistory:
 		return model
-	case askIntentAddRepairLog, askIntentAddLabour, askIntentPartsUpdate:
+	case askIntentAddRepairLog, askIntentAddLabour, askIntentPartsUpdate, askIntentCompleteJob,
+		askIntentCreateJob, askIntentCreatePartsRequest:
 		if !question {
 			return model
 		}
 	}
 	return ""
+}
+
+// modelCreatesParts trusts the model's create_parts_request ("Request 2 x L7
+// for job 31221") when it named no existing request and the part name it
+// returned was typed, so "request 2" is not read as parts request #2.
+func (r *askResolver) modelCreatesParts() bool {
+	res := r.in.Result
+	name := strings.TrimSpace(res.ItemName)
+	return res.Intent == askIntentCreatePartsRequest && len(res.PartsRequestIDs) == 0 &&
+		name != "" && askTextHasWords(r.in.Message, name)
 }
 
 // partsContext reports whether a parts action word is about parts requests
@@ -560,6 +607,19 @@ func (r *askResolver) partsContext(action string) bool {
 // intents handle the message (after fixing questions and parts filters).
 func (r *askResolver) resolveSkill() bool {
 	switch r.skillFor() {
+	case askIntentCharges:
+		// Answered by the charges view; resolve() picks the jobs.
+		r.labour = true
+		r.resp.Intent = askIntentCharges
+	case askIntentCreateJob:
+		r.createJob()
+		return true
+	case askIntentPartsInvoice:
+		r.partsInvoice()
+		return true
+	case askIntentCreatePartsRequest:
+		r.createPartsRequest()
+		return true
 	case askIntentCompleteJob:
 		r.completeJob()
 		return true
@@ -587,9 +647,10 @@ func (r *askResolver) resolveSkill() bool {
 	}
 	if isAskQuestion(r.in.Message) {
 		switch r.resp.Intent {
-		case askIntentUpdateJobs, askIntentAddRepairLog, askIntentAddLabour, askIntentCompleteJob:
+		case askIntentUpdateJobs, askIntentAddRepairLog, askIntentAddLabour, askIntentCompleteJob,
+			askIntentCreateJob, askIntentCreatePartsRequest:
 			r.resp.Intent = askIntentCustomerJobs
-		case askIntentPartsUpdate:
+		case askIntentPartsUpdate, askIntentPartsInvoice:
 			r.resp.Intent = askIntentPartsRequests
 		}
 	}
@@ -605,7 +666,8 @@ func (r *askResolver) resolveSkill() bool {
 var askSkillIntents = map[string]bool{
 	askIntentPartsUpdate: true, askIntentWaitingParts: true, askIntentJobDetails: true,
 	askIntentRepairHistory: true, askIntentAddRepairLog: true, askIntentAddLabour: true,
-	askIntentCompleteJob: true,
+	askIntentCompleteJob: true, askIntentPartsInvoice: true, askIntentCreatePartsRequest: true,
+	askIntentCreateJob: true,
 }
 
 // skillJobs resolves the jobs a skill is about: typed numbers, else the
@@ -644,23 +706,6 @@ func (r *askResolver) clearSkillFields(intent string) {
 	r.resp.PartsStatuses = []string{}
 	r.resp.PreviewInstruction = ""
 	r.resp.CustomerQuery = ""
-}
-
-func (r *askResolver) completeJob() {
-	// Only a pointer to the button, so the saved jobs may be used ("complete it").
-	ids, ok := r.skillJobs(parseAskJobIDs(r.in.Message), true)
-	if !ok {
-		return
-	}
-	r.clearSkillFields(askIntentCompleteJob)
-	r.resp.ReferenceIDs = ids
-	label := "job " + askJobRefs(ids, "and")
-	if len(ids) > 1 {
-		label = "each job (" + askJobRefs(ids, "and") + ")"
-	}
-	r.resp.Reply = "There's no “Complete” status to set from here. To complete " + label +
-		", open the job page and tap Complete Job — it sets the finished status your shop chose for Complete Job."
-	r.save = &askContext{ReferenceIDs: ids, CustomerQuery: r.customerFor(ids), Topic: askTopicJobs}
 }
 
 func (r *askResolver) readJobs(intent string) {
@@ -823,9 +868,7 @@ func (r *askResolver) partsUpdate() bool {
 	res := r.in.Result
 	action := askPartsActionIn(msg)
 	if action == "" {
-		if _, ok := askPartsActions[res.PartsAction]; ok {
-			action = res.PartsAction
-		}
+		action = askModelPartsAction(res)
 	}
 	price := askPriceIn(msg)
 	if price == nil && res.TotalPrice != nil && askValidPrice(*res.TotalPrice) && askTypedNumber(msg, *res.TotalPrice) {
@@ -870,7 +913,7 @@ func (r *askResolver) partsUpdate() bool {
 	preview := &askPartsPreview{Action: action, Changes: []askPartsChange{}}
 	newStatus := askPartsActions[action]
 	for _, p := range targets {
-		preview.Changes = append(preview.Changes, r.partsChange(p, newStatus, price, url, jobs))
+		preview.Changes = append(preview.Changes, r.partsChangeVia(p, askPartsVia(action), newStatus, price, url, jobs))
 	}
 	r.resp.PartsPreview = preview
 	r.resp.ReferenceIDs = askPartsJobs(targets)
@@ -879,6 +922,63 @@ func (r *askResolver) partsUpdate() bool {
 }
 
 func (r *askResolver) partsChange(p askPartsRow, newStatus string, price *float64, url *string, jobs map[int64]bool) askPartsChange {
+	return r.partsChangeVia(p, "", newStatus, price, url, jobs)
+}
+
+// askPartsVia is the status a two-step action passes through.
+func askPartsVia(action string) string {
+	if action == askPartsApproveOrder {
+		return "approved"
+	}
+	return ""
+}
+
+// askModelPartsAction is the model's action: two actions (approve + order)
+// become approve_order.
+func askModelPartsAction(res askInterpretResult) string {
+	set := map[string]bool{}
+	for _, a := range append([]string{res.PartsAction}, res.PartsActions...) {
+		set[a] = true
+	}
+	if set[askPartsApprove] && set[askPartsOrder] {
+		return askPartsApproveOrder
+	}
+	if _, ok := askPartsActions[res.PartsAction]; ok {
+		return res.PartsAction
+	}
+	for _, a := range res.PartsActions {
+		if a != askPartsSetPrice {
+			return a
+		}
+	}
+	for _, a := range res.PartsActions {
+		return a
+	}
+	return ""
+}
+
+// partsChangeVia is partsChange for a change that may pass through via first
+// (approve then order). Both steps are checked with the live status and the
+// caller's approve permission; Apply's PATCHes check them again.
+func (r *askResolver) partsChangeVia(p askPartsRow, via, newStatus string, price *float64, url *string, jobs map[int64]bool) askPartsChange {
+	if via != "" && p.Status != via && p.Status != newStatus {
+		ch := r.partsChangeOne(p, newStatus, price, url, jobs)
+		if !ch.Valid && ch.Error != "" && !strings.HasPrefix(ch.Error, "It is ") {
+			return ch // wrong job, no timestamp
+		}
+		ch.Valid, ch.Error = true, ""
+		ch.ViaStatus = via
+		if e := askPartsTransitionError(p.Status, via, r.in.CanApproveParts); e != "" {
+			ch.Valid, ch.Error = false, e
+		} else if e := askPartsTransitionError(via, newStatus, r.in.CanApproveParts); e != "" {
+			ch.Valid, ch.Error = false, e
+		}
+		return ch
+	}
+	return r.partsChangeOne(p, newStatus, price, url, jobs)
+}
+
+func (r *askResolver) partsChangeOne(p askPartsRow, newStatus string, price *float64, url *string, jobs map[int64]bool) askPartsChange {
 	ch := askPartsChange{
 		PartsPurchaseRequestID: p.ID, ReferenceID: p.ReferenceID, ItemName: p.ItemName, Quantity: p.Quantity,
 		Source: p.Source, OldStatus: p.Status, NewStatus: p.Status, OldPrice: p.TotalPrice, NewPrice: p.TotalPrice,
@@ -1114,6 +1214,8 @@ func askPartsExample(action string, id int64) string {
 	switch action {
 	case askPartsApprove:
 		return fmt.Sprintf("approve request %d", id)
+	case askPartsApproveOrder:
+		return fmt.Sprintf("approve and mark request %d ordered", id)
 	case askPartsOrder:
 		return fmt.Sprintf("mark request %d ordered", id)
 	case askPartsArrive:
@@ -1323,6 +1425,9 @@ func (r *askResolver) skillSummary() string {
 		parts := []string{}
 		for _, ch := range pp.Changes {
 			s := fmt.Sprintf("request %d (job #%d) %s", ch.PartsPurchaseRequestID, ch.ReferenceID, askPartsStatusWord(ch.OldStatus))
+			if ch.ViaStatus != "" {
+				s += " → " + askPartsStatusWord(ch.ViaStatus)
+			}
 			if ch.NewStatus != ch.OldStatus {
 				s += " → " + askPartsStatusWord(ch.NewStatus)
 			}
@@ -1353,7 +1458,29 @@ func (r *askResolver) skillSummary() string {
 	case askIntentRepairHistory:
 		return "Showed repair logs of " + askRefList(ids, askSummaryRefs) + "."
 	case askIntentCompleteJob:
+		if p := resp.CompleteJobPreview; p != nil {
+			rows := []string{}
+			for _, j := range p.Jobs {
+				if j.Already {
+					rows = append(rows, fmt.Sprintf("job #%d already %s", j.ReferenceID, p.TargetStatusName))
+				} else {
+					rows = append(rows, fmt.Sprintf("job #%d %s → %s", j.ReferenceID, askOr(j.CurrentStatusName, "no status"), p.TargetStatusName))
+				}
+			}
+			return "Opened a Complete Job preview: " + strings.Join(rows, "; ") + " (nothing saved until Apply)."
+		}
 		return "Said: " + resp.Reply
+	case askIntentPartsInvoice:
+		return r.invoiceSummary()
+	case askIntentCreatePartsRequest:
+		if p := resp.PartsCreatePreview; p != nil {
+			return fmt.Sprintf("Opened a new parts request preview on job #%d: %s ×%d, $%.2f, %s, %s (nothing saved until Apply).",
+				p.ReferenceID, p.ItemName, p.Quantity, p.TotalPrice, p.Source, askPartsStatusWord(p.Status))
+		}
+	case askIntentCreateJob:
+		if p := resp.CreateJobPreview; p != nil {
+			return "Opened a new-job preview for a " + p.CustomerMode + " customer (customer details not kept; nothing saved until Apply)."
+		}
 	}
 	return ""
 }

@@ -580,23 +580,11 @@ func TestAskStatusOnlyPreviewHasNoMoneyLines(t *testing.T) {
 }
 
 // --- Fix 4: Complete Job --------------------------------------------------
+// Complete Job now previews the button's status change: see
+// TestAskCompleteJobPreviewsTheButtonStatus in ai_tools_ask_finish_test.go.
 
-func TestAskCompleteJobPointsToButton(t *testing.T) {
+func TestAskCompleteJobMissingJob(t *testing.T) {
 	llm, _, ask := skillSetup(t)
-	for _, msg := range []string{"Complete job #31352", "close job #31352", "mark #31352 complete", "please complete #31352"} {
-		llm.answer(askIntentUpdateJobs, 31352)
-		resp := ask(msg)
-		if resp.Intent != askIntentCompleteJob || resp.PreviewInstruction != "" || !reflect.DeepEqual(resp.ReferenceIDs, []int64{31352}) {
-			t.Fatalf("[%s] resp = %+v", msg, resp)
-		}
-		if !strings.Contains(resp.Reply, "Complete Job") || !strings.Contains(resp.Reply, "#31352") {
-			t.Fatalf("[%s] reply = %q", msg, resp.Reply)
-		}
-	}
-	llm.answer(askIntentCompleteJob)
-	if resp := ask("complete it"); resp.Intent != askIntentCompleteJob || !reflect.DeepEqual(resp.ReferenceIDs, []int64{31352}) || !resp.ContextUsed {
-		t.Fatalf("follow-up resp = %+v", resp)
-	}
 	llm.answer(askIntentCompleteJob, 99999)
 	if resp := ask("complete job #99999"); resp.Intent != askIntentUnknown || resp.Notice != "No job #99999." {
 		t.Fatalf("missing resp = %+v", resp)

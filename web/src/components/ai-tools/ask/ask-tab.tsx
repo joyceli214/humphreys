@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type SyntheticEvent } from "react";
 import { MessageSquarePlus, SendHorizontal } from "lucide-react";
+import { CompleteJobAnswer, CreateJobAnswer, InvoiceAnswer, PartsCreateAnswer } from "./ask-action-answers";
 import { apiClient } from "@/lib/api/client";
 import type { AskInterpretResponse } from "@/lib/ai-tools/types";
 import { AI_TEXT_MAX } from "@/lib/ai-tools/limits";
@@ -9,7 +10,6 @@ import { ChargesAnswer, CustomerJobsAnswer, PartsAnswer, UpdatePreviewAnswer } f
 import { AskMentionMenu, useShortcutResults, type MenuRow } from "@/components/ai-tools/ask/ask-mention-menu";
 import { ASK_SKILL_PROMPTS, appendMention, findTrigger, insertMention, type ShortcutKind, type ShortcutTrigger } from "@/components/ai-tools/ask/ask-shortcuts";
 import {
-  CompleteJobAnswer,
   JobDetailsAnswer,
   LabourPreviewAnswer,
   PartsChangeAnswer,
@@ -91,7 +91,7 @@ function AnswerBody({ answer, onStarter }: { answer: AskInterpretResponse; text:
     case "parts_requests":
       return <PartsAnswer query={answer.parts_query} statuses={answer.parts_statuses ?? []} referenceIds={answer.reference_ids ?? []} />;
     case "charges_summary":
-      return <ChargesAnswer referenceIds={answer.reference_ids ?? []} customerQuery={answer.customer_query} />;
+      return <ChargesAnswer referenceIds={answer.reference_ids ?? []} customerQuery={answer.customer_query} focus={answer.charges_focus} />;
     case "parts_update":
       if (!answer.parts_preview) return <p>{answer.reply || NO_JOBS_REPLY}</p>;
       return <PartsChangeAnswer preview={answer.parts_preview} reply={answer.reply} />;
@@ -109,7 +109,13 @@ function AnswerBody({ answer, onStarter }: { answer: AskInterpretResponse; text:
     case "repair_history":
       return <RepairHistoryAnswer referenceIds={answer.reference_ids ?? []} />;
     case "complete_job":
-      return <CompleteJobAnswer reply={answer.reply} referenceIds={answer.reference_ids ?? []} />;
+      return answer.complete_job_preview ? <CompleteJobAnswer preview={answer.complete_job_preview} /> : <p>{answer.reply || NO_JOBS_REPLY}</p>;
+    case "parts_invoice":
+      return answer.invoice_preview ? <InvoiceAnswer preview={answer.invoice_preview} /> : <p>{answer.reply}</p>;
+    case "create_parts_request":
+      return answer.parts_create_preview ? <PartsCreateAnswer preview={answer.parts_create_preview} /> : <p>{answer.reply}</p>;
+    case "create_job":
+      return answer.create_job_preview ? <CreateJobAnswer preview={answer.create_job_preview} /> : <p>{answer.reply}</p>;
     default:
       return (
         <div>

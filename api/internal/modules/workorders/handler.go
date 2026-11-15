@@ -17,6 +17,7 @@ import (
 	"humphreys/api/internal/mailer"
 	"humphreys/api/internal/middleware"
 	"humphreys/api/internal/modules/aisettings"
+	"humphreys/api/internal/modules/catalog"
 	"humphreys/api/internal/modules/uploads"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,10 @@ type Handler struct {
 	// askParts reads parts requests for Ask previews (nil: parts changes
 	// answer that the lookup is unavailable).
 	askParts askPartsLookup
+	// askCatalog reads the dropdown catalogs (statuses, Complete Job target,
+	// items, brands, job types, payment methods, parts presets) through the
+	// catalog repository the create page and Complete Job button use.
+	askCatalog askCatalogLookup
 	// askCleanupAt is when the Ask memory expiry last ran (unix nanos).
 	askCleanupAt atomic.Int64
 }
@@ -251,6 +256,7 @@ func New(db *pgxpool.Pool) *Handler {
 		askContext:     askStore,
 		askJobs:        askStore,
 		askParts:       askStore,
+		askCatalog:     catalog.NewRepository(db),
 	}
 	// Delete Ask summaries and contexts past their 2-day retention in the
 	// background; startup does not wait for it.

@@ -38,6 +38,7 @@ export type MassUpdatePreviewRow = {
   after: string;
   lower_than_before: boolean;
   valid: boolean;
+  via_status?: AskPartsStatus;
   error?: string;
   /** Change to the job total in dollars (positive = total goes up). Treated as 0 when missing. */
   amount_delta?: number;
@@ -131,6 +132,9 @@ export type AskIntent =
   | "add_repair_log"
   | "add_labour"
   | "complete_job"
+  | "parts_invoice"
+  | "create_parts_request"
+  | "create_job"
   | "unknown";
 
 export type AskPartsStatus = "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
@@ -150,6 +154,7 @@ export type AskPartsChange = {
   new_source_url: string | null;
   updated_at: string | null;
   valid: boolean;
+  via_status?: AskPartsStatus;
   error?: string;
 };
 
@@ -163,7 +168,7 @@ export type AskPartsChoice = {
 };
 
 export type AskPartsPreview = {
-  action: "" | "approve" | "order" | "arrive" | "cancel" | "set_price";
+  action: "" | "approve" | "order" | "arrive" | "cancel" | "set_price" | "approve_order";
   changes: AskPartsChange[];
   /** Set when Ask needs the user to say which request (no changes then). */
   choices?: AskPartsChoice[];
@@ -182,6 +187,32 @@ export type AskLabourPreview = {
 };
 
 export type AskWaitingParts = { status_id: number; status_name: string; total: number };
+
+export type AskInvoicePreview = {
+  invoice_number: string;
+  lines: { text: string; price: number | null; match: "matched" | "ambiguous" | "unmatched"; change?: AskPartsChange; candidates?: AskPartsChoice[] }[];
+};
+export type AskPartsCreatePreview = {
+  reference_id: number; item_name: string; quantity: number; total_price: number;
+  source: "online" | "supplier"; source_url: string | null;
+  status: AskPartsStatus; preset_match: boolean;
+};
+export type AskCompleteJobPreview = {
+  target_status_id: number; target_status_name: string; target_source: string;
+  jobs: { reference_id: number; current_status_id: number | null; current_status_name: string; already: boolean }[];
+};
+export type AskCreateJobPreview = {
+  customer_mode: "new" | "existing"; customer_id: number | null;
+  customer: { name: string; home_phone: string; work_phone: string; email: string;
+    address_line_1: string; address_line_2: string; city: string; province: string; postal_code: string };
+  brand_id: number | null; brand_name: string; brand_new: boolean;
+  item_id: number | null; item_name: string; item_new: boolean;
+  model_number: string; serial_number: string; problem_description: string;
+  status_id: number | null; status_name: string; status_is_default: boolean;
+  job_type_id: number | null; job_type_name: string;
+  deposit: number; deposit_payment_method_id: number | null; deposit_payment_method_name: string;
+  quote: number | null; notes: string[];
+};
 
 export type AskInterpretResponse = {
   intent: AskIntent;
@@ -204,6 +235,11 @@ export type AskInterpretResponse = {
   repair_log_preview?: AskRepairLogPreview;
   labour_preview?: AskLabourPreview;
   waiting_parts?: AskWaitingParts;
+  charges_focus?: "labour";
+  invoice_preview?: AskInvoicePreview;
+  parts_create_preview?: AskPartsCreatePreview;
+  complete_job_preview?: AskCompleteJobPreview;
+  create_job_preview?: AskCreateJobPreview;
 };
 
 /** ✎ AI help actions for POST /ai-tools/email-rewrite. */

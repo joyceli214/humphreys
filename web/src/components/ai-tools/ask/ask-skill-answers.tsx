@@ -21,10 +21,10 @@ export function todayLocalDate(now: Date = new Date()) {
 
 const hoursLabel = (h: number) => `${h} hr`;
 
-type Phase = "preview" | "applying" | "done" | "cancelled";
+export type Phase = "preview" | "applying" | "done" | "cancelled";
 
 /** The Mass Update preview card frame: title, "Nothing is saved…", body, Apply / Cancel. */
-function PreviewCard(props: {
+export function PreviewCard(props: {
   title: string;
   children: React.ReactNode;
   phase: Phase;
@@ -61,7 +61,7 @@ const CANCELLED = (
   </p>
 );
 
-function applyErrorText(err: unknown, fallback: string) {
+export function applyErrorText(err: unknown, fallback: string) {
   const status = errorStatus(err);
   if (status === 409) return "It changed after the preview. Ask again for a fresh preview.";
   if (status === 403) return "You don't have permission for this change.";
@@ -103,6 +103,18 @@ export function partsPatchPayload(ch: AskPartsChange) {
     item_name: ch.item_name,
     quantity: ch.quantity
   };
+}
+
+/** Approval then order needs the server-returned timestamp for the second PATCH. */
+export async function applyPartsChange(ch: AskPartsChange) {
+  if (!ch.valid || !ch.updated_at) throw new Error("Ask again for a valid, fresh preview.");
+  const payload = partsPatchPayload(ch);
+  if (ch.via_status) {
+    const approved = await apiClient.updatePartsPurchaseRequest(ch.reference_id, ch.parts_purchase_request_id, { ...payload, status: ch.via_status });
+    if (!approved.updated_at) throw new Error("Approval was saved, but no fresh timestamp was returned. Ask again before ordering.");
+    payload.updated_at = approved.updated_at;
+  }
+  return apiClient.updatePartsPurchaseRequest(ch.reference_id, ch.parts_purchase_request_id, payload);
 }
 
 export function PartsChangeAnswer({ preview, reply }: { preview: AskPartsPreview; reply: string }) {
@@ -161,7 +173,7 @@ export function PartsChangeAnswer({ preview, reply }: { preview: AskPartsPreview
     const out: PartsResult[] = [];
     for (const ch of valid) {
       try {
-        await apiClient.updatePartsPurchaseRequest(ch.reference_id, ch.parts_purchase_request_id, partsPatchPayload(ch));
+        await applyPartsChange(ch);
         out.push({ id: ch.parts_purchase_request_id, ok: true, message: partsStatusWord(ch.new_status) });
       } catch (err) {
         out.push({ id: ch.parts_purchase_request_id, ok: false, message: applyErrorText(err, "Could not update this request.") });
@@ -226,7 +238,7 @@ export function PartsChangeAnswer({ preview, reply }: { preview: AskPartsPreview
                   {!ch.valid && ch.error && <div className="text-[15px] font-semibold text-red-700">{ch.error}</div>}
                 </td>
                 <td>
-                  <StatusChange from={ch.old_status} to={ch.new_status} />
+                  {ch.via_status ? <><StatusChange from={ch.old_status} to={ch.via_status} /> → <StatusPill>{partsStatusWord(ch.new_status)}</StatusPill></> : <StatusChange from={ch.old_status} to={ch.new_status} />}
                 </td>
                 <td>
                   <PriceChange from={ch.old_price} to={ch.new_price} />
@@ -528,27 +540,6 @@ export function WaitingPartsAnswer({ waiting }: { waiting: AskWaitingParts }) {
       {total > shown.length && (
         <p className="mt-2 text-[15px] text-[#4a5260]">
           Showing {shown.length} of {total}. The list is capped at {ROW_CAP}.
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Complete Job
-// ---------------------------------------------------------------------------
-
-export function CompleteJobAnswer({ reply, referenceIds }: { reply: string; referenceIds: number[] }) {
-  return (
-    <div>
-      <p className="mb-2">{reply}</p>
-      {referenceIds.length > 0 && (
-        <p className="flex flex-wrap gap-x-3 font-semibold text-[#135f6f]">
-          {referenceIds.slice(0, DETAIL_CAP).map((id) => (
-            <JobLink key={id} referenceId={id}>
-              Open job #{id}
-            </JobLink>
-          ))}
         </p>
       )}
     </div>

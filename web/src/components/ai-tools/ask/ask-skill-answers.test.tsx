@@ -1,5 +1,5 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const interpretAsk = vi.fn();
@@ -238,13 +238,12 @@ describe("Ask read answers", () => {
     expect(listRepairLogs).toHaveBeenCalledWith(31165);
   });
 
-  it("points Complete Job to the job page", async () => {
-    interpretAsk.mockResolvedValue(answer({ intent: "complete_job", reference_ids: [31352], reply: "There's no “Complete” status to set from here. Tap Complete Job." }));
-    render(<AskTab />);
-    ask("Complete job #31352");
-    const link = await screen.findByRole("link", { name: "Open job #31352" });
-    expect(link).toHaveAttribute("href", "/work-orders/31352");
-    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+  it("shows the Complete Job preview before any status write", async () => {
+    interpretAsk.mockResolvedValue(answer({ intent: "complete_job", reference_ids: [31352], complete_job_preview: {target_status_id:20,target_status_name:"Finished",target_source:"completed_group",jobs:[{reference_id:31352,current_status_id:9,current_status_name:"Received",already:false}]} }));
+    render(<AskTab />); ask("Complete job #31352");
+    expect(await screen.findByText("Preview: Complete Job")).toBeInTheDocument();
+    expect(screen.getByText("Received → Finished")).toBeInTheDocument();
+    expect(screen.getByRole("button", {name:"Apply"})).toBeEnabled();
   });
 
   it("filters the parts list by the statuses asked and the named job", async () => {
@@ -265,4 +264,25 @@ describe("Ask read answers", () => {
     expect(logText("a ![p](/x.png) b")).toBe("a [photo] b");
     expect(logText("x".repeat(700)).length).toBe(601);
   });
+});
+
+it("answers labour questions with live gross labour, discount and total", async () => {
+  interpretAsk.mockResolvedValue(answer({intent:"charges_summary",reference_ids:[29277],charges_focus:"labour"}));
+  getWorkOrderDetail.mockResolvedValue({reference_id:29277,labour_total:110,labour_discount_type:"amount",labour_discount_value:10,parts_total:0,delivery_total:0,deposit:0});
+  render(<AskTab />); ask("did we already add labour on #29277?");
+  expect(await screen.findByText(/Labour on these jobs: \$100.00/)).toBeInTheDocument();
+  const table = screen.getByRole("table");
+  expect(within(table).getAllByRole("columnheader").map(cell => cell.textContent)).toEqual([
+    "Job #", "Labour before discount", "Labour discount", "Labour", "Parts", "Deposit", "Balance"
+  ]);
+  const rows = within(table).getAllByRole("row");
+  expect(within(rows[1]).getAllByRole("cell").map(cell => cell.textContent)).toEqual([
+    "#29277", "$110.00", "−$10.00", "$100.00", "$0.00", "$0.00", "$113.00"
+  ]);
+  expect(within(rows[2]).getAllByRole("cell").map(cell => cell.textContent)).toEqual([
+    "Total", "$110.00", "−$10.00", "$100.00", "$0.00", "$0.00", "$113.00"
+  ]);
+  expect(getWorkOrderDetail).toHaveBeenCalledWith(29277);
+  expect(listRepairLogs).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button",{name:"Apply"})).toBeNull();
 });
