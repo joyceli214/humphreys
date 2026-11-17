@@ -85,7 +85,16 @@ var (
 	askInvoiceCommand = regexp.MustCompile(`(?im)^(?:please\s+)?(?:mark|set|make)\b[^\n]*\bordered\b[^\n]*$|\binvoice\b`)
 )
 
-func askIsPartsCreate(msg string) bool { return askPartsCreate.MatchString(msg) }
+// askPartsCreateQty: "Request 2 x L7 ...", "order 3 x belts" — a quantity
+// and a part, never parts request #2.
+var askPartsCreateQty = regexp.MustCompile(`(?i)^\s*(?:please\s+)?(?:request|order)\s+\d{1,3}\s*[x×]\s*[A-Za-z0-9]`)
+
+// askPartsCreateLead reads the quantity and part from "Request 2 x L7 for job 31221".
+var askPartsCreateLead = regexp.MustCompile(`(?i)^\s*(?:please\s+)?(?:request|order)\s+(\d{1,3})\s*[x×]\s*(.+?)\s+(?:for|on)\s+(?:jobs?\s*|work\s+orders?\s*|[#＃]\s*)?\d+`)
+
+func askIsPartsCreate(msg string) bool {
+	return askPartsCreate.MatchString(msg) || askPartsCreateQty.MatchString(msg)
+}
 func askInvoiceMessage(msg string, model bool) bool {
 	command := askInvoiceCommand.MatchString(msg) && askOrderedWord.MatchString(msg)
 	if strings.Contains(msg, "\n") {
@@ -270,6 +279,11 @@ func (r *askResolver) createPartsRequest() {
 	if n := strings.TrimSpace(r.in.Result.ItemName); n != "" && askTextHasWords(msg, n) {
 		name = n
 	}
+	// "Request 2 x L7 for job 31221 ...": quantity first, then the part.
+	lead := askPartsCreateLead.FindStringSubmatch(msg)
+	if name == "" && lead != nil {
+		name = strings.Trim(lead[2], " ,;")
+	}
 	if name == "" {
 		if i := strings.Index(msg, ":"); i >= 0 {
 			name = strings.TrimSpace(msg[i+1:])
@@ -291,7 +305,14 @@ func (r *askResolver) createPartsRequest() {
 		return
 	}
 	p := &askPartsCreatePreview{ReferenceID: ids[0], ItemName: capRunes(name, askMaxString), Quantity: 1, Source: "online", Status: "waiting_approval"}
-	if m := askPartQuantity.FindStringSubmatch(msg); m != nil {
+	if lead != nil {
+		n, e := strconv.ParseInt(lead[1], 10, 32)
+		if e != nil || n < 1 {
+			r.plain("Parts quantity must be at least 1.")
+			return
+		}
+		p.Quantity = int32(n)
+	} else if m := askPartQuantity.FindStringSubmatch(msg); m != nil {
 		n, e := strconv.ParseInt(askOr(m[1], m[2]), 10, 32)
 		if e != nil || n < 1 {
 			r.plain("Parts quantity must be at least 1.")

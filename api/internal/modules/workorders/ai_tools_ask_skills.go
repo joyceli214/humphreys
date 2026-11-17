@@ -657,6 +657,11 @@ func (r *askResolver) resolveSkill() bool {
 			r.resp.Intent = askIntentPartsRequests
 		}
 	}
+	// The model read a make/model word ("Bill #31221 for the Wave radio") as
+	// an equipment search, but a job number was typed: show that job.
+	if r.resp.Intent == askIntentSearchEquipment && len(parseAskJobIDs(r.in.Message)) > 0 {
+		r.resp.Intent = askIntentCustomerJobs
+	}
 	if !askIntents[r.resp.Intent] || askSkillIntents[r.resp.Intent] {
 		r.resp.Intent = askIntentUnknown
 	}

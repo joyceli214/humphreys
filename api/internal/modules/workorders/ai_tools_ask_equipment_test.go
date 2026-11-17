@@ -174,3 +174,15 @@ func TestAskEquipmentSearchFollowUp(t *testing.T) {
 		t.Fatalf("resp = %+v", resp)
 	}
 }
+
+// A typed job number wins over the model's equipment search: "Bill #31221
+// for the Wave radio repair" shows #31221 (seen with the real model).
+func TestAskModelEquipmentSearchWithTypedJobShowsTheJob(t *testing.T) {
+	llm, store, _, ask := finishSetup(t)
+	dualStore(store)
+	llm.answerJSON(map[string]any{"intent": askIntentSearchEquipment, "reference_ids": []int64{31221}, "brand": "Bose", "model_number": "Wave"})
+	resp := ask("Bill #31221 for the Wave radio repair")
+	if resp.Intent != askIntentCustomerJobs || len(resp.ReferenceIDs) != 1 || resp.ReferenceIDs[0] != 31221 || resp.EquipmentSearch != nil {
+		t.Fatalf("resp = %+v", resp)
+	}
+}

@@ -695,3 +695,19 @@ func TestAskModelCreatePartsRequestBeatsRequestNumberWords(t *testing.T) {
 		t.Fatalf("resp = %+v", resp)
 	}
 }
+
+// "Request 2 x L7 ..." is a new request for 2 x L7 even when the model reads
+// "request 2" as parts request #2 (seen with the real model on 2026-11-17).
+func TestAskQuantityRequestIsANewPartsRequest(t *testing.T) {
+	llm, store, _, ask := finishSetup(t)
+	dualStore(store)
+	llm.answerJSON(map[string]any{"intent": askIntentPartsUpdate, "reference_ids": []int64{31221}, "parts_request_ids": []int64{2}, "parts_action": "set_price", "total_price": 24})
+	resp := ask("Request 2 x L7 for job 31221 from the supplier, $24 total")
+	p := resp.PartsCreatePreview
+	if resp.Intent != askIntentCreatePartsRequest || p == nil || resp.PartsPreview != nil {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if p.ReferenceID != 31221 || p.ItemName != "L7" || p.Quantity != 2 || p.TotalPrice != 24 {
+		t.Fatalf("preview = %+v", p)
+	}
+}
