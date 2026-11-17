@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/mail"
 	"regexp"
 	"strconv"
 	"strings"
@@ -42,37 +41,6 @@ func (s *askLooseString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type askNewJobInput struct {
-	CustomerName         string         `json:"customer_name"`
-	ExistingCustomer     bool           `json:"existing_customer"`
-	Phone                string         `json:"phone"`
-	WorkPhone            string         `json:"work_phone"`
-	Email                string         `json:"email"`
-	Address              string         `json:"address"`
-	Brand                string         `json:"brand"`
-	Item                 string         `json:"item"`
-	Model                string         `json:"model"`
-	Serial               string         `json:"serial"`
-	Problem              string         `json:"problem"`
-	Quote                askLooseString `json:"quote"`
-	Deposit              askLooseString `json:"deposit"`
-	DepositCollected     any            `json:"deposit_collected"`
-	DepositPaymentMethod string         `json:"deposit_payment_method"`
-	Status               string         `json:"status"`
-	JobType              string         `json:"job_type"`
-}
-
-func (n *askNewJobInput) clean() *askNewJobInput {
-	if n == nil {
-		return nil
-	}
-	c := *n
-	for _, s := range []*string{&c.CustomerName, &c.Phone, &c.WorkPhone, &c.Email, &c.Address, &c.Brand, &c.Item, &c.Model, &c.Serial, &c.Problem, &c.DepositPaymentMethod, &c.Status, &c.JobType} {
-		*s = capRunes(strings.TrimSpace(*s), askMaxString)
-	}
-	return &c
-}
-
 type askInvoiceLine struct {
 	Text       string           `json:"text"`
 	Price      *float64         `json:"price"`
@@ -106,51 +74,15 @@ type askCompleteJobPreview struct {
 	TargetSource     string              `json:"target_source"`
 	Jobs             []askCompleteJobRow `json:"jobs"`
 }
-type askNewCustomer struct {
-	Name         string `json:"name"`
-	HomePhone    string `json:"home_phone"`
-	WorkPhone    string `json:"work_phone"`
-	Email        string `json:"email"`
-	AddressLine1 string `json:"address_line_1"`
-	AddressLine2 string `json:"address_line_2"`
-	City         string `json:"city"`
-	Province     string `json:"province"`
-	PostalCode   string `json:"postal_code"`
-}
-type askCreateJobPreview struct {
-	CustomerMode             string         `json:"customer_mode"`
-	CustomerID               *int64         `json:"customer_id"`
-	Customer                 askNewCustomer `json:"customer"`
-	BrandID                  *int64         `json:"brand_id"`
-	BrandName                string         `json:"brand_name"`
-	BrandNew                 bool           `json:"brand_new"`
-	ItemID                   *int64         `json:"item_id"`
-	ItemName                 string         `json:"item_name"`
-	ItemNew                  bool           `json:"item_new"`
-	ModelNumber              string         `json:"model_number"`
-	SerialNumber             string         `json:"serial_number"`
-	ProblemDescription       string         `json:"problem_description"`
-	StatusID                 *int64         `json:"status_id"`
-	StatusName               string         `json:"status_name"`
-	StatusIsDefault          bool           `json:"status_is_default"`
-	JobTypeID                *int64         `json:"job_type_id"`
-	JobTypeName              string         `json:"job_type_name"`
-	Deposit                  float64        `json:"deposit"`
-	DepositPaymentMethodID   *int64         `json:"deposit_payment_method_id"`
-	DepositPaymentMethodName string         `json:"deposit_payment_method_name"`
-	Quote                    *float64       `json:"quote"`
-	Notes                    []string       `json:"notes"`
-}
 
 var (
-	askLabourWord      = regexp.MustCompile(`(?i)\blabou?r\b|人工`)
-	askCreateJob       = regexp.MustCompile(`(?i)\b(?:new\s+(?:job|work\s+order)|(?:create|open|start)\s+(?:a\s+)?(?:new\s+)?(?:job|work\s+order))\b|開新\s*job`)
-	askPartsCreate     = regexp.MustCompile(`(?i)\b(?:create|add|new|open)\s+(?:a\s+)?parts?\s+(?:purchase\s+)?request\b`)
-	askInvoiceNumber   = regexp.MustCompile(`(?i)\b(INV-[A-Z0-9-]+)\b|\binvoice\s*(?:number|no\.?)?\s*[:#-]?\s*(\d[\w-]*)`)
-	askTrailingPrice   = regexp.MustCompile(`\s+(\$\s*\d+(?:\.\d{1,2})?|\d+\.\d{1,2})\s*$`)
-	askPartQuantity    = regexp.MustCompile(`(?i)\s+[x×]\s*(\d+)\b|\bqty\s*[:=]?\s*(\d+)\b`)
-	askInvoiceCommand  = regexp.MustCompile(`(?im)^(?:please\s+)?(?:mark|set|make)\b[^\n]*\bordered\b[^\n]*$|\binvoice\b`)
-	askDepositEvidence = regexp.MustCompile(`(?i)\b(?:no\s+)?deposit\s+(?:was\s+)?(?:not\s+)?(?:collected|paid|uncollected|unpaid)\b(?:\s*[:?=]\s*(?:yes|no|not))?`)
+	askLabourWord     = regexp.MustCompile(`(?i)\blabou?r\b|人工`)
+	askCreateJob      = regexp.MustCompile(`(?i)\b(?:new\s+(?:job|work\s+order)|(?:create|open|start)\s+(?:a\s+)?(?:new\s+)?(?:job|work\s+order))\b|開新\s*job`)
+	askPartsCreate    = regexp.MustCompile(`(?i)\b(?:create|add|new|open)\s+(?:a\s+)?parts?\s+(?:purchase\s+)?request\b`)
+	askInvoiceNumber  = regexp.MustCompile(`(?i)\b(INV-[A-Z0-9-]+)\b|\binvoice\s*(?:number|no\.?)?\s*[:#-]?\s*(\d[\w-]*)`)
+	askTrailingPrice  = regexp.MustCompile(`\s+(\$\s*\d+(?:\.\d{1,2})?|\d+\.\d{1,2})\s*$`)
+	askPartQuantity   = regexp.MustCompile(`(?i)\s+[x×]\s*(\d+)\b|\bqty\s*[:=]?\s*(\d+)\b`)
+	askInvoiceCommand = regexp.MustCompile(`(?im)^(?:please\s+)?(?:mark|set|make)\b[^\n]*\bordered\b[^\n]*$|\binvoice\b`)
 )
 
 func askIsPartsCreate(msg string) bool { return askPartsCreate.MatchString(msg) }
@@ -500,285 +432,12 @@ func (r *askResolver) completeJob() {
 	r.save = &askContext{ReferenceIDs: ids, Topic: askTopicJobs}
 }
 
-// Discard intake prose entirely so unlabelled names and addresses cannot leak.
+// A new-job request is never remembered as typed, so unlabelled customer
+// names, phones and addresses cannot leak into Ask memory or summaries.
 func askScrubNewJobText(string) string { return "Asked to open a new job (customer details not kept)." }
 func askTurnUserText(message, intent string) string {
-	if intent == askIntentCreateJob || askCreateJob.MatchString(message) {
+	if askCreateJob.MatchString(message) {
 		return askScrubNewJobText(message)
 	}
 	return message
-}
-
-type askAddress struct{ Line1, Line2, City, Province, Postal string }
-
-var askPostal = regexp.MustCompile(`(?i)\b([A-Z]\d[A-Z])\s*(\d[A-Z]\d)\s*$`)
-var askProvince = regexp.MustCompile(`(?i)(?:,\s*|\s+)(ON|Ontario|QC|Quebec|BC|British Columbia|AB|Alberta|MB|Manitoba|NB|New Brunswick|NL|Newfoundland and Labrador|NS|Nova Scotia|NT|Northwest Territories|NU|Nunavut|PE|Prince Edward Island|SK|Saskatchewan|YT|Yukon)\s*$`)
-
-func parseAskAddress(raw string) (askAddress, bool) {
-	a := askAddress{}
-	text := strings.TrimSpace(raw)
-	if m := askPostal.FindStringSubmatch(text); m != nil {
-		a.Postal = strings.ToUpper(m[1] + " " + m[2])
-		text = strings.TrimSpace(text[:len(text)-len(m[0])])
-	}
-	m := askProvince.FindStringSubmatch(text)
-	if m == nil {
-		return a, false
-	}
-	provinces := map[string]string{"on": "Ontario", "qc": "Quebec", "bc": "British Columbia", "ab": "Alberta", "mb": "Manitoba", "nb": "New Brunswick", "nl": "Newfoundland and Labrador", "ns": "Nova Scotia", "nt": "Northwest Territories", "nu": "Nunavut", "pe": "Prince Edward Island", "sk": "Saskatchewan", "yt": "Yukon"}
-	a.Province = askOr(provinces[strings.ToLower(m[1])], m[1])
-	text = strings.Trim(text[:len(text)-len(m[0])], " ,")
-	parts := strings.Split(text, ",")
-	if len(parts) < 2 || len(parts) > 3 {
-		return a, false
-	}
-	a.Line1 = strings.TrimSpace(parts[0])
-	a.City = strings.TrimSpace(parts[len(parts)-1])
-	if len(parts) == 3 {
-		a.Line2 = strings.TrimSpace(parts[1])
-	}
-	if m := regexp.MustCompile(`^(\d+)-(\d+\s+.+)$`).FindStringSubmatch(a.Line1); m != nil {
-		if a.Line2 != "" {
-			return a, false
-		}
-		a.Line2 = m[1]
-		a.Line1 = m[2]
-	}
-	if !regexp.MustCompile(`^\d+\s+\S+`).MatchString(a.Line1) || a.City == "" {
-		return a, false
-	}
-	return a, true
-}
-
-// Only typed model values count. Labelled values take precedence.
-func askIntakeFields(msg string, model *askNewJobInput) map[string]string {
-	f := map[string]string{}
-	if model != nil {
-		values := map[string]string{"customer name": model.CustomerName, "phone": model.Phone, "work phone": model.WorkPhone, "email": model.Email, "address": model.Address, "brand": model.Brand, "item": model.Item, "model": model.Model, "serial": model.Serial, "problem": model.Problem, "quote": string(model.Quote), "deposit": string(model.Deposit), "payment": model.DepositPaymentMethod, "status": model.Status, "job type": model.JobType}
-		for k, v := range values {
-			if strings.TrimSpace(v) != "" && strings.Contains(strings.ToLower(msg), strings.ToLower(v)) {
-				f[k] = v
-			}
-		}
-	}
-	for _, line := range strings.Split(msg, "\n") {
-		kv := strings.SplitN(line, ":", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		key := strings.ToLower(strings.Trim(strings.TrimSpace(kv[0]), "|? "))
-		value := strings.Trim(strings.TrimSpace(kv[1]), "| ")
-		switch key {
-		case "customer name", "name":
-			key = "customer name"
-		case "home phone", "phone":
-			key = "phone"
-		case "full address", "full address (one line)", "address":
-			key = "address"
-		case "problem description":
-			key = "problem"
-		case "quote before tax", "quote before tax (cad)":
-			key = "quote"
-		case "deposit payment method":
-			key = "payment"
-		}
-		f[key] = value
-	}
-	if m := regexp.MustCompile(`(?i)\bexisting\s+customer\s+([^\n:]+)`).FindStringSubmatch(msg); m != nil {
-		f["existing"] = strings.TrimSpace(m[1])
-	}
-	return f
-}
-func askProblemSymptoms(s string) string {
-	if loc := regexp.MustCompile(`(?i)[,; .]*(?:quote(?:d)?(?: before tax)?|deposit(?: collected)?)\b[^$]*\$\s*\d`).FindStringIndex(s); loc != nil {
-		s = s[:loc[0]]
-	}
-	return strings.TrimSpace(s)
-}
-
-func askIntakeMoney(s string) (*float64, bool) {
-	if s == "" {
-		return nil, true
-	}
-	m := regexp.MustCompile(`\$?\s*(\d+(?:\.\d{1,2})?)`).FindStringSubmatch(s)
-	if m == nil {
-		return nil, false
-	}
-	v, err := strconv.ParseFloat(m[1], 64)
-	if err != nil || !askValidPrice(v) || strings.Contains(s, "-") {
-		return nil, false
-	}
-	return &v, true
-}
-func (r *askResolver) createJob() {
-	r.newJob = true
-	r.save = &askContext{ReferenceIDs: []int64{}, Topic: askTopicJobs}
-	r.resp.CustomerQuery = ""
-	r.resp.ReferenceIDs = []int64{}
-	if !r.in.CanCreateJobs {
-		r.plain("You don't have permission to create jobs.")
-		return
-	}
-	if r.h.askCatalog == nil {
-		r.plain("I couldn't load the job catalog right now.")
-		return
-	}
-	f := askIntakeFields(r.in.Message, r.in.Result.NewJob)
-	p := &askCreateJobPreview{CustomerMode: "new", Notes: []string{}, BrandName: f["brand"], ItemName: f["item"], ModelNumber: f["model"], SerialNumber: f["serial"], ProblemDescription: askProblemSymptoms(f["problem"])}
-	if f["existing"] != "" {
-		customers, err := r.h.service.ListCustomers(r.ctx, f["existing"])
-		if err != nil {
-			r.plain("I couldn't search customers right now.")
-			return
-		}
-		if len(customers) > 1 {
-			r.plain("Several customers match. Please identify the customer uniquely on the create page.")
-			return
-		}
-		if len(customers) == 0 {
-			r.plain("No existing customer matches. Check the name or provide new customer details.")
-			return
-		}
-		p.CustomerMode = "existing"
-		p.CustomerID = &customers[0].ID
-		p.Customer.Name = customers[0].Label
-	} else {
-		p.Customer = askNewCustomer{Name: f["customer name"], Email: f["email"]}
-		if p.Customer.Name == "" {
-			r.plain("What is the customer name and phone number?")
-			return
-		}
-		normalize := func(s string) string {
-			return strings.NewReplacer(" ", "", "-", "", "(", "", ")", "", ".", "").Replace(s)
-		}
-		p.Customer.HomePhone = normalize(f["phone"])
-		p.Customer.WorkPhone = normalize(f["work phone"])
-		if p.Customer.HomePhone == "" && p.Customer.WorkPhone == "" {
-			r.plain("What is the customer's home or work phone number?")
-			return
-		}
-		for _, phone := range []string{p.Customer.HomePhone, p.Customer.WorkPhone} {
-			if phone != "" && !askAllDigits(phone) {
-				r.plain("Please provide a phone number using digits, spaces, dashes or parentheses.")
-				return
-			}
-		}
-		if p.Customer.Email != "" {
-			if _, err := mail.ParseAddress(p.Customer.Email); err != nil {
-				r.plain("Please check the email address.")
-				return
-			}
-		}
-		if f["address"] != "" {
-			a, ok := parseAskAddress(f["address"])
-			if !ok {
-				r.plain("Please clarify the address: street, unit if any, city, province and postal code.")
-				return
-			}
-			p.Customer.AddressLine1 = a.Line1
-			p.Customer.AddressLine2 = a.Line2
-			p.Customer.City = a.City
-			p.Customer.Province = a.Province
-			p.Customer.PostalCode = a.Postal
-		}
-	}
-	var valid bool
-	p.Quote, valid = askIntakeMoney(f["quote"])
-	if !valid {
-		r.plain("Please check the quote amount.")
-		return
-	}
-	deposit, valid := askIntakeMoney(f["deposit"])
-	if !valid {
-		r.plain("Please check the deposit amount.")
-		return
-	}
-	collected := strings.ToLower(f["deposit collected"])
-	if collected == "" {
-		// Negation belongs to the deposit statement. Symptoms such as "no
-		// sound" must not cancel a separate "deposit collected" statement.
-		collected = strings.ToLower(askDepositEvidence.FindString(r.in.Message))
-	}
-	if deposit != nil {
-		p.Deposit = *deposit
-	} else if regexp.MustCompile(`\b(?:yes|paid|collected)\b`).MatchString(collected) && !regexp.MustCompile(`\b(?:no|not|unpaid|uncollected)\b`).MatchString(collected) && p.Quote != nil {
-		p.Deposit = round2(*p.Quote * 1.13)
-		p.Notes = append(p.Notes, "Deposit = quote × 1.13 (13% Ontario HST), because the deposit was collected.")
-	}
-	cat := r.h.askCatalog
-	lookup := func(list func(context.Context, string) ([]catalog.LookupOption, error), name string) (*int64, string, error) {
-		opts, err := list(r.ctx, "")
-		if err != nil {
-			return nil, "", err
-		}
-		for _, o := range opts {
-			if strings.EqualFold(o.Label, name) {
-				id := o.ID
-				return &id, o.Label, nil
-			}
-		}
-		return nil, name, nil
-	}
-	var err error
-	p.BrandID, p.BrandName, err = lookup(cat.ListBrands, p.BrandName)
-	if err != nil {
-		r.plain("I couldn't load brands right now.")
-		return
-	}
-	p.BrandNew = p.BrandName != "" && p.BrandID == nil
-	p.ItemID, p.ItemName, err = lookup(cat.ListItems, p.ItemName)
-	if err != nil {
-		r.plain("I couldn't load items right now.")
-		return
-	}
-	p.ItemNew = p.ItemName != "" && p.ItemID == nil
-	if p.ItemName == "" {
-		r.plain("What item is the job for?")
-		return
-	}
-	status := askOr(f["status"], "Received")
-	p.StatusIsDefault = f["status"] == ""
-	p.StatusID, p.StatusName, err = lookup(cat.ListWorkOrderStatuses, status)
-	if err != nil || p.StatusID == nil {
-		r.plain("I couldn't resolve the job status. Choose a configured status on the create page.")
-		return
-	}
-	p.JobTypeID, p.JobTypeName, err = lookup(cat.ListJobTypes, askOr(f["job type"], "Repair"))
-	if err != nil {
-		r.plain("I couldn't load job types right now.")
-		return
-	}
-	if f["job type"] != "" && p.JobTypeID == nil {
-		r.plain("Please choose a configured job type.")
-		return
-	}
-	if p.Deposit > 0 {
-		paymentText := strings.ToLower(f["payment"] + " " + f["deposit"] + " " + collected)
-		options, e := cat.ListPaymentMethods(r.ctx, "")
-		if e != nil {
-			r.plain("I couldn't load payment methods right now.")
-			return
-		}
-		for _, o := range options {
-			if regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(o.Label) + `\b`).MatchString(paymentText) {
-				if p.DepositPaymentMethodID != nil {
-					r.plain("Which deposit payment method should I use?")
-					return
-				}
-				id := o.ID
-				p.DepositPaymentMethodID = &id
-				p.DepositPaymentMethodName = o.Label
-			}
-		}
-		if p.DepositPaymentMethodID == nil {
-			r.plain("What payment method was used for the deposit?")
-			return
-		}
-	}
-	if p.BrandNew || p.ItemNew {
-		p.Notes = append(p.Notes, "New catalog names will use the same Add New catalog actions as the create page, subject to permissions and frozen dropdowns.")
-	}
-	r.clearSkillFields(askIntentCreateJob)
-	r.resp.Reply = ""
-	r.resp.CreateJobPreview = p
 }

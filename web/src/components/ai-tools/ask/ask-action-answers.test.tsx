@@ -1,17 +1,16 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AskCreateJobPreview, AskPartsChange } from "@/lib/ai-tools/types";
+import type { AskPartsChange } from "@/lib/ai-tools/types";
 const mocks = vi.hoisted(() => ({
  updatePartsPurchaseRequest: vi.fn(), createPartsPurchaseRequest: vi.fn(), getCompleteJobStatusTarget: vi.fn(),
  listWorkOrderStatuses: vi.fn(), updateWorkOrderStatus: vi.fn(), createWorkOrder: vi.fn(), updateWorkOrderWorkNotes: vi.fn(),
  createBrand: vi.fn(), createItem: vi.fn(), listDropdownManagement: vi.fn()
 }));
 vi.mock("@/lib/api/client", () => ({apiClient: mocks, APIError: class extends Error { constructor(message: string, public status: number) { super(message); } }}));
-import { CompleteJobAnswer, CreateJobAnswer, InvoiceAnswer, PartsCreateAnswer } from "./ask-action-answers";
+import { CompleteJobAnswer, InvoiceAnswer, PartsCreateAnswer } from "./ask-action-answers";
 import { PartsChangeAnswer } from "./ask-skill-answers";
 const ch = (id = 501, extra: Partial<AskPartsChange> = {}): AskPartsChange => ({parts_purchase_request_id:id, reference_id:275, item_name:"Belt", quantity:1, source:"supplier", old_status:"approved", new_status:"ordered", old_price:0, new_price:4.5, old_source_url:null, new_source_url:null, updated_at:"2026-11-14T01:00:00Z",valid:true,...extra});
-const job: AskCreateJobPreview = {customer_mode:"new",customer_id:null,customer:{name:"Pat Example",home_phone:"4165550199",work_phone:"",email:"pat@example.com",address_line_1:"64 Bramalea Rd",address_line_2:"1412",city:"Brampton",province:"Ontario",postal_code:"L6T 2W8"},brand_id:31,brand_name:"Sony",brand_new:false,item_id:11,item_name:"Receiver",item_new:false,model_number:"STR-DH190",serial_number:"12345",problem_description:"No sound",status_id:9,status_name:"Received",status_is_default:true,job_type_id:1,job_type_name:"Repair",deposit:90.4,deposit_payment_method_id:41,deposit_payment_method_name:"Cash",quote:80,notes:["quote × 1.13"]};
 beforeEach(() => { vi.resetAllMocks(); mocks.getCompleteJobStatusTarget.mockResolvedValue({status_id:20}); mocks.updateWorkOrderStatus.mockResolvedValue({}); mocks.listDropdownManagement.mockResolvedValue({items:[]}); });
 afterEach(cleanup);
 describe("Ask finish previews and existing Apply paths", () => {
@@ -50,43 +49,14 @@ describe("Ask finish previews and existing Apply paths", () => {
   render(<CompleteJobAnswer preview={{target_status_id:20,target_status_name:"Finished",target_source:"setting",jobs:[{reference_id:275,current_status_id:9,current_status_name:"Received",already:false}]}} />);
   fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/target changed/); expect(mocks.updateWorkOrderStatus).not.toHaveBeenCalled();
  });
- it("creates a job then saves symptoms using work notes and shows parsed fields", async () => {
-  mocks.createWorkOrder.mockResolvedValue({reference_id:31353,status_id:9,payment_method_ids:[41]}); mocks.updateWorkOrderWorkNotes.mockResolvedValue({});
-  render(<CreateJobAnswer preview={job} />); expect(screen.getByText("64 Bramalea Rd")).toBeInTheDocument(); expect(screen.getByText("1412")).toBeInTheDocument(); expect(mocks.createWorkOrder).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/Job #31353 created/);
-  expect(mocks.createWorkOrder).toHaveBeenCalledWith(expect.objectContaining({creation_mode:"new_job",new_customer:job.customer,brand_ids:[31],item_id:11,job_type_id:1,deposit:90.4,deposit_payment_method_id:41}));
-  expect(mocks.updateWorkOrderWorkNotes).toHaveBeenCalledWith(31353,{problem_description:"No sound",worker_ids:[],work_done:null,payment_method_ids:[41]});
- });
- it("does not create a duplicate after a work notes failure", async () => {
-  mocks.createWorkOrder.mockResolvedValue({reference_id:31353,status_id:9,payment_method_ids:[]}); mocks.updateWorkOrderWorkNotes.mockRejectedValueOnce(new Error("notes failed")).mockResolvedValueOnce({});
-  render(<CreateJobAnswer preview={job} />); fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/notes failed/);
-  fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/Job #31353 created/); expect(mocks.createWorkOrder).toHaveBeenCalledTimes(1);
- });
- it("reuses the create page catalog actions for new names", async () => {
-  mocks.createBrand.mockResolvedValue({id:32,label:"Marantz"}); mocks.createItem.mockResolvedValue({id:12,label:"Tuner"}); mocks.createWorkOrder.mockResolvedValue({reference_id:31354,status_id:9,payment_method_ids:[]}); mocks.updateWorkOrderWorkNotes.mockResolvedValue({});
-  render(<CreateJobAnswer preview={{...job,brand_new:true,brand_id:null,brand_name:"Marantz",item_new:true,item_id:null,item_name:"Tuner"}} />);
-  fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/Job #31354 created/);
-  expect(mocks.createBrand).toHaveBeenCalledWith("Marantz"); expect(mocks.createItem).toHaveBeenCalledWith("Tuner"); expect(mocks.createWorkOrder).toHaveBeenCalledWith(expect.objectContaining({brand_ids:[32],item_id:12}));
- });
- it("honours frozen catalog dropdowns", async () => {
-  mocks.listDropdownManagement.mockResolvedValue({items:[{key:"brands",is_frozen:true}]});
-  render(<CreateJobAnswer preview={{...job,brand_new:true,brand_id:null,brand_name:"Marantz"}} />); fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/frozen/); expect(mocks.createBrand).not.toHaveBeenCalled(); expect(mocks.createWorkOrder).not.toHaveBeenCalled();
- });
- it("cancel leaves a new job unsaved", () => { render(<CreateJobAnswer preview={job} />); fireEvent.click(screen.getByRole("button",{name:"Cancel"})); expect(screen.getByText(/Nothing was changed/)).toBeInTheDocument(); expect(mocks.createWorkOrder).not.toHaveBeenCalled(); });
 });
 
-describe("completion fallbacks and explicit creation status", () => {
+describe("completion fallbacks", () => {
  it("uses the first completed-group status when the button setting is absent", async () => {
   mocks.getCompleteJobStatusTarget.mockResolvedValue({status_id:null});
   mocks.listWorkOrderStatuses.mockResolvedValue({items:[{id:19,label:"Finishing"},{id:20,label:"Finished",status_group:"completed"}]});
   render(<CompleteJobAnswer preview={{target_status_id:20,target_status_name:"Finished",target_source:"completed_group",jobs:[{reference_id:275,current_status_id:9,current_status_name:"Received",already:false}]}} />);
   fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/Job #275 completed/);
   expect(mocks.updateWorkOrderStatus).toHaveBeenCalledWith(275,{status_id:20});
- });
- it("applies an explicit job status through the existing status endpoint after creation", async () => {
-  mocks.createWorkOrder.mockResolvedValue({reference_id:31353,status_id:9,payment_method_ids:[]}); mocks.updateWorkOrderWorkNotes.mockResolvedValue({});
-  render(<CreateJobAnswer preview={{...job,status_id:8,status_name:"On Test",status_is_default:false}} />);
-  fireEvent.click(screen.getByRole("button",{name:"Apply"})); await screen.findByText(/Job #31353 created/);
-  expect(mocks.updateWorkOrderStatus).toHaveBeenCalledWith(31353,{status_id:8});
  });
 });

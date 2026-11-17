@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type SyntheticEvent } from "react";
 import { MessageSquarePlus, SendHorizontal } from "lucide-react";
-import { CompleteJobAnswer, CreateJobAnswer, InvoiceAnswer, PartsCreateAnswer } from "./ask-action-answers";
+import { CompleteJobAnswer, InvoiceAnswer, PartsCreateAnswer } from "./ask-action-answers";
 import { apiClient } from "@/lib/api/client";
 import type { AskInterpretResponse } from "@/lib/ai-tools/types";
 import { AI_TEXT_MAX } from "@/lib/ai-tools/limits";
@@ -15,7 +15,8 @@ import {
   PartsChangeAnswer,
   RepairHistoryAnswer,
   RepairLogPreviewAnswer,
-  WaitingPartsAnswer
+  WaitingPartsAnswer,
+  EquipmentSearchAnswer
 } from "@/components/ai-tools/ask/ask-skill-answers";
 import { cn } from "@/lib/utils";
 
@@ -104,6 +105,9 @@ function AnswerBody({ answer, onStarter }: { answer: AskInterpretResponse; text:
     case "jobs_waiting_parts":
       if (!answer.waiting_parts) return <p>{answer.reply || "I couldn't find the waiting-on-parts status."}</p>;
       return <WaitingPartsAnswer waiting={answer.waiting_parts} />;
+    case "search_equipment":
+      if (!answer.equipment_search) return <p>{answer.reply || "I couldn't search jobs right now."}</p>;
+      return <EquipmentSearchAnswer search={answer.equipment_search} />;
     case "job_details":
       return <JobDetailsAnswer referenceIds={answer.reference_ids ?? []} />;
     case "repair_history":
@@ -114,12 +118,17 @@ function AnswerBody({ answer, onStarter }: { answer: AskInterpretResponse; text:
       return answer.invoice_preview ? <InvoiceAnswer preview={answer.invoice_preview} /> : <p>{answer.reply}</p>;
     case "create_parts_request":
       return answer.parts_create_preview ? <PartsCreateAnswer preview={answer.parts_create_preview} /> : <p>{answer.reply}</p>;
-    case "create_job":
-      return answer.create_job_preview ? <CreateJobAnswer preview={answer.create_job_preview} /> : <p>{answer.reply}</p>;
     default:
       return (
         <div>
           <p className="mb-2 whitespace-pre-wrap">{answer.reply || "I can find jobs, update jobs, change parts requests, add repair logs or labour, or sum up charges."}</p>
+          {answer.link && (
+            <p className="mb-2">
+              <a href={answer.link.href} target="_blank" rel="noreferrer" className="font-semibold text-[#135f6f] underline">
+                Open {answer.link.label}
+              </a>
+            </p>
+          )}
           <Starters onPick={onStarter} />
         </div>
       );

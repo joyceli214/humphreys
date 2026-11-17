@@ -61,9 +61,27 @@ type askContext struct {
 	ReferenceIDs  []int64
 	CustomerQuery string
 	// Topic is askTopicJobs or askTopicParts ("" counts as jobs).
-	Topic     string
-	Turns     []askTurn
+	Topic string
+	Turns []askTurn
+	// Pending is a question Ask asked and is waiting on (labour amount,
+	// repair log hours); only the next message can answer it.
+	Pending   *askPending
 	UpdatedAt time.Time
+}
+
+// Pending question kinds.
+const (
+	askPendingLabour    = "labour"
+	askPendingRepairLog = "repair_log"
+)
+
+// askPending is what Ask remembers about a question it asked: the job and
+// whatever the user already gave (hours for labour, the text of a repair log).
+type askPending struct {
+	Kind        string   `json:"kind"`
+	ReferenceID int64    `json:"reference_id"`
+	Hours       *float64 `json:"hours,omitempty"`
+	Text        string   `json:"text,omitempty"`
 }
 
 // normalizeAskTopic maps anything but "parts" to "jobs".
@@ -138,10 +156,10 @@ type pgAskStore struct{ db *pgxpool.Pool }
 
 func (s *pgAskStore) LoadAskContext(ctx context.Context, userID string) (askContext, bool, error) {
 	var ac askContext
-	var turns []byte
+	var turns, pending []byte
 	err := s.db.QueryRow(ctx,
-		`SELECT reference_ids, customer_query, topic, turns, updated_at FROM public.ai_ask_context WHERE user_id = $1::uuid`,
-		userID).Scan(&ac.ReferenceIDs, &ac.CustomerQuery, &ac.Topic, &turns, &ac.UpdatedAt)
+		`SELECT reference_ids, customer_query, topic, turns, pending, updated_at FROM public.ai_ask_context WHERE user_id = $1::uuid`,
+		userID).Scan(&ac.ReferenceIDs, &ac.CustomerQuery, &ac.Topic, &turns, &pending, &ac.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return askContext{}, false, nil
 	}
@@ -153,6 +171,14 @@ func (s *pgAskStore) LoadAskContext(ctx context.Context, userID string) (askCont
 		if err := json.Unmarshal(turns, &ac.Turns); err != nil {
 			log.Printf("[ai] ask context turns: %v", err)
 			ac.Turns = nil
+		}
+	}
+	if len(pending) > 0 && string(pending) != "null" {
+		var p askPending
+		if err := json.Unmarshal(pending, &p); err != nil {
+			log.Printf("[ai] ask context pending: %v", err)
+		} else if p.ReferenceID > 0 {
+			ac.Pending = &p
 		}
 	}
 	return ac, true, nil
@@ -174,16 +200,26 @@ func (s *pgAskStore) SaveAskContext(ctx context.Context, userID string, ac askCo
 	if err != nil {
 		return err
 	}
+	var pendingJSON *string
+	if ac.Pending != nil {
+		b, err := json.Marshal(ac.Pending)
+		if err != nil {
+			return err
+		}
+		v := string(b)
+		pendingJSON = &v
+	}
 	_, err = s.db.Exec(ctx,
-		`INSERT INTO public.ai_ask_context (user_id, reference_ids, customer_query, topic, turns, updated_at)
-		 VALUES ($1::uuid, $2::bigint[], $3, $4, $5::jsonb, now())
+		`INSERT INTO public.ai_ask_context (user_id, reference_ids, customer_query, topic, turns, pending, updated_at)
+		 VALUES ($1::uuid, $2::bigint[], $3, $4, $5::jsonb, $6::jsonb, now())
 		 ON CONFLICT (user_id) DO UPDATE
 		   SET reference_ids = EXCLUDED.reference_ids,
 		       customer_query = EXCLUDED.customer_query,
 		       topic = EXCLUDED.topic,
 		       turns = EXCLUDED.turns,
+		       pending = EXCLUDED.pending,
 		       updated_at = now()`,
-		userID, ids, ac.CustomerQuery, normalizeAskTopic(ac.Topic), string(turnsJSON))
+		userID, ids, ac.CustomerQuery, normalizeAskTopic(ac.Topic), string(turnsJSON), pendingJSON)
 	return err
 }
 

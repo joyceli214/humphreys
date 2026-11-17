@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { apiClient } from "@/lib/api/client";
 import type { PartsPurchaseRequest, WorkOrderDetail, WorkOrderListItem } from "@/lib/api/generated/types";
-import type { AskLabourPreview, AskPartsChange, AskPartsPreview, AskRepairLogPreview, AskWaitingParts, MassUpdateApplyResult } from "@/lib/ai-tools/types";
+import type { AskLabourPreview, AskPartsChange, AskPartsPreview, AskRepairLogPreview, AskWaitingParts, AskEquipmentSearch, MassUpdateApplyResult } from "@/lib/ai-tools/types";
 import { partsStatusWord } from "@/lib/ai-tools/email-flow";
 import { errorMessage } from "@/components/ai-tools/ai-ui";
 import { JobLink } from "@/components/ai-tools/job-link";
@@ -355,11 +355,17 @@ export function LabourPreviewAnswer({ preview }: { preview: AskLabourPreview }) 
             </td>
           </tr>
           <tr>
-            <th>Hours</th>
+            <th>Amount</th>
             <td>
-              {hoursLabel(preview.hours)} × {money(preview.rate)}/hr = <b>{money(preview.amount)}</b>
+              <b>{money(preview.amount)}</b>
             </td>
           </tr>
+          {preview.hours !== null && (
+            <tr>
+              <th>Hours</th>
+              <td>{hoursLabel(preview.hours)}</td>
+            </tr>
+          )}
           <tr>
             <th>Labour</th>
             <td>
@@ -540,6 +546,54 @@ export function WaitingPartsAnswer({ waiting }: { waiting: AskWaitingParts }) {
       {total > shown.length && (
         <p className="mt-2 text-[15px] text-[#4a5260]">
           Showing {shown.length} of {total}. The list is capped at {ROW_CAP}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function EquipmentSearchAnswer({ search }: { search: AskEquipmentSearch }) {
+  const label = [search.brand && `make ${search.brand}`, search.model_number && `model ${search.model_number}`, search.serial && `serial ${search.serial}`]
+    .filter(Boolean)
+    .join(", ");
+  if (search.rows.length === 0) return <p>No jobs found for {label}.</p>;
+  const shown = search.rows.slice(0, ROW_CAP);
+  return (
+    <div>
+      <p className="mb-2">
+        <b>{plural(search.total, "job")}</b> for {label}.
+      </p>
+      <div className="-mx-1 overflow-x-auto">
+        <table className={TABLE_CLASS}>
+          <thead>
+            <tr>
+              <th>Job #</th>
+              <th>Status</th>
+              <th>Customer</th>
+              <th>Make</th>
+              <th>Model</th>
+              <th>Serial</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((row) => (
+              <tr key={row.reference_id}>
+                <td className="whitespace-nowrap font-semibold text-[#135f6f]">
+                  <JobLink referenceId={row.reference_id} />
+                </td>
+                <td>{row.status_name || "—"}</td>
+                <td>{row.customer_name || "—"}</td>
+                <td>{row.brand || "—"}</td>
+                <td>{row.model_number || "—"}</td>
+                <td>{row.serial_number || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {search.total > shown.length && (
+        <p className="mt-2 text-[15px] text-[#4a5260]">
+          Showing {shown.length} of {search.total}. The list is capped at {Math.min(ROW_CAP, search.rows.length)}.
         </p>
       )}
     </div>

@@ -81,8 +81,13 @@ type askInterpretResult struct {
 	Quantity askLooseString `json:"quantity"`
 	// Supplier invoice number as typed.
 	InvoiceNumber string `json:"invoice_number"`
-	// NewJob holds the new-job fields as typed (create_job).
-	NewJob *askNewJobInput `json:"new_job"`
+	// Amount is the labour money (dollars) as typed (add_labour); never
+	// computed from hours.
+	Amount *float64 `json:"amount"`
+	// Equipment search (search_equipment): make, model and serial as typed.
+	EquipBrand  string `json:"brand"`
+	EquipModel  string `json:"model_number"`
+	EquipSerial string `json:"serial"`
 }
 
 type askInterpretResponse struct {
@@ -106,20 +111,28 @@ type askInterpretResponse struct {
 	RepairLogPreview *askRepairLogPreview `json:"repair_log_preview,omitempty"`
 	LabourPreview    *askLabourPreview    `json:"labour_preview,omitempty"`
 	WaitingParts     *askWaitingParts     `json:"waiting_parts,omitempty"`
+	EquipmentSearch  *askEquipmentSearch  `json:"equipment_search,omitempty"`
 	// ChargesFocus "labour": a labour question ("did we already add labour on
 	// #X?"); the charges answer shows the labour lines and labour total.
 	ChargesFocus       string                 `json:"charges_focus,omitempty"`
 	InvoicePreview     *askInvoicePreview     `json:"invoice_preview,omitempty"`
 	PartsCreatePreview *askPartsCreatePreview `json:"parts_create_preview,omitempty"`
 	CompleteJobPreview *askCompleteJobPreview `json:"complete_job_preview,omitempty"`
-	CreateJobPreview   *askCreateJobPreview   `json:"create_job_preview,omitempty"`
+	// Link is a portal page the reply points to (e.g. New Job).
+	Link *askLink `json:"link,omitempty"`
+}
+
+// askLink is a clickable portal link shown under the reply.
+type askLink struct {
+	Label string `json:"label"`
+	Href  string `json:"href"`
 }
 
 // askInterpretTemperature: Ask interpret is a classifier, so it samples at 0
 // (the shared OpenRouter temperature is 0.2).
 const askInterpretTemperature = 0.0
 
-// askInterpretMaxTokens leaves room for a new job's fields.
+// askInterpretMaxTokens caps the model's JSON answer.
 const askInterpretMaxTokens = 800
 
 // askRetryReply is shown with a lookup or preview that came from the
@@ -239,7 +252,6 @@ func (h *Handler) AskInterpret(c *gin.Context) {
 		CanCreateRepairLogs: hasPermission(c, permRepairLogsCreate),
 		CanCreateParts:      hasPermission(c, permPartsCreate),
 		CanUpdateStatus:     hasPermission(c, permStatusUpdate),
-		CanCreateJobs:       hasPermission(c, permCreate),
 	})
 	if retried && strings.TrimSpace(out.resp.Reply) == "" {
 		// The retry must never leave the chat without a line of text.
@@ -255,6 +267,8 @@ func (h *Handler) AskInterpret(c *gin.Context) {
 		if out.save != nil {
 			next = *out.save
 		}
+		// A pending question lasts one reply: any other answer clears it.
+		next.Pending = out.pending
 		next.Turns = appendAskTurn(prev.Turns, askTurnUserText(message, out.resp.Intent), out.summary)
 		h.saveAskContext(ctx, userID, next)
 	}
@@ -328,7 +342,6 @@ type askResolveInput struct {
 	CanCreateRepairLogs bool
 	CanCreateParts      bool
 	CanUpdateStatus     bool
-	CanCreateJobs       bool
 }
 
 // askOutcome is the resolved answer, what to remember (nil keeps the saved
@@ -336,6 +349,7 @@ type askResolveInput struct {
 type askOutcome struct {
 	resp    askInterpretResponse
 	save    *askContext
+	pending *askPending
 	summary string
 }
 
@@ -355,9 +369,8 @@ type askResolver struct {
 	broad bool
 	// labour: a question about labour already on a job (charges view).
 	labour bool
-	// newJob: the message was about opening a new job; nothing it typed
-	// (customer details) is remembered.
-	newJob bool
+	// pending is the question Ask is waiting on (saved with the context).
+	pending *askPending
 }
 
 // resolveAsk applies the server rules on top of the model's classification.
@@ -385,7 +398,7 @@ func (h *Handler) resolveAsk(ctx context.Context, in askResolveInput) askOutcome
 	if r.resp.PartsRequestIDs == nil {
 		r.resp.PartsRequestIDs = []int64{}
 	}
-	if !r.resolveSkill() {
+	if !r.answerPending() && !r.resolveSkill() {
 		r.resolve()
 	}
 	if r.broad {
@@ -398,17 +411,18 @@ func (h *Handler) resolveAsk(ctx context.Context, in askResolveInput) askOutcome
 	if r.resp.Intent == askIntentUpdateJobs && (r.resp.PreviewInstruction == "" || len(r.resp.ReferenceIDs) == 0) {
 		r.plain(askNoContextReply)
 	}
-	return askOutcome{resp: r.resp, save: r.save, summary: r.summary()}
+	return askOutcome{resp: r.resp, save: r.save, pending: r.pending, summary: r.summary()}
 }
 
 func (r *askResolver) resolve() {
 	msg, prev := r.in.Message, r.in.Prev
-	explicit := parseAskJobIDs(msg)
+	explicit := askTypedJobIDs(msg)
 	followUp := isAskFollowUp(msg) && !r.broad
 	customerRef := isAskCustomerFollowUp(msg)
 	// A question ("what's the make and model on #31178") never updates.
 	updateVerb := isAskUpdateVerb(msg) && !isAskQuestion(msg)
-	bare := len(explicit) > 0 && isAskBareJobNumbers(msg)
+	_, lone := askLoneJobNumber(msg)
+	bare := len(explicit) > 0 && (isAskBareJobNumbers(msg) || (lone && len(parseAskJobIDs(msg)) == 0 && !updateVerb))
 
 	if bare && (r.resp.Intent == askIntentUnknown || r.resp.Intent == askIntentUpdateJobs) {
 		r.resp.Intent = askIntentCustomerJobs
@@ -760,11 +774,6 @@ func (r *askResolver) summary() string {
 		}
 		return askOneLine(s, askMaxTurnRunes)
 	}
-	if r.newJob {
-		// A new-job question back ("I still need the phone number") never
-		// repeats what was typed: customer details stay out of Ask memory.
-		return "Asked for more details to open a new job (customer details not kept)."
-	}
 	switch resp.Intent {
 	case askIntentUpdateJobs:
 		s = "Opened a preview to change " + jobs(ids) + " (nothing saved until Apply)."
@@ -983,7 +992,13 @@ func parseAskInterpretOutput(text string) (askInterpretResult, error) {
 	out.ItemName = capRunes(strings.Join(strings.Fields(raw.ItemName), " "), askMaxString)
 	out.Quantity = askLooseString(capRunes(strings.TrimSpace(string(raw.Quantity)), 20))
 	out.InvoiceNumber = capRunes(strings.TrimSpace(raw.InvoiceNumber), 60)
-	out.NewJob = raw.NewJob.clean()
+	out.EquipBrand = capRunes(strings.Join(strings.Fields(raw.EquipBrand), " "), askMaxString)
+	out.EquipModel = capRunes(strings.Join(strings.Fields(raw.EquipModel), " "), askMaxString)
+	out.EquipSerial = capRunes(strings.Join(strings.Fields(raw.EquipSerial), " "), askMaxString)
+	if raw.Amount != nil && askValidPrice(*raw.Amount) && *raw.Amount > 0 {
+		v := round2(*raw.Amount)
+		out.Amount = &v
+	}
 	if raw.Hours != nil && !math.IsNaN(*raw.Hours) && !math.IsInf(*raw.Hours, 0) && *raw.Hours >= 0 && *raw.Hours <= askMaxHours {
 		v := *raw.Hours
 		out.Hours = &v
@@ -1022,7 +1037,7 @@ func askSystemPrompt() string {
 		"You only classify: you never write SQL and never change data. Any data change happens later in a preview that the user must review and Apply. " +
 		"Respond with exactly ONE JSON object and nothing before or after it: no markdown, no code fences (```), no comments, no trailing commentary. " +
 		"Always include these keys with these types: intent (string), customer_query (string), reference_ids (array of integers), parts_query (string), parts_statuses (array of strings), reply (string). " +
-		"Optional keys (omit or leave empty when not needed): parts_request_ids (array of integers), parts_action (string), parts_actions (array of strings), total_price (number or null), source_url (string), log_text (string), hours (number or null), item_name (string), quantity (integer or null), invoice_number (string), new_job (object or null). " +
+		"Optional keys (omit or leave empty when not needed): parts_request_ids (array of integers), parts_action (string), parts_actions (array of strings), total_price (number or null), source_url (string), log_text (string), hours (number or null), item_name (string), quantity (integer or null), invoice_number (string), amount (number or null), brand (string), model_number (string), serial (string). " +
 		"Example: " +
 		`{"intent":"customer_jobs","customer_query":"","reference_ids":[31221],"parts_query":"","parts_statuses":[],"reply":""}. ` +
 		"intent must be one of:\n" +
@@ -1030,19 +1045,19 @@ func askSystemPrompt() string {
 		`- "job_details": a question about a job's item: make, brand, model or serial number; job numbers in reference_ids\n` +
 		`- "repair_history": what was done on a job, its repair logs or repair history; job numbers in reference_ids\n` +
 		`- "update_jobs": change one or more jobs' status, location, labour total in dollars, line items or work done; put the job numbers in reference_ids\n` +
-		`- "add_repair_log": add a repair log to one job; the job number in reference_ids, the log text exactly as typed in log_text, hours (number) in hours\n` +
-		`- "add_labour": add labour hours to one job ("add 1 hour labour to #X"); the job number in reference_ids, the hours (number) in hours\n` +
+		`- "add_repair_log": add a repair log to one job; the job number in reference_ids, the log text exactly as typed in log_text, hours (number) in hours only if typed, else null\n` +
+		`- "add_labour": add labour to one job ("add $110 labour to #X", "add labour to #X: $110, 1 hour"); the job number in reference_ids, the money in dollars (number) in amount and the hours (number) in hours, each only if typed, else null; never work out money from hours\n` +
 		`- "complete_job": complete or close a job ("complete job #X", "mark #X complete"); job numbers in reference_ids. The server previews the same status change as the Complete Job button\n` +
-		`- "create_job": open a NEW job (new job, create a job, 開新 job); put what the user typed in new_job: {"customer_name","existing_customer" (true when they name an existing customer),"phone","email","address" (one line),"brand","item" (the kind of equipment only, e.g. amplifier, CD player),"model" (the model number, e.g. L-509),"serial","problem","quote","deposit","deposit_collected","deposit_payment_method","status","job_type"}; copy values exactly as typed, never invent one\n` +
 		`- "create_parts_request": add a NEW parts request to one job; the job number in reference_ids, the part as typed in item_name, quantity, total_price only if typed\n` +
 		`- "parts_invoice": a pasted supplier invoice or list of parts (one per line) to mark ordered; invoice_number as typed\n` +
 		`- "parts_requests": show parts purchase requests; optional parts_query text and parts_statuses from: draft, waiting_approval, approved, ordered, arrived, used, cancelled (only the statuses asked about); put job numbers in reference_ids when the request is about specific jobs\n` +
 		`- "parts_update": change parts requests: parts_action is one of approve, order (mark ordered), arrive (mark arrived), cancel, set_price (with two actions, e.g. approve and mark ordered, also list both in parts_actions); put parts request ids (from "request 480", "parts request #480", "PR 480") in parts_request_ids and job numbers in reference_ids; total_price for a new price, source_url for a link typed by the user, parts_query for a part name\n` +
+		`- "search_equipment": find jobs by the item's make/brand, model number or serial number ("find Marantz 2270", "serial 123456", "model L-509", "jobs for Luxman", "any Technics SL-1200?"); put each only as typed in brand, model_number and serial (leave the others empty); a brand is not a customer\n` +
 		`- "jobs_waiting_parts": which jobs are waiting on parts (the jobs, not the parts requests)\n` +
 		`- "charges_summary": sum up labour, parts, deposit and balance for jobs, and any question about labour already on a job ("did we already add labour on #X?", "how much labour is on #X?"); put job numbers in reference_ids or the customer in customer_query\n` +
 		`- "unknown": anything else; put one short, plain sentence in reply\n` +
-		"A question (what, which, show, is, did ...) never changes data: never answer a question with update_jobs, add_repair_log, add_labour, parts_update, complete_job, create_job or create_parts_request. " +
-		"Parts request ids and job numbers are both integers: a number after request, parts request or PR is a parts request id; a number after job or # is a job number. " +
+		"A question (what, which, show, is, did ...) never changes data: never answer a question with update_jobs, add_repair_log, add_labour, parts_update, complete_job or create_parts_request. Opening a new job is not something you do: return unknown. " +
+		"Parts request ids and job numbers are both integers: a number after request, parts request or PR is a parts request id; a number after job or # is a job number, and so is a number typed alone or in a sentence without # (\"31121\", \"status of 31121\"), unless it is a price, hours, a quantity, a year, a request id, or a model or serial number. " +
 		"You receive the user's saved context (SAVED_TOPIC, SAVED_JOBS, SAVED_CUSTOMER) and the recent conversation (USER/ASSISTANT lines, oldest first), then the Request line. " +
 		"Use them to resolve pronouns and implicit references such as \"their\", \"they\", \"them\", \"the jobs\", \"both\", \"all\", \"it\", \"the same customer\", \"her jobs\", or Chinese 佢哋, 呢啲, 全部, and put the resolved job numbers in reference_ids. " +
 		"An update with no pronoun right after a job list (\"update status to Finished\", \"set to pending\") means those jobs. " +

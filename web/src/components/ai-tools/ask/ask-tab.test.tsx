@@ -71,6 +71,15 @@ describe("AskTab", () => {
     expect(screen.getByRole("log")).toHaveAttribute("aria-live", "polite");
   });
 
+  it("points a new-job request to the portal's New Job page with a clickable link", async () => {
+    const reply = "Ask can't open new jobs. Use New Job in the portal: /work-orders/create?mode=new_job";
+    interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply, link: { label: "New Job", href: "/work-orders/create?mode=new_job" } }));
+    render(<AskTab />);
+    ask("new job for Pat, receiver");
+    expect(await screen.findByText(reply)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open New Job" })).toHaveAttribute("href", "/work-orders/create?mode=new_job");
+  });
+
   it("New conversation resets the server memory, then clears the messages", async () => {
     interpretAsk.mockResolvedValue(intent({ intent: "unknown", reply: "I can help with jobs and parts." }));
     newAskConversation.mockResolvedValue({ ok: true, summarized: true });

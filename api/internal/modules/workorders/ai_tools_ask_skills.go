@@ -38,7 +38,6 @@ const (
 	// Admin Portal finish items (ai_tools_ask_actions.go).
 	askIntentPartsInvoice       = "parts_invoice"
 	askIntentCreatePartsRequest = "create_parts_request"
-	askIntentCreateJob          = "create_job"
 )
 
 // askChargesFocusLabour marks a charges answer to a labour question.
@@ -67,10 +66,6 @@ var askPartsActions = map[string]string{
 }
 
 const (
-	// askLabourHourlyRate is the shop labour rate ($/hr) used to turn hours
-	// into the job's labour total. Not stored in the app; taken from the
-	// shop's billing notes (1 hr = $110).
-	askLabourHourlyRate = 110.0
 	// askMaxHours caps hours on one repair log or labour change.
 	askMaxHours = 24.0
 	// askMaxPrice caps a parts request price typed into Ask.
@@ -140,10 +135,11 @@ type askRepairLogPreview struct {
 }
 
 type askLabourPreview struct {
-	ReferenceID int64   `json:"reference_id"`
-	Hours       float64 `json:"hours"`
-	Rate        float64 `json:"rate"`
-	Amount      float64 `json:"amount"`
+	ReferenceID int64 `json:"reference_id"`
+	// Hours as typed (shown only; never used to work out money).
+	Hours *float64 `json:"hours"`
+	// Amount is the money the user gave; the labour total grows by exactly it.
+	Amount float64 `json:"amount"`
 	// Row is the Mass Update preview row (set_labour_total) the client applies
 	// with POST /ai-tools/mass-update/apply.
 	Row  MassUpdatePreviewRow `json:"row"`
@@ -520,7 +516,7 @@ func (r *askResolver) skillFor() string {
 	msg := r.in.Message
 	model := r.resp.Intent
 	question := isAskQuestion(msg)
-	explicit := parseAskJobIDs(msg)
+	explicit := askTypedJobIDs(msg)
 	// "Did we already add labour on #X?" / "how much labour is on #X?" is a
 	// charges question (labour lines + total), never a repair log or a change.
 	if question && askLabourWord.MatchString(msg) && !askRepairLogAdd.MatchString(msg) {
@@ -528,8 +524,6 @@ func (r *askResolver) skillFor() string {
 	}
 	if !question {
 		switch {
-		case askCreateJob.MatchString(msg):
-			return askIntentCreateJob
 		case askInvoiceMessage(msg, model == askIntentPartsInvoice):
 			return askIntentPartsInvoice
 		case askIsPartsCreate(msg), r.modelCreatesParts():
@@ -538,7 +532,7 @@ func (r *askResolver) skillFor() string {
 			return askIntentCompleteJob
 		case askRepairLogAdd.MatchString(msg):
 			return askIntentAddRepairLog
-		case askLabourAdd.MatchString(msg) && !askPriceDollar.MatchString(msg):
+		case askLabourAdd.MatchString(msg):
 			return askIntentAddLabour
 		}
 		if action := askPartsActionIn(msg); action != "" && r.partsContext(action) {
@@ -547,6 +541,11 @@ func (r *askResolver) skillFor() string {
 	}
 	if askWaitingOnParts.MatchString(msg) && len(explicit) == 0 && len(askPartsStatusesIn(msg)) == 0 {
 		return askIntentWaitingParts
+	}
+	// "serial 123456", "model L-509", "find Marantz 2270": a job search by
+	// the item, never a job number.
+	if len(parseAskJobIDs(msg)) == 0 && !isAskFollowUp(msg) && !r.equipmentFilter().empty() {
+		return askIntentSearchEquipment
 	}
 	if (question || !isAskUpdateVerb(msg)) && (len(explicit) > 0 || isAskFollowUp(msg)) {
 		switch {
@@ -560,7 +559,7 @@ func (r *askResolver) skillFor() string {
 	case askIntentWaitingParts, askIntentJobDetails, askIntentRepairHistory:
 		return model
 	case askIntentAddRepairLog, askIntentAddLabour, askIntentPartsUpdate, askIntentCompleteJob,
-		askIntentCreateJob, askIntentCreatePartsRequest:
+		askIntentCreatePartsRequest:
 		if !question {
 			return model
 		}
@@ -606,14 +605,15 @@ func (r *askResolver) partsContext(action string) bool {
 // resolveSkill answers the new skills. It returns false to let the existing
 // intents handle the message (after fixing questions and parts filters).
 func (r *askResolver) resolveSkill() bool {
+	if !isAskQuestion(r.in.Message) && askCreateJob.MatchString(r.in.Message) {
+		r.newJobLink()
+		return true
+	}
 	switch r.skillFor() {
 	case askIntentCharges:
 		// Answered by the charges view; resolve() picks the jobs.
 		r.labour = true
 		r.resp.Intent = askIntentCharges
-	case askIntentCreateJob:
-		r.createJob()
-		return true
 	case askIntentPartsInvoice:
 		r.partsInvoice()
 		return true
@@ -638,6 +638,9 @@ func (r *askResolver) resolveSkill() bool {
 	case askIntentWaitingParts:
 		r.waitingParts()
 		return true
+	case askIntentSearchEquipment:
+		r.searchEquipment(r.equipmentFilter())
+		return true
 	case askIntentJobDetails:
 		r.readJobs(askIntentJobDetails)
 		return true
@@ -648,7 +651,7 @@ func (r *askResolver) resolveSkill() bool {
 	if isAskQuestion(r.in.Message) {
 		switch r.resp.Intent {
 		case askIntentUpdateJobs, askIntentAddRepairLog, askIntentAddLabour, askIntentCompleteJob,
-			askIntentCreateJob, askIntentCreatePartsRequest:
+			askIntentCreatePartsRequest:
 			r.resp.Intent = askIntentCustomerJobs
 		case askIntentPartsUpdate, askIntentPartsInvoice:
 			r.resp.Intent = askIntentPartsRequests
@@ -667,7 +670,7 @@ var askSkillIntents = map[string]bool{
 	askIntentPartsUpdate: true, askIntentWaitingParts: true, askIntentJobDetails: true,
 	askIntentRepairHistory: true, askIntentAddRepairLog: true, askIntentAddLabour: true,
 	askIntentCompleteJob: true, askIntentPartsInvoice: true, askIntentCreatePartsRequest: true,
-	askIntentCreateJob: true,
+	askIntentSearchEquipment: true,
 }
 
 // skillJobs resolves the jobs a skill is about: typed numbers, else the
@@ -709,7 +712,7 @@ func (r *askResolver) clearSkillFields(intent string) {
 }
 
 func (r *askResolver) readJobs(intent string) {
-	ids, ok := r.skillJobs(parseAskJobIDs(r.in.Message), true)
+	ids, ok := r.skillJobs(askTypedJobIDs(r.in.Message), true)
 	if !ok {
 		return
 	}
@@ -720,7 +723,7 @@ func (r *askResolver) readJobs(intent string) {
 }
 
 func (r *askResolver) singleJob(what string) (int64, bool) {
-	ids, ok := r.skillJobs(parseAskJobIDs(r.in.Message), false)
+	ids, ok := r.skillJobs(askTypedJobIDs(r.in.Message), false)
 	if !ok {
 		return 0, false
 	}
@@ -746,19 +749,37 @@ func (r *askResolver) addRepairLog() {
 	}
 	text = capRunes(text, askMaxLogText)
 	if text == "" {
-		r.plain(fmt.Sprintf("What should the repair log on #%d say? For example: “Add a repair log to #%d: Final test OK (0.25 hr)”.", id, id))
+		r.plain(fmt.Sprintf("What should the repair log on #%d say? For example: “Add a repair log to #%d: Final test OK, 1 hr”.", id, id))
 		return
 	}
-	hours := askHoursIn(r.in.Message)
+	r.buildRepairLog(id, text, askTypedHours(r.in.Message, r.in.Result.Hours))
+}
+
+// askTypedHours reads hours from the text, else the model's hours when that
+// number was typed. Hours always come from the user; nil when none were given.
+func askTypedHours(msg string, model *float64) *float64 {
+	if h := askHoursIn(msg); h != nil {
+		return h
+	}
+	if model != nil && askTypedNumber(msg, *model) {
+		v := *model
+		return &v
+	}
+	return nil
+}
+
+// buildRepairLog previews a repair log with the hours the user gave, or asks
+// for them (and remembers the question) when none were given.
+func (r *askResolver) buildRepairLog(id int64, text string, hours *float64) {
 	if hours == nil {
-		hours = r.in.Result.Hours
+		r.plain(fmt.Sprintf("How many hours for this repair log on #%d?", id))
+		r.askPending(&askPending{Kind: askPendingRepairLog, ReferenceID: id, Text: text})
+		return
 	}
-	h := 0.0
-	if hours != nil {
-		h = *hours
-	}
+	h := *hours
 	if math.IsNaN(h) || h < 0 || h > askMaxHours {
-		r.plain(fmt.Sprintf("Repair log hours must be between 0 and %g.", askMaxHours))
+		r.plain(fmt.Sprintf("Repair log hours must be between 0 and %g. How many hours for this repair log on #%d?", askMaxHours, id))
+		r.askPending(&askPending{Kind: askPendingRepairLog, ReferenceID: id, Text: text})
 		return
 	}
 	r.clearSkillFields(askIntentAddRepairLog)
@@ -773,17 +794,37 @@ func (r *askResolver) addLabour() {
 	if !ok {
 		return
 	}
-	hours := askHoursIn(r.in.Message)
-	if hours == nil {
-		hours = r.in.Result.Hours
+	msg := r.in.Message
+	amount := askAmountIn(msg, false)
+	if amount == nil && r.in.Result.Amount != nil && askTypedNumber(msg, *r.in.Result.Amount) {
+		v := *r.in.Result.Amount
+		amount = &v
 	}
-	if hours == nil {
-		r.plain(fmt.Sprintf("How many hours of labour? For example: “Add 1 hour labour to #%d”.", id))
+	r.buildLabour(id, amount, askTypedHours(msg, r.in.Result.Hours))
+}
+
+// buildLabour previews adding exactly the amount the user gave to the job's
+// labour total. Ask never works out money from hours: without an amount it
+// asks for it (and remembers the question with any hours already given).
+func (r *askResolver) buildLabour(id int64, amount, hours *float64) {
+	if amount != nil && *amount == float64(id) {
+		// The job's own number is never the labour amount ("labour to 30175 for 1 hr").
+		amount = nil
+	}
+	if hours != nil && (math.IsNaN(*hours) || *hours <= 0 || *hours > askMaxHours) {
+		r.plain(fmt.Sprintf("Labour hours must be more than 0 and at most %g. How much labour for #%d?", askMaxHours, id))
+		r.askPending(&askPending{Kind: askPendingLabour, ReferenceID: id})
 		return
 	}
-	h := *hours
-	if math.IsNaN(h) || h <= 0 || h > askMaxHours || math.Abs(h*4-math.Round(h*4)) > 1e-9 {
-		r.plain(fmt.Sprintf("Labour is added in quarter hours (0.25 to %g). How many hours?", askMaxHours))
+	if amount == nil {
+		r.plain(fmt.Sprintf("How much labour for #%d? You can add the hours too, e.g. “$110, 1 hour”.", id))
+		r.askPending(&askPending{Kind: askPendingLabour, ReferenceID: id, Hours: hours})
+		return
+	}
+	a := round2(*amount)
+	if !askValidPrice(a) || a <= 0 {
+		r.plain(fmt.Sprintf("The labour amount must be more than $0 and at most $%.0f. How much labour for #%d?", askMaxPrice, id))
+		r.askPending(&askPending{Kind: askPendingLabour, ReferenceID: id, Hours: hours})
 		return
 	}
 	if r.h.service == nil {
@@ -796,20 +837,154 @@ func (r *askResolver) addLabour() {
 		r.plain(fmt.Sprintf("I couldn't load job #%d right now.", id))
 		return
 	}
-	amount := round2(h * askLabourHourlyRate)
-	total := round2(float64Value(detail.LabourTotal) + amount)
+	total := round2(float64Value(detail.LabourTotal) + a)
 	op := MassUpdateOp{ReferenceID: int32(id), Op: massOpSetLabourTotal, LabourTotal: &total}
 	rows, _, err := r.h.buildMassUpdateRows(r.ctx, []MassUpdateOp{op}, nil, nil)
 	if err != nil || len(rows) != 1 {
 		r.plain(fmt.Sprintf("I couldn't prepare the labour change for #%d.", id))
 		return
 	}
-	note := fmt.Sprintf("At $%.0f/hr. Admin time is not added automatically — if this job bills the 0.25 hr admin time, ask for %g hours instead. Flat-rate jobs: set the labour total in Mass Update.", askLabourHourlyRate, h+0.25)
+	var h *float64
+	if hours != nil {
+		v := round2(*hours)
+		h = &v
+	}
 	r.clearSkillFields(askIntentAddLabour)
 	r.resp.Reply = ""
 	r.resp.ReferenceIDs = []int64{id}
-	r.resp.LabourPreview = &askLabourPreview{ReferenceID: id, Hours: h, Rate: askLabourHourlyRate, Amount: amount, Row: rows[0], Note: note}
+	r.resp.LabourPreview = &askLabourPreview{ReferenceID: id, Hours: h, Amount: a, Row: rows[0]}
 	r.save = &askContext{ReferenceIDs: []int64{id}, CustomerQuery: r.customerFor([]int64{id}), Topic: askTopicJobs}
+}
+
+// askPending remembers the question just asked, keeping the job as the
+// saved job so the reply can refer back to it.
+func (r *askResolver) askPending(p *askPending) {
+	r.pending = p
+	r.save = &askContext{ReferenceIDs: []int64{p.ReferenceID}, CustomerQuery: r.customerFor([]int64{p.ReferenceID}), Topic: askTopicJobs}
+}
+
+// newJobLink answers a request to open a new job: Ask doesn't open jobs; it
+// points to the portal's New Job page. Nothing typed is remembered.
+func (r *askResolver) newJobLink() {
+	r.plain(askNewJobReply)
+	r.resp.Link = &askLink{Label: "New Job", Href: askNewJobPath}
+	r.save = &askContext{ReferenceIDs: []int64{}, Topic: askTopicJobs}
+}
+
+const (
+	// askNewJobPath is the portal's New Job page (the same link as the portal's Create New Job).
+	askNewJobPath  = "/work-orders/create?mode=new_job"
+	askNewJobReply = "Ask can't open new jobs. Use New Job in the portal: " + askNewJobPath
+)
+
+var (
+	askAmountWords = regexp.MustCompile(`(?i)\b(\d{1,6}(?:\.\d{1,2})?)\s*(?:dollars?|bucks)\b`)
+	askAmountFor   = regexp.MustCompile(`(?i)\b(\d{1,6}(?:\.\d{1,2})?)\s+for\s+(?:\d|\.\d|an?\b|one\b|half\b)`)
+	askBareAmount  = regexp.MustCompile(`(?:^|[^\w.#＃])(\d{1,6}(?:\.\d{1,2})?)(?:[^\w.]|$)`)
+	askJobRefNum   = regexp.MustCompile(`(?i)[#＃]\s*\d+|\b(?:jobs?|work\s+orders?|wo)\s*[#＃]?\s*\d+`)
+	askAnyDigit    = regexp.MustCompile(`\d`)
+)
+
+// askAmountIn reads a labour money amount the user typed: "$110", "110
+// dollars", "110 for 1.5 hr". bare (a reply to "How much labour?") also
+// accepts a plain number that is not hours or a job number ("110").
+func askAmountIn(msg string, bare bool) *float64 {
+	text := askURL.ReplaceAllString(msg, " ")
+	parse := func(s string) *float64 {
+		v, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", ""), 64)
+		if err != nil {
+			return nil
+		}
+		v = round2(v)
+		return &v
+	}
+	if m := askPriceDollar.FindStringSubmatch(text); m != nil {
+		return parse(m[1])
+	}
+	// A job number is never the money: "#30175 for 1 hour", "job 30175 for 1 hr".
+	noJobs := askJobRefNum.ReplaceAllString(text, " ")
+	if m := askAmountWords.FindStringSubmatch(noJobs); m != nil {
+		return parse(m[1])
+	}
+	if m := askAmountFor.FindStringSubmatch(noJobs); m != nil {
+		return parse(m[1])
+	}
+	if !bare {
+		return nil
+	}
+	rest := askHoursRe.ReplaceAllString(askJobRefNum.ReplaceAllString(text, " "), " ")
+	if m := askBareAmount.FindStringSubmatch(rest); m != nil {
+		return parse(m[1])
+	}
+	return nil
+}
+
+// answerPending handles a reply to the question Ask asked last turn ("How
+// much labour for #N?", "How many hours for this repair log on #N?") with
+// exactly the numbers typed. A reply that is clearly a different request
+// (another job or action, a question, or no number) drops the question and is
+// handled normally.
+func (r *askResolver) answerPending() bool {
+	p := r.in.Prev.Pending
+	msg := r.in.Message
+	if p == nil || p.ReferenceID <= 0 || !askAnswersPending(msg, p) {
+		return false
+	}
+	switch p.Kind {
+	case askPendingLabour:
+		hours := askHoursIn(msg)
+		if hours == nil {
+			hours = p.Hours
+		}
+		r.buildLabour(p.ReferenceID, askAmountIn(msg, true), hours)
+	case askPendingRepairLog:
+		hours := askHoursIn(msg)
+		if hours == nil && askPriceDollar.FindString(msg) == "" {
+			// "1.5" alone answers "How many hours?".
+			rest := askJobRefNum.ReplaceAllString(msg, " ")
+			if m := askBareAmount.FindStringSubmatch(rest); m != nil {
+				if v, err := strconv.ParseFloat(m[1], 64); err == nil {
+					hours = &v
+				}
+			}
+		}
+		r.buildRepairLog(p.ReferenceID, p.Text, hours)
+	default:
+		return false
+	}
+	return true
+}
+
+// askAnswersPending reports whether msg reads as an answer to p rather than
+// a new request.
+func askAnswersPending(msg string, p *askPending) bool {
+	if !askAnyDigit.MatchString(msg) && !askHoursWords.MatchString(msg) {
+		return false
+	}
+	if isAskQuestion(msg) || askCreateJob.MatchString(msg) || askIsPartsCreate(msg) || askCompleteJob.MatchString(msg) ||
+		askInvoiceMessage(msg, false) || askPartsRequestRef.MatchString(msg) || askPartsWord.MatchString(msg) {
+		return false
+	}
+	// A bare "$95" reads as a parts price; any other parts action is a new request.
+	if a := askPartsActionIn(msg); a != "" && a != askPartsSetPrice {
+		return false
+	}
+	switch p.Kind {
+	case askPendingLabour:
+		if askRepairLogAdd.MatchString(msg) {
+			return false
+		}
+	case askPendingRepairLog:
+		if askLabourWord.MatchString(msg) || askPriceDollar.MatchString(msg) {
+			return false
+		}
+	}
+	for _, id := range parseAskJobIDs(strings.Join(askJobRefNum.FindAllString(msg, -1), " ")) {
+		if id != p.ReferenceID {
+			return false
+		}
+	}
+	return true
 }
 
 // waitingParts lists the jobs in the "Waiting on Part (s)" status (the rule:
@@ -1446,13 +1621,21 @@ func (r *askResolver) skillSummary() string {
 		}
 	case askIntentAddLabour:
 		if p := resp.LabourPreview; p != nil {
-			return fmt.Sprintf("Opened a labour preview: %g hr ($%.2f) on job #%d (nothing saved until Apply).", p.Hours, p.Amount, p.ReferenceID)
+			hours := ""
+			if p.Hours != nil {
+				hours = fmt.Sprintf(", %g hr", *p.Hours)
+			}
+			return fmt.Sprintf("Opened a labour preview: $%.2f%s on job #%d (nothing saved until Apply).", p.Amount, hours, p.ReferenceID)
 		}
 	case askIntentWaitingParts:
 		if len(ids) > 0 {
 			return "Listed jobs waiting on parts: " + askRefList(ids, askSummaryRefs) + "."
 		}
 		return "Listed jobs waiting on parts."
+	case askIntentSearchEquipment:
+		if s := resp.EquipmentSearch; s != nil {
+			return s.summary(ids)
+		}
 	case askIntentJobDetails:
 		return "Showed make, model and serial of " + askRefList(ids, askSummaryRefs) + "."
 	case askIntentRepairHistory:
@@ -1476,10 +1659,6 @@ func (r *askResolver) skillSummary() string {
 		if p := resp.PartsCreatePreview; p != nil {
 			return fmt.Sprintf("Opened a new parts request preview on job #%d: %s ×%d, $%.2f, %s, %s (nothing saved until Apply).",
 				p.ReferenceID, p.ItemName, p.Quantity, p.TotalPrice, p.Source, askPartsStatusWord(p.Status))
-		}
-	case askIntentCreateJob:
-		if p := resp.CreateJobPreview; p != nil {
-			return "Opened a new-job preview for a " + p.CustomerMode + " customer (customer details not kept; nothing saved until Apply)."
 		}
 	}
 	return ""

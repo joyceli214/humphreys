@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { apiClient } from "@/lib/api/client";
 import type { WorkOrderDetail } from "@/lib/api/generated/types";
-import type { AskCompleteJobPreview, AskCreateJobPreview, AskInvoicePreview, AskPartsCreatePreview } from "@/lib/ai-tools/types";
+import type { AskCompleteJobPreview, AskInvoicePreview, AskPartsCreatePreview } from "@/lib/ai-tools/types";
 import { JobLink } from "@/components/ai-tools/job-link";
 import { TABLE_CLASS } from "@/components/ai-tools/mgmt-ui";
 import { money } from "./ask-answers";
@@ -92,62 +92,5 @@ export function CompleteJobAnswer({ preview: p }: { preview: AskCompleteJobPrevi
   return <PreviewCard title="Preview: Complete Job" phase={phase} canApply={p.jobs.some(j => !j.already)} applyError={error} onApply={() => void apply()} onCancel={() => setPhase("cancelled")}>
     <p className="mb-2">This is the same as the Complete Job button.</p>
     <table className={TABLE_CLASS}><thead><tr><th>Job</th><th>Current → target</th></tr></thead><tbody>{p.jobs.map(j => <tr key={j.reference_id}><td><JobLink referenceId={j.reference_id} /></td><td>{j.current_status_name || "No status"} → {p.target_status_name}{j.already ? " (already there)" : ""}</td></tr>)}</tbody></table>
-  </PreviewCard>;
-}
-
-export function CreateJobAnswer({ preview: p }: { preview: AskCreateJobPreview }) {
-  const [phase, setPhase] = useState<Phase>("preview"); const [error, setError] = useState(""); const [createdID, setCreatedID] = useState<number>();
-  const busy = useRef(false);
-  // Save progress across retries: once POST succeeds, only unfinished PATCHes retry.
-  const progress = useRef<{ job?: WorkOrderDetail; brandID?: number; itemID?: number; notesDone?: boolean }>({brandID:p.brand_id ?? undefined,itemID:p.item_id ?? undefined});
-  const apply = async () => {
-    if (busy.current) return; busy.current = true; setPhase("applying"); setError("");
-    try {
-      const saved = progress.current;
-      if (!saved.job) {
-        if ((p.brand_new && !saved.brandID) || (p.item_new && !saved.itemID)) {
-          const {items} = await apiClient.listDropdownManagement();
-          if (items.some(d => d.is_frozen && ((d.key === "brands" && p.brand_new && !saved.brandID) || (d.key === "items" && p.item_new && !saved.itemID)))) throw new Error("A required catalog dropdown is frozen. Choose an existing option on the create page.");
-          if (p.brand_new && !saved.brandID) saved.brandID = (await apiClient.createBrand(p.brand_name)).id;
-          if (p.item_new && !saved.itemID) saved.itemID = (await apiClient.createItem(p.item_name)).id;
-        }
-        saved.job = await apiClient.createWorkOrder({
-          creation_mode:"new_job", customer_id:p.customer_mode === "existing" ? p.customer_id ?? undefined : undefined,
-          new_customer:p.customer_mode === "new" ? p.customer : undefined,
-          item_id:saved.itemID, brand_ids:saved.brandID ? [saved.brandID] : [], job_type_id:p.job_type_id ?? undefined,
-          model_number:p.model_number || undefined,serial_number:p.serial_number || undefined,
-          remote_control_qty:0,cable_qty:0,cord_qty:0,dvd_vhs_qty:0,album_cd_cassette_qty:0,
-          deposit:p.deposit,deposit_payment_method_id:p.deposit_payment_method_id ?? undefined
-        });
-        setCreatedID(saved.job.reference_id);
-      }
-      if (p.problem_description && !saved.notesDone) {
-        await apiClient.updateWorkOrderWorkNotes(saved.job.reference_id, {problem_description:p.problem_description,worker_ids:[],work_done:null,payment_method_ids:saved.job.payment_method_ids}); saved.notesDone = true;
-      }
-      // POST defaults to Received; explicit statuses reuse the status PATCH.
-      if (p.status_id && saved.job.status_id !== p.status_id) {
-        await apiClient.updateWorkOrderStatus(saved.job.reference_id,{status_id:p.status_id}); saved.job.status_id = p.status_id;
-      }
-      setPhase("done");
-    } catch (e) {
-      const prefix = progress.current.job ? `Job #${progress.current.job.reference_id} was created. Remaining details could not be saved; Apply retries only those details. ` : "";
-      setError(prefix + applyErrorText(e,"Could not create the job.")); setPhase("preview");
-    } finally { busy.current = false; }
-  };
-  if (phase === "cancelled") return cancelled;
-  if (phase === "done") return <p><b>Job #{createdID} created.</b> <JobLink referenceId={createdID!}>Open job #{createdID}</JobLink></p>;
-  const fields: [string, string | number][] = [
-    ["Customer",`${p.customer_mode === "existing" ? `Existing #${p.customer_id}` : "New"}: ${p.customer.name}`],
-    ...p.customer_mode === "new" ? [["Home phone",p.customer.home_phone],["Work phone",p.customer.work_phone],["Email",p.customer.email],["Address line 1",p.customer.address_line_1],["Address line 2",p.customer.address_line_2],["City",p.customer.city],["Province",p.customer.province],["Postal code",p.customer.postal_code]] as [string,string][] : [],
-    ["Brand",`${p.brand_name}${p.brand_new ? " (new catalog option)" : ""}`],["Item",`${p.item_name}${p.item_new ? " (new catalog option)" : ""}`],
-    ["Model",p.model_number],["Serial",p.serial_number],["Problem description",p.problem_description],
-    ["Status",`${p.status_name}${p.status_is_default ? " (default)" : ""}`],["Job type",p.job_type_name || "Default"],
-    ["Remote controls / cables / cords / DVD-VHS / albums-CD-cassettes","0 / 0 / 0 / 0 / 0"],
-    ["Deposit",money(p.deposit)],["Deposit payment method",p.deposit_payment_method_name || "—"]
-  ];
-  return <PreviewCard title="Preview: create job" phase={phase} canApply={true} applyError={error} onApply={() => void apply()} onCancel={() => { if (createdID) { setError(`Job #${createdID} already exists. Open it to finish saving the remaining details.`); return; } setPhase("cancelled"); }}>
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">{fields.map(([label,value]) => <div className="contents" key={label}><dt className="font-semibold">{label}</dt><dd>{value || "—"}</dd></div>)}</dl>
-    {p.quote !== null && <p className="mt-2">Quote before tax: {money(p.quote)} (reference only).</p>}
-    {p.notes?.map((n,i) => <p key={i} className="mt-2">{n}</p>)}
   </PreviewCard>;
 }

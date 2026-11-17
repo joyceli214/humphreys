@@ -16,40 +16,6 @@ func TestAskInvoicePrefersApprovedAndKeepsPartNumber(t *testing.T) {
 	}
 }
 
-func TestAskCreateJobDoesNotTreatUncollectedAsPaid(t *testing.T) {
-	llm, _, _, ask := finishSetup(t)
-	llm.answer(askIntentCreateJob)
-	p := ask("New job\nCustomer name: Pat Example\nPhone: 4165550199\nItem: Receiver\nQuote before tax: $80\nDeposit collected: not collected").CreateJobPreview
-	if p == nil || p.Deposit != 0 {
-		t.Fatalf("preview=%+v", p)
-	}
-}
-
-func TestAskCreateJobModelQuoteCollectionNeedsTypedEvidence(t *testing.T) {
-	llm, _, _, ask := finishSetup(t)
-	llm.answerJSON(map[string]any{"intent": askIntentCreateJob, "new_job": map[string]any{"customer_name": "Pat Example", "phone": "416-555-0199", "item": "Receiver", "problem": "no sound, quote $80", "quote": 80, "deposit_collected": true, "deposit_payment_method": "cash"}})
-	p := ask("open a new job for Pat Example 416-555-0199, receiver, no sound, quote $80, deposit collected, cash").CreateJobPreview
-	if p == nil || p.Deposit != 90.4 || p.ProblemDescription != "no sound" {
-		t.Fatalf("preview=%+v", p)
-	}
-}
-
-func TestAskCreateJobQuoteRequiresAffirmativeDepositEvidence(t *testing.T) {
-	llm, _, _, ask := finishSetup(t)
-	llm.answerJSON(map[string]any{"intent": askIntentCreateJob, "new_job": map[string]any{
-		"customer_name": "Pat Example", "phone": "416-555-0199", "item": "Receiver",
-		"quote": 80, "deposit_collected": true, "deposit_payment_method": "cash",
-	}})
-	for _, suffix := range []string{"", "deposit not collected", "deposit was not collected", "no deposit collected", "deposit collected: no", "deposit uncollected", "deposit unpaid", "deposit not paid"} {
-		t.Run(suffix, func(t *testing.T) {
-			p := ask("open a new job for Pat Example 416-555-0199, receiver, quote $80, cash, " + suffix).CreateJobPreview
-			if p == nil || p.Deposit != 0 || p.DepositPaymentMethodID != nil {
-				t.Fatalf("uncollected deposit preview=%+v", p)
-			}
-		})
-	}
-}
-
 func TestAskInvoiceWithoutNumberOrHeaderKeepsEveryPart(t *testing.T) {
 	llm, store, _, ask := finishSetup(t)
 	store.partRows = []askPartsRow{partRow(1, 275, "Capacitor 1234", "approved", 0), partRow(2, 28800, "Drive belt", "approved", 0)}

@@ -177,12 +177,14 @@ describe("Ask repair log and labour", () => {
       lower_than_before: false, valid: true, updated_at: "2026-11-13T06:45:00Z", amount_delta: 124.3
     };
     interpretAsk.mockResolvedValue(
-      answer({ intent: "add_labour", reference_ids: [31351], labour_preview: { reference_id: 31351, hours: 1, rate: 110, amount: 110, row, note: "At $110/hr." } })
+      answer({ intent: "add_labour", reference_ids: [31351], labour_preview: { reference_id: 31351, hours: 1, amount: 110, row } })
     );
     applyAIMassUpdate.mockResolvedValue({ results: [{ reference_id: 31351, success: true, applied: ["Labour $0.00 → $110.00"] }] });
     render(<AskTab />);
-    ask("Add labour to #31351 for 1 hour");
+    ask("Add labour to #31351: $110, 1 hour");
     expect(await screen.findByText("Preview: add labour to job #31351")).toBeInTheDocument();
+    expect(screen.getByText("1 hr")).toBeInTheDocument();
+    expect(screen.queryByText(/\/hr/)).not.toBeInTheDocument();
     expect(screen.getByText("$0.00 →", { exact: false })).toBeInTheDocument();
     expect(applyAIMassUpdate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));

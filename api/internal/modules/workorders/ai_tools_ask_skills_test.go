@@ -459,12 +459,12 @@ func TestAskQuestionsNeverOpenUpdatePreview(t *testing.T) {
 func TestAskRepairLogPreview(t *testing.T) {
 	llm, store, ask := skillSetup(t)
 	llm.answer(askIntentUpdateJobs, 31352)
-	resp := ask("Add a 0.25 hr repair log to #31352: Final test: unit tested OK.")
+	resp := ask("Add a 0.5 hr repair log to #31352: Final test: unit tested OK.")
 	p := resp.RepairLogPreview
 	if resp.Intent != askIntentAddRepairLog || p == nil || resp.PreviewInstruction != "" {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if p.ReferenceID != 31352 || p.Details != "Final test: unit tested OK." || p.HoursUsed != 0.25 {
+	if p.ReferenceID != 31352 || p.Details != "Final test: unit tested OK." || p.HoursUsed != 0.5 {
 		t.Fatalf("preview = %+v", p)
 	}
 	llm.answer(askIntentUnknown)
@@ -508,12 +508,12 @@ func TestAskRepairLogNeedsPermissionAndOneJob(t *testing.T) {
 func TestAskLabourPreview(t *testing.T) {
 	llm, _, ask := skillSetup(t)
 	llm.answer(askIntentUpdateJobs, 31351)
-	resp := ask("Add labour to #31351 for 1 hour")
+	resp := ask("Add labour to #31351: $110, 1 hour")
 	p := resp.LabourPreview
 	if resp.Intent != askIntentAddLabour || p == nil || resp.PreviewInstruction != "" {
 		t.Fatalf("resp = %+v", resp)
 	}
-	if p.ReferenceID != 31351 || p.Hours != 1 || p.Rate != 110 || p.Amount != 110 || !strings.Contains(p.Note, "1.25") {
+	if p.ReferenceID != 31351 || p.Hours == nil || *p.Hours != 1 || p.Amount != 110 || p.Note != "" {
 		t.Fatalf("preview = %+v", p)
 	}
 	op := p.Row.Operation
@@ -523,19 +523,26 @@ func TestAskLabourPreview(t *testing.T) {
 	if p.Row.Before != "$0.00" || p.Row.After != "$110.00" || p.Row.UpdatedAt == nil || !p.Row.UpdatedAt.Equal(skillUpdatedAt) {
 		t.Fatalf("row = %+v", p.Row)
 	}
-	// Existing labour is added to.
+	// Existing labour grows by exactly the amount typed; hours never change it.
 	llm.answer(askIntentAddLabour, 31165)
-	if p := ask("add 1.5 hours labour to #31165").LabourPreview; p == nil || *p.Row.Operation.LabourTotal != 385 || p.Row.Before != "$220.00" {
+	if p := ask("add labour to #31165, 110 for 1.5 hr").LabourPreview; p == nil || *p.Row.Operation.LabourTotal != 330 || p.Row.Before != "$220.00" || *p.Hours != 1.5 {
 		t.Fatalf("preview = %+v", p)
 	}
-	for _, msg := range []string{"add 0.3 hours labour to #31351", "add 30 hours labour to #31351"} {
-		llm.answer(askIntentAddLabour, 31351)
-		if resp := ask(msg); resp.Intent != askIntentUnknown || !strings.Contains(resp.Reply, "quarter hours") {
-			t.Fatalf("[%s] resp = %+v", msg, resp)
-		}
+	llm.answer(askIntentAddLabour, 31351)
+	if p := ask("add $80 labour to #31351").LabourPreview; p == nil || p.Amount != 80 || p.Hours != nil {
+		t.Fatalf("preview = %+v", p)
 	}
 	llm.answer(askIntentAddLabour, 31351)
-	if resp := ask("add labour to #31351"); resp.Intent != askIntentUnknown || !strings.Contains(resp.Reply, "How many hours") {
+	if p := ask("add 95 dollars labour to #31351").LabourPreview; p == nil || p.Amount != 95 {
+		t.Fatalf("preview = %+v", p)
+	}
+	// The model's amount counts only when it was typed.
+	llm.answerJSON(map[string]any{"intent": askIntentAddLabour, "reference_ids": []int64{31351}, "amount": 165, "hours": 1.5})
+	if p := ask("add labour to #31351 1.5 hours").LabourPreview; p != nil {
+		t.Fatalf("invented amount used: %+v", p)
+	}
+	llm.answer(askIntentAddLabour, 31351)
+	if resp := ask("add 30 hours labour to #31351 $100"); resp.Intent != askIntentUnknown || resp.LabourPreview != nil {
 		t.Fatalf("resp = %+v", resp)
 	}
 }

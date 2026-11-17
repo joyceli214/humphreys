@@ -127,6 +127,7 @@ export type AskIntent =
   | "charges_summary"
   | "parts_update"
   | "jobs_waiting_parts"
+  | "search_equipment"
   | "job_details"
   | "repair_history"
   | "add_repair_log"
@@ -134,7 +135,6 @@ export type AskIntent =
   | "complete_job"
   | "parts_invoice"
   | "create_parts_request"
-  | "create_job"
   | "unknown";
 
 export type AskPartsStatus = "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
@@ -178,8 +178,9 @@ export type AskRepairLogPreview = { reference_id: number; details: string; hours
 
 export type AskLabourPreview = {
   reference_id: number;
-  hours: number;
-  rate: number;
+  /** Hours as typed by the user (shown only; never used to work out money). */
+  hours: number | null;
+  /** Money the user gave; the labour total grows by exactly this. */
   amount: number;
   /** Mass Update row (set_labour_total); Apply sends row.operation to /ai-tools/mass-update/apply. */
   row: MassUpdatePreviewRow;
@@ -187,6 +188,11 @@ export type AskLabourPreview = {
 };
 
 export type AskWaitingParts = { status_id: number; status_name: string; total: number };
+/** search_equipment: jobs whose item matches the typed make / model / serial (capped). */
+export type AskEquipmentSearch = {
+  brand: string; model_number: string; serial: string; total: number;
+  rows: { reference_id: number; status_name: string; customer_name: string; brand: string; model_number: string; serial_number: string }[];
+};
 
 export type AskInvoicePreview = {
   invoice_number: string;
@@ -200,18 +206,6 @@ export type AskPartsCreatePreview = {
 export type AskCompleteJobPreview = {
   target_status_id: number; target_status_name: string; target_source: string;
   jobs: { reference_id: number; current_status_id: number | null; current_status_name: string; already: boolean }[];
-};
-export type AskCreateJobPreview = {
-  customer_mode: "new" | "existing"; customer_id: number | null;
-  customer: { name: string; home_phone: string; work_phone: string; email: string;
-    address_line_1: string; address_line_2: string; city: string; province: string; postal_code: string };
-  brand_id: number | null; brand_name: string; brand_new: boolean;
-  item_id: number | null; item_name: string; item_new: boolean;
-  model_number: string; serial_number: string; problem_description: string;
-  status_id: number | null; status_name: string; status_is_default: boolean;
-  job_type_id: number | null; job_type_name: string;
-  deposit: number; deposit_payment_method_id: number | null; deposit_payment_method_name: string;
-  quote: number | null; notes: string[];
 };
 
 export type AskInterpretResponse = {
@@ -235,11 +229,13 @@ export type AskInterpretResponse = {
   repair_log_preview?: AskRepairLogPreview;
   labour_preview?: AskLabourPreview;
   waiting_parts?: AskWaitingParts;
+  equipment_search?: AskEquipmentSearch;
   charges_focus?: "labour";
   invoice_preview?: AskInvoicePreview;
   parts_create_preview?: AskPartsCreatePreview;
   complete_job_preview?: AskCompleteJobPreview;
-  create_job_preview?: AskCreateJobPreview;
+  /** A portal page the reply points to, e.g. New Job. */
+  link?: { label: string; href: string };
 };
 
 /** ✎ AI help actions for POST /ai-tools/email-rewrite. */

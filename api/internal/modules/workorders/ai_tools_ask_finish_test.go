@@ -343,7 +343,7 @@ func TestAskLabourQuestionShowsCharges(t *testing.T) {
 		t.Fatalf("history resp = %+v", resp)
 	}
 	llm.answer(askIntentAddLabour, 31351)
-	if resp := ask("Add 1 hour labour to #31351"); resp.Intent != askIntentAddLabour || resp.LabourPreview == nil {
+	if resp := ask("Add labour to #31351: $110, 1 hour"); resp.Intent != askIntentAddLabour || resp.LabourPreview == nil {
 		t.Fatalf("add labour resp = %+v", resp)
 	}
 }
@@ -632,156 +632,11 @@ const newJobMsg = "New job\n" +
 	"Quote before tax: $80\n" +
 	"Deposit collected: yes, cash"
 
-func TestAskCreateJobPreviewListsEveryField(t *testing.T) {
-	llm, store, _, ask := finishSetup(t)
-	llm.answer(askIntentUnknown)
-	resp := ask(newJobMsg)
-	p := resp.CreateJobPreview
-	if resp.Intent != askIntentCreateJob || p == nil {
-		t.Fatalf("resp = %+v", resp)
-	}
-	c := p.Customer
-	if p.CustomerMode != "new" || c.Name != "Pat Example" || c.HomePhone != "4165550199" || c.Email != "pat@example.com" {
-		t.Fatalf("customer = %+v", c)
-	}
-	if c.AddressLine1 != "64 Bramalea Rd" || c.AddressLine2 != "1412" || c.City != "Brampton" || c.Province != "Ontario" || c.PostalCode != "L6T 2W8" {
-		t.Fatalf("address = %+v", c)
-	}
-	if p.BrandID == nil || *p.BrandID != 31 || p.BrandNew || p.ItemID == nil || *p.ItemID != 11 || p.ItemNew {
-		t.Fatalf("catalog = %+v", p)
-	}
-	if p.ModelNumber != "STR-DH190" || p.SerialNumber != "12345" || p.ProblemDescription != "No sound from left channel" {
-		t.Fatalf("equipment = %+v", p)
-	}
-	if p.StatusName != "Received" || !p.StatusIsDefault || p.JobTypeID == nil || *p.JobTypeID != 1 {
-		t.Fatalf("status/job type = %+v", p)
-	}
-	if p.Deposit != 90.4 || p.DepositPaymentMethodID == nil || *p.DepositPaymentMethodID != 41 || p.Quote == nil || *p.Quote != 80 {
-		t.Fatalf("deposit = %+v", p)
-	}
-	if len(p.Notes) == 0 || !strings.Contains(strings.Join(p.Notes, " "), "1.13") {
-		t.Fatalf("notes = %v", p.Notes)
-	}
-	// Ask memory never keeps the customer's details.
-	row, _ := store.row(askUserA)
-	blob, _ := json.Marshal(row)
-	for _, pii := range []string{"Pat", "Example", "555", "0199", "pat@", "Bramalea", "Brampton", "L6T"} {
-		if strings.Contains(string(blob), pii) {
-			t.Fatalf("Ask memory kept %q: %s", pii, blob)
-		}
-	}
-	if turn := lastTurn(t, store); !strings.Contains(turn.Assistant, "new-job preview") || !strings.Contains(turn.Assistant, "nothing saved until Apply") {
-		t.Fatalf("turn = %+v", turn)
-	}
-}
-
-func TestAskCreateJobAsksForMissingFields(t *testing.T) {
-	llm, store, _, ask := finishSetup(t)
-	llm.answer(askIntentCreateJob)
-	resp := ask("New job\nCustomer name: Pat Example\nItem: Receiver\nProblem description: hum")
-	if resp.CreateJobPreview != nil || !strings.Contains(resp.Reply, "phone") {
-		t.Fatalf("resp = %+v", resp)
-	}
-	if row, _ := store.row(askUserA); strings.Contains(row.Turns[len(row.Turns)-1].User, "Pat") {
-		t.Fatalf("turn kept the name: %+v", row.Turns)
-	}
-	// Deposit without a payment method.
-	resp = ask("New job\nCustomer name: Pat Example\nPhone: 4165550199\nItem: Receiver\nDeposit: $50")
-	if resp.CreateJobPreview != nil || !strings.Contains(resp.Reply, "payment method") {
-		t.Fatalf("resp = %+v", resp)
-	}
-	// A bad email is not sent on.
-	resp = ask("New job\nCustomer name: Pat Example\nPhone: 4165550199\nEmail: pat@@nowhere\nItem: Receiver")
-	if resp.CreateJobPreview != nil || !strings.Contains(resp.Reply, "email") {
-		t.Fatalf("resp = %+v", resp)
-	}
-	// An address Ask can't split: ask, don't guess.
-	resp = ask("New job\nCustomer name: Pat Example\nPhone: 4165550199\nAddress: somewhere near the lake\nItem: Receiver")
-	if resp.CreateJobPreview != nil || !strings.Contains(resp.Reply, "address") {
-		t.Fatalf("resp = %+v", resp)
-	}
-}
-
-func TestAskCreateJobDepositRules(t *testing.T) {
-	llm, _, _, ask := finishSetup(t)
-	llm.answer(askIntentCreateJob)
-	// Quote but deposit not collected: deposit stays 0.
-	p := ask("New job\nCustomer name: Pat Example\nPhone: 416 555 0199\nItem: Receiver\nQuote before tax: $80\nDeposit collected: no").CreateJobPreview
-	if p == nil || p.Deposit != 0 || p.DepositPaymentMethodID != nil {
-		t.Fatalf("preview = %+v", p)
-	}
-	// A typed deposit amount is used as is.
-	p = ask("New job\nCustomer name: Pat Example\nPhone: 4165550199\nItem: Receiver\nDeposit: $50 debit").CreateJobPreview
-	if p == nil || p.Deposit != 50 || p.DepositPaymentMethodID == nil || *p.DepositPaymentMethodID != 42 {
-		t.Fatalf("preview = %+v", p)
-	}
-}
-
-func TestAskCreateJobExistingCustomerAndNewCatalogNames(t *testing.T) {
-	llm, _, _, ask := finishSetup(t)
-	llm.answer(askIntentCreateJob)
-	p := ask("New job for existing customer Jane Doe\nBrand: Marantz\nItem: Receiver\nModel: 2230\nStatus: On Test").CreateJobPreview
-	if p == nil || p.CustomerMode != "existing" || p.CustomerID == nil || *p.CustomerID != 1 {
-		t.Fatalf("preview = %+v", p)
-	}
-	if !p.BrandNew || p.BrandName != "Marantz" || p.BrandID != nil {
-		t.Fatalf("brand = %+v", p)
-	}
-	if p.StatusID == nil || *p.StatusID != 8 || p.StatusIsDefault {
-		t.Fatalf("status = %+v", p)
-	}
-	// Several customers match: ask.
-	resp := ask("New job for existing customer John Smith\nItem: Turntable")
-	if resp.CreateJobPreview != nil || !strings.Contains(resp.Reply, "customers match") {
-		t.Fatalf("resp = %+v", resp)
-	}
-	// No create permission.
-	router := finishRouter(t, shopStore(), finishShopStub(), shopCatalog())
-	resp = askWith(t, router, skillPerms, newJobMsg)
-	if resp.CreateJobPreview != nil || !strings.Contains(resp.Reply, "permission to create jobs") {
-		t.Fatalf("resp = %+v", resp)
-	}
-}
-
-func TestAskCreateJobUsesModelFieldsOnlyWhenTyped(t *testing.T) {
-	llm, _, _, ask := finishSetup(t)
-	llm.answerJSON(map[string]any{"intent": askIntentCreateJob, "new_job": map[string]any{
-		"customer_name": "Pat Example", "phone": "416-555-0199", "item": "Receiver", "brand": "Yamaha",
-		"problem": "no sound", "serial": "INVENTED",
-	}})
-	p := ask("open a new job for Pat Example 416-555-0199, Yamaha receiver, no sound").CreateJobPreview
-	if p == nil || p.Customer.Name != "Pat Example" || p.Customer.HomePhone != "4165550199" || p.BrandID == nil || *p.BrandID != 32 {
-		t.Fatalf("preview = %+v", p)
-	}
-	if p.SerialNumber != "" || p.ProblemDescription != "no sound" {
-		t.Fatalf("untyped model value used: %+v", p)
-	}
-}
-
 func TestAskCreateJobTurnSummaryScrubsTypedDetails(t *testing.T) {
 	got := askScrubNewJobText("New job for Pat Example, 416-555-0199, pat@example.com, 64 Bramalea Rd")
 	for _, pii := range []string{"Pat", "555", "pat@", "Bramalea"} {
 		if strings.Contains(got, pii) {
 			t.Fatalf("scrubbed = %q", got)
-		}
-	}
-}
-
-func TestParseAskAddress(t *testing.T) {
-	cases := map[string]askAddress{
-		"1412-64 Bramalea Rd, Brampton ON L6T 2W8":      {Line1: "64 Bramalea Rd", Line2: "1412", City: "Brampton", Province: "Ontario", Postal: "L6T 2W8"},
-		"55 King St W, Unit 4, Toronto, Ontario M5K1A1": {Line1: "55 King St W", Line2: "Unit 4", City: "Toronto", Province: "Ontario", Postal: "M5K 1A1"},
-		"12 Main Street, Kitchener, ON":                 {Line1: "12 Main Street", City: "Kitchener", Province: "Ontario"},
-	}
-	for in, want := range cases {
-		got, ok := parseAskAddress(in)
-		if !ok || got != want {
-			t.Fatalf("%q: got %+v ok=%v", in, got, ok)
-		}
-	}
-	for _, bad := range []string{"somewhere near the lake", "Brampton"} {
-		if _, ok := parseAskAddress(bad); ok {
-			t.Fatalf("%q parsed", bad)
 		}
 	}
 }
