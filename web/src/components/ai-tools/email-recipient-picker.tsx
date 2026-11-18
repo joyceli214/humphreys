@@ -116,7 +116,7 @@ export function EmailRecipientPicker({ value, onChange, customerHint, contacts: 
 
       <div>
         <p className="text-xs font-medium text-neutral-600">
-          Common contacts 常用聯絡人 <span className="font-normal text-neutral-500">— selected go on {extrasRole}</span>
+          Common contacts <span className="font-normal text-neutral-500">— selected go on {extrasRole}</span>
         </p>
         {contacts.loading ? (
           <p className="text-xs text-neutral-500">Loading contacts...</p>

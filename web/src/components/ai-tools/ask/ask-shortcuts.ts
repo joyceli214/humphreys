@@ -1,5 +1,23 @@
 export type ShortcutKind = "/" | "@" | "#";
 
+/**
+ * Extra "/" skills (besides the starter chips). Each puts an editable example
+ * in the box; it never sends by itself. Changes always preview first.
+ */
+export const ASK_SKILL_PROMPTS: ReadonlyArray<{ label: string; prompt: string }> = [
+  { label: "Jobs waiting on parts", prompt: "Which jobs are waiting on parts?" },
+  { label: "Parts waiting approval", prompt: "Which parts requests are waiting for approval?" },
+  { label: "Approve parts request", prompt: "Approve parts request " },
+  { label: "Mark parts ordered", prompt: "Mark parts request  as ordered" },
+  { label: "Mark parts arrived", prompt: "Mark the parts for job # as arrived" },
+  { label: "Cancel parts request", prompt: "Cancel parts request " },
+  { label: "Set parts price", prompt: "Set the price on parts request  to $" },
+  { label: "Add repair log", prompt: "Add a repair log to #: " },
+  { label: "Add labour", prompt: "Add 1 hour labour to #" },
+  { label: "Repair history", prompt: "What did we do on #" },
+  { label: "Make and model", prompt: "What's the make and model on #" }
+];
+
 export type ShortcutTrigger = {
   kind: ShortcutKind;
   /** Index of the trigger character in the text. */

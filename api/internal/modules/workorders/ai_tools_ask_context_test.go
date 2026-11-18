@@ -25,12 +25,19 @@ type memAskStore struct {
 	rows  map[string]askContext
 	jobs  map[int64]bool
 	parts map[int64]int // parts requests per job
+	// partRows are full parts requests (Ask skills); statusJobs maps a status
+	// id to its jobs.
+	partRows   []askPartsRow
+	statusJobs map[int64][]int64
 	// customers maps a customer name to their jobs (newest first), for the
 	// customer search and the job → customer lookup.
 	customers map[string][]int64
 	saves     int
 	deletes   int
 	loadErr   error
+	// summaries are the closed-conversation summaries (all users).
+	summaries     []memAskSummary
+	nextSummaryID int64
 }
 
 func newMemAskStore(jobs ...int64) *memAskStore {
@@ -148,6 +155,11 @@ type askLLM struct {
 	prompts  []string
 	srv      *httptest.Server
 	callsOut int
+	// Conversation summary calls (system prompt has askSummaryMarker) are
+	// answered with summary and recorded apart from the classifications.
+	summary        string
+	summaryPrompts []string
+	summaryCalls   int
 }
 
 func newAskLLM(t *testing.T) *askLLM {
@@ -160,11 +172,26 @@ func newAskLLM(t *testing.T) *askLLM {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		l.mu.Lock()
+		isSummary := false
 		for _, m := range req.Messages {
-			l.prompts = append(l.prompts, m.Content)
+			if strings.Contains(m.Content, askSummaryMarker) {
+				isSummary = true
+			}
 		}
-		content := l.content
-		l.callsOut++
+		var content string
+		if isSummary {
+			for _, m := range req.Messages {
+				l.summaryPrompts = append(l.summaryPrompts, m.Content)
+			}
+			l.summaryCalls++
+			content = l.summary
+		} else {
+			for _, m := range req.Messages {
+				l.prompts = append(l.prompts, m.Content)
+			}
+			content = l.content
+			l.callsOut++
+		}
 		l.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"model":   "mock-model",
@@ -200,7 +227,7 @@ func askContextRouter(t *testing.T, store *memAskStore) *gin.Engine {
 	group := router.Group("", middleware.Auth("test-secret"))
 	h := &Handler{service: NewService(searchStub()), httpClient: &http.Client{}}
 	if store != nil {
-		h.askContext, h.askJobs = store, store
+		h.askContext, h.askJobs, h.askParts = store, store, store
 	}
 	// A generous limiter so a multi-message test is not rate limited.
 	h.aiLimiter = newAIRateLimiter(1000, time.Minute)

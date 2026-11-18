@@ -56,6 +56,7 @@ func askContextTestDB(t *testing.T) *pgxpool.Pool {
 		"043_ask_context.sql", "043_ask_context.sql", // twice: idempotent
 		"045_ask_context_topic.sql", "045_ask_context_topic.sql",
 		"046_ask_context_turns.sql", "046_ask_context_turns.sql",
+		"047_ask_conversation_summaries.sql", "047_ask_conversation_summaries.sql",
 	} {
 		migration, err := os.ReadFile("../../../migrations/" + file)
 		if err != nil {
@@ -167,11 +168,52 @@ func TestAskContextPostgres(t *testing.T) {
 		}
 	}
 
-	// Deleting a user removes the context.
+	// Conversation summaries: insert, list newest first within the window,
+	// expire after 48 hours for every user.
+	now := time.Now()
+	for _, s := range []struct {
+		user, text string
+		age        time.Duration
+	}{
+		{userA, "A old", 49 * time.Hour}, {userA, "A 2h", 2 * time.Hour}, {userA, "A 1h", time.Hour}, {userB, "B 1h", time.Hour},
+	} {
+		if err := store.InsertAskSummary(ctx, s.user, s.text, now.Add(-s.age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := store.ListAskSummaries(ctx, userA, now.Add(-askSummaryTTL), 5)
+	if err != nil || len(list) != 2 || list[0].Summary != "A 1h" || list[1].Summary != "A 2h" {
+		t.Fatalf("list A = %+v err=%v", list, err)
+	}
+	if list, _ := store.ListAskSummaries(ctx, userA, now.Add(-askSummaryTTL), 1); len(list) != 1 || list[0].Summary != "A 1h" {
+		t.Fatalf("limit = %+v", list)
+	}
+	if n, err := store.DeleteExpiredAskSummaries(ctx, now.Add(-askSummaryTTL)); err != nil || n != 1 {
+		t.Fatalf("expired summaries deleted = %d err=%v", n, err)
+	}
+	var left int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_ask_conversation_summaries`).Scan(&left); err != nil || left != 3 {
+		t.Fatalf("summaries left = %d err=%v", left, err)
+	}
+	// Global context expiry.
+	if _, err := db.Exec(ctx, `UPDATE ai_ask_context SET updated_at = now() - interval '3 days' WHERE user_id = $1`, userB); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := store.DeleteExpiredAskContexts(ctx, now.Add(-askContextTTL)); err != nil || n != 1 {
+		t.Fatalf("expired contexts deleted = %d err=%v", n, err)
+	}
+	if err := store.SaveAskContext(ctx, userB, askContext{CustomerQuery: "Test Customer B"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deleting a user removes the context and summaries.
 	if _, err := db.Exec(ctx, `DELETE FROM users WHERE id = $1`, userB); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := store.LoadAskContext(ctx, userB); ok {
 		t.Fatal("context should cascade on user delete")
+	}
+	if list, _ := store.ListAskSummaries(ctx, userB, now.Add(-askSummaryTTL), 5); len(list) != 0 {
+		t.Fatalf("summaries should cascade on user delete: %+v", list)
 	}
 }

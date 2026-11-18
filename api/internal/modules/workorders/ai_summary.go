@@ -37,7 +37,10 @@ type openRouterMessage struct {
 }
 
 type openRouterReasoning struct {
-	Exclude bool `json:"exclude,omitempty"`
+	// Enabled false asks the model not to think first (Ask interpret): hidden
+	// reasoning could use up max_tokens and leave the answer empty.
+	Enabled *bool `json:"enabled,omitempty"`
+	Exclude bool  `json:"exclude,omitempty"`
 }
 
 type openRouterProvider struct {
@@ -52,6 +55,27 @@ type openRouterChatRequest struct {
 	Messages    []openRouterMessage  `json:"messages"`
 	Temperature float64              `json:"temperature"`
 	MaxTokens   int                  `json:"max_tokens"`
+	// ResponseFormat asks an OpenAI-compatible provider for a JSON object.
+	// Only Ask interpret sets it; every other caller leaves it out.
+	ResponseFormat *openRouterResponseFormat `json:"response_format,omitempty"`
+}
+
+type openRouterResponseFormat struct {
+	Type string `json:"type"`
+}
+
+// openRouterTemperature is the shared sampling temperature.
+const openRouterTemperature = 0.2
+
+// openRouterOptions are per-call overrides. The zero value is the shared
+// behaviour (temperature 0.2, free text).
+type openRouterOptions struct {
+	// Temperature overrides openRouterTemperature when set.
+	Temperature *float64
+	// JSONObject sends response_format {"type":"json_object"}.
+	JSONObject bool
+	// NoReasoning sends reasoning {"enabled": false}.
+	NoReasoning bool
 }
 
 type openRouterChatResponse struct {
@@ -415,11 +439,40 @@ func (h *Handler) generateOpenRouterTextOnce(c *gin.Context, settings aisettings
 // generateOpenRouterTextCtx is generateOpenRouterTextOnce on an explicit
 // context: up to len(openRouterRetryBackoffs) retries, with the fallback model.
 func (h *Handler) generateOpenRouterTextCtx(ctx context.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int) (string, string, error) {
+	return h.generateOpenRouterTextOpts(ctx, settings, systemPrompt, prompt, maxTokens, openRouterOptions{})
+}
+
+// generateOpenRouterJSON is generateOpenRouterTextCtx for a caller that wants
+// one JSON object back (Ask interpret): response_format json_object at the
+// given temperature. A provider that rejects response_format (a 4xx that is
+// not auth or rate limiting) is asked once more without it, so JSON mode can
+// only help, never break the call.
+func (h *Handler) generateOpenRouterJSON(ctx context.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int, temperature float64) (string, string, error) {
+	opts := openRouterOptions{Temperature: &temperature, JSONObject: true, NoReasoning: true}
+	text, model, err := h.generateOpenRouterTextOpts(ctx, settings, systemPrompt, prompt, maxTokens, opts)
+	var provider *openRouterError
+	if err != nil && errors.As(err, &provider) && openRouterRejectedRequest(provider.StatusCode) && ctx.Err() == nil {
+		log.Printf("[ai] provider rejected JSON mode (status %d: %s); retrying without response_format or the reasoning switch", provider.StatusCode, provider.Message)
+		opts.JSONObject = false
+		opts.NoReasoning = false
+		return h.generateOpenRouterTextOpts(ctx, settings, systemPrompt, prompt, maxTokens, opts)
+	}
+	return text, model, err
+}
+
+// openRouterRejectedRequest: the provider refused the request itself (bad or
+// unsupported parameter), not the key, the quota or the server.
+func openRouterRejectedRequest(status int) bool {
+	return status >= 400 && status < 500 && status != http.StatusUnauthorized &&
+		status != http.StatusForbidden && status != http.StatusTooManyRequests && status != http.StatusPaymentRequired
+}
+
+func (h *Handler) generateOpenRouterTextOpts(ctx context.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int, opts openRouterOptions) (string, string, error) {
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", "", err
 		}
-		text, model, err := h.generateOpenRouterTextAttempt(ctx, settings, systemPrompt, prompt, maxTokens)
+		text, model, err := h.openRouterAttempt(ctx, settings, systemPrompt, prompt, maxTokens, openRouterAttemptTimeout, true, opts)
 		if err == nil {
 			if model != settings.OpenRouterModel {
 				log.Printf("[ai] fallback model answered: %s (primary: %s)", model, settings.OpenRouterModel)
@@ -459,17 +512,17 @@ func (h *Handler) generateOpenRouterTextCtx(ctx context.Context, settings aisett
 const openRouterAttemptTimeout = 45 * time.Second
 
 func (h *Handler) generateOpenRouterTextAttempt(ctx context.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int) (string, string, error) {
-	return h.openRouterAttempt(ctx, settings, systemPrompt, prompt, maxTokens, openRouterAttemptTimeout, true)
+	return h.openRouterAttempt(ctx, settings, systemPrompt, prompt, maxTokens, openRouterAttemptTimeout, true, openRouterOptions{})
 }
 
 // generateOpenRouterTextSingle makes exactly one OpenRouter request: no
 // retries and no fallback model. Used for batch work (Mass Update Work Done)
 // where one slow job must not multiply the time and spend.
 func (h *Handler) generateOpenRouterTextSingle(ctx context.Context, settings aisettings.Settings, systemPrompt, prompt string, maxTokens int, timeout time.Duration) (string, string, error) {
-	return h.openRouterAttempt(ctx, settings, systemPrompt, prompt, maxTokens, timeout, false)
+	return h.openRouterAttempt(ctx, settings, systemPrompt, prompt, maxTokens, timeout, false, openRouterOptions{})
 }
 
-func (h *Handler) openRouterAttempt(ctx context.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int, timeout time.Duration, allowFallback bool) (string, string, error) {
+func (h *Handler) openRouterAttempt(ctx context.Context, settings aisettings.Settings, systemPrompt string, prompt string, maxTokens int, timeout time.Duration, allowFallback bool, opts openRouterOptions) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	payload := openRouterChatRequest{
@@ -486,8 +539,18 @@ func (h *Handler) openRouterAttempt(ctx context.Context, settings aisettings.Set
 				Content: prompt,
 			},
 		},
-		Temperature: 0.2,
+		Temperature: openRouterTemperature,
 		MaxTokens:   maxTokens,
+	}
+	if opts.Temperature != nil {
+		payload.Temperature = *opts.Temperature
+	}
+	if opts.NoReasoning {
+		off := false
+		payload.Reasoning = &openRouterReasoning{Enabled: &off, Exclude: true}
+	}
+	if opts.JSONObject {
+		payload.ResponseFormat = &openRouterResponseFormat{Type: "json_object"}
 	}
 	if fallback := openRouterFallbackModel(); allowFallback && fallback != "" && fallback != settings.OpenRouterModel {
 		payload.Models = []string{settings.OpenRouterModel, fallback}

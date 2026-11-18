@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"humphreys/api/internal/domain"
@@ -16,6 +17,7 @@ import (
 	"humphreys/api/internal/mailer"
 	"humphreys/api/internal/middleware"
 	"humphreys/api/internal/modules/aisettings"
+	"humphreys/api/internal/modules/catalog"
 	"humphreys/api/internal/modules/uploads"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +43,15 @@ type Handler struct {
 	// askJobs checks which job numbers exist. Both nil degrade gracefully.
 	askContext askContextStore
 	askJobs    askJobLookup
+	// askParts reads parts requests for Ask previews (nil: parts changes
+	// answer that the lookup is unavailable).
+	askParts askPartsLookup
+	// askCatalog reads the dropdown catalogs (statuses, Complete Job target,
+	// items, brands, job types, payment methods, parts presets) through the
+	// catalog repository the create page and Complete Job button use.
+	askCatalog askCatalogLookup
+	// askCleanupAt is when the Ask memory expiry last ran (unix nanos).
+	askCleanupAt atomic.Int64
 }
 
 type updateEquipmentRequest struct {
@@ -236,7 +247,7 @@ func New(db *pgxpool.Pool) *Handler {
 
 	askStore := &pgAskStore{db: db}
 
-	return &Handler{
+	h := &Handler{
 		service:        NewService(NewRepository(db)),
 		emailClient:    mailer.NewGraphClientFromEnv(httpClient),
 		aiSettings:     aisettings.NewService(aisettings.NewRepository(db)),
@@ -244,7 +255,15 @@ func New(db *pgxpool.Pool) *Handler {
 		aiSummaryCache: aiCache,
 		askContext:     askStore,
 		askJobs:        askStore,
+		askParts:       askStore,
+		askCatalog:     catalog.NewRepository(db),
 	}
+	// Delete Ask summaries and contexts past their 2-day retention in the
+	// background; startup does not wait for it.
+	if db != nil {
+		h.startAskMemoryCleanup()
+	}
+	return h
 }
 
 func NewWithService(service *Service) *Handler {

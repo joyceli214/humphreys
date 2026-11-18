@@ -1,13 +1,23 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type SyntheticEvent } from "react";
-import { SendHorizontal } from "lucide-react";
+import { MessageSquarePlus, SendHorizontal } from "lucide-react";
+import { CompleteJobAnswer, InvoiceAnswer, PartsCreateAnswer } from "./ask-action-answers";
 import { apiClient } from "@/lib/api/client";
 import type { AskInterpretResponse } from "@/lib/ai-tools/types";
 import { AI_TEXT_MAX } from "@/lib/ai-tools/limits";
 import { errorMessage } from "@/components/ai-tools/ai-ui";
-import { FOCUS, MgmtChip, MgmtError, MgmtLoading, errorStatus } from "@/components/ai-tools/mgmt-ui";
+import { FOCUS, MgmtButton, MgmtChip, MgmtError, MgmtLoading, errorStatus } from "@/components/ai-tools/mgmt-ui";
 import { ChargesAnswer, CustomerJobsAnswer, PartsAnswer, UpdatePreviewAnswer } from "@/components/ai-tools/ask/ask-answers";
 import { AskMentionMenu, useShortcutResults, type MenuRow } from "@/components/ai-tools/ask/ask-mention-menu";
-import { appendMention, findTrigger, insertMention, type ShortcutKind, type ShortcutTrigger } from "@/components/ai-tools/ask/ask-shortcuts";
+import { ASK_SKILL_PROMPTS, appendMention, findTrigger, insertMention, type ShortcutKind, type ShortcutTrigger } from "@/components/ai-tools/ask/ask-shortcuts";
+import {
+  JobDetailsAnswer,
+  LabourPreviewAnswer,
+  PartsChangeAnswer,
+  RepairHistoryAnswer,
+  RepairLogPreviewAnswer,
+  WaitingPartsAnswer,
+  EquipmentSearchAnswer
+} from "@/components/ai-tools/ask/ask-skill-answers";
 import { cn } from "@/lib/utils";
 
 /** Starter chips put an editable example in the box; they never send by themselves. */
@@ -16,7 +26,15 @@ export const ASK_STARTERS: Array<{ label: string; prompt: string }> = [
   { label: "Update a job", prompt: "Job #: set status to " },
   { label: "Parts requests", prompt: "Show all parts requests" },
   { label: "Update many jobs", prompt: "Set jobs # and # to status " },
-  { label: "Sum up charges", prompt: "Sum up the charges on job #" }
+  { label: "Sum up charges", prompt: "Sum up the charges on job #" },
+  { label: "Jobs waiting on parts", prompt: "Which jobs are waiting on parts?" },
+  { label: "Approve parts request", prompt: "Approve parts request " }
+];
+
+/** Everything the "/" menu offers: the starters plus the other skills. */
+export const ASK_SKILLS: Array<{ label: string; prompt: string }> = [
+  ...ASK_STARTERS,
+  ...ASK_SKILL_PROMPTS.filter((s) => !ASK_STARTERS.some((t) => t.label === s.label))
 ];
 
 /**
@@ -31,6 +49,8 @@ type Turn = {
   text: string;
   state: { status: "loading" } | { status: "error"; message: string } | { status: "ok"; answer: AskInterpretResponse };
 };
+
+const NEW_CONVERSATION_ERROR = "Couldn't start a new conversation. Ask still remembers this one — try again.";
 
 function interpretError(err: unknown) {
   if (errorStatus(err) === 429) return "Too many AI requests. Wait a minute, then try again.";
@@ -72,11 +92,43 @@ function AnswerBody({ answer, onStarter }: { answer: AskInterpretResponse; text:
     case "parts_requests":
       return <PartsAnswer query={answer.parts_query} statuses={answer.parts_statuses ?? []} referenceIds={answer.reference_ids ?? []} />;
     case "charges_summary":
-      return <ChargesAnswer referenceIds={answer.reference_ids ?? []} customerQuery={answer.customer_query} />;
+      return <ChargesAnswer referenceIds={answer.reference_ids ?? []} customerQuery={answer.customer_query} focus={answer.charges_focus} />;
+    case "parts_update":
+      if (!answer.parts_preview) return <p>{answer.reply || NO_JOBS_REPLY}</p>;
+      return <PartsChangeAnswer preview={answer.parts_preview} reply={answer.reply} />;
+    case "add_repair_log":
+      if (!answer.repair_log_preview) return <p>{answer.reply || NO_JOBS_REPLY}</p>;
+      return <RepairLogPreviewAnswer preview={answer.repair_log_preview} />;
+    case "add_labour":
+      if (!answer.labour_preview) return <p>{answer.reply || NO_JOBS_REPLY}</p>;
+      return <LabourPreviewAnswer preview={answer.labour_preview} />;
+    case "jobs_waiting_parts":
+      if (!answer.waiting_parts) return <p>{answer.reply || "I couldn't find the waiting-on-parts status."}</p>;
+      return <WaitingPartsAnswer waiting={answer.waiting_parts} />;
+    case "search_equipment":
+      if (!answer.equipment_search) return <p>{answer.reply || "I couldn't search jobs right now."}</p>;
+      return <EquipmentSearchAnswer search={answer.equipment_search} />;
+    case "job_details":
+      return <JobDetailsAnswer referenceIds={answer.reference_ids ?? []} />;
+    case "repair_history":
+      return <RepairHistoryAnswer referenceIds={answer.reference_ids ?? []} />;
+    case "complete_job":
+      return answer.complete_job_preview ? <CompleteJobAnswer preview={answer.complete_job_preview} /> : <p>{answer.reply || NO_JOBS_REPLY}</p>;
+    case "parts_invoice":
+      return answer.invoice_preview ? <InvoiceAnswer preview={answer.invoice_preview} /> : <p>{answer.reply}</p>;
+    case "create_parts_request":
+      return answer.parts_create_preview ? <PartsCreateAnswer preview={answer.parts_create_preview} /> : <p>{answer.reply}</p>;
     default:
       return (
         <div>
-          <p className="mb-2 whitespace-pre-wrap">{answer.reply || "I can find jobs, update jobs, list parts requests, or sum up charges."}</p>
+          <p className="mb-2 whitespace-pre-wrap">{answer.reply || "I can find jobs, update jobs, change parts requests, add repair logs or labour, or sum up charges."}</p>
+          {answer.link && (
+            <p className="mb-2">
+              <a href={answer.link.href} target="_blank" rel="noreferrer" className="font-semibold text-[#135f6f] underline">
+                Open {answer.link.label}
+              </a>
+            </p>
+          )}
           <Starters onPick={onStarter} />
         </div>
       );
@@ -99,6 +151,8 @@ function Starters({ onPick }: { onPick: (prompt: string) => void }) {
 export function AskTab() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState("");
   const nextId = useRef(1);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -112,7 +166,7 @@ export function AskTab() {
   const listId = useId();
   // A query still being typed (#15, @Name) is not itself an inserted mention.
   const pickedText = menu && !menu.sticky ? `${input.slice(0, menu.start)}${input.slice(menu.caret)}` : input;
-  const results = useShortcutResults(menu, pickedText, ASK_STARTERS);
+  const results = useShortcutResults(menu, pickedText, ASK_SKILLS);
   const activeIndex = active >= 0 && active < results.options.length ? active : -1;
   const optionId = (i: number) => `${listId}-o${i}`;
 
@@ -148,6 +202,21 @@ export function AskTab() {
       setTurns((list) => list.map((t) => (t.id === id ? { ...t, state: { status: "ok", answer } } : t)));
     } catch (err) {
       setTurns((list) => list.map((t) => (t.id === id ? { ...t, state: { status: "error", message: interpretError(err) } } : t)));
+    }
+  };
+
+  /** Ends the conversation on the server first; the list is cleared only when that worked. */
+  const newConversation = async () => {
+    setResetting(true);
+    setResetError("");
+    try {
+      await apiClient.newAskConversation();
+      setTurns([]);
+      closeMenu();
+    } catch {
+      setResetError(NEW_CONVERSATION_ERROR);
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -282,6 +351,17 @@ export function AskTab() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col text-[17px] leading-normal text-[#1f2328]">
+      <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        <MgmtButton variant="ghost" className="min-h-[44px] gap-2 px-3 text-[16px]" disabled={resetting} onClick={() => void newConversation()}>
+          <MessageSquarePlus className="h-5 w-5" aria-hidden />
+          {resetting ? "Starting…" : "New conversation"}
+        </MgmtButton>
+      </div>
+      {resetError && (
+        <div className="mb-3">
+          <MgmtError onRetry={() => void newConversation()}>{resetError}</MgmtError>
+        </div>
+      )}
       <div role="log" aria-live="polite" aria-label="Ask messages" className="flex-1 space-y-3 pb-4">
         {turns.length === 0 && (
           <div>

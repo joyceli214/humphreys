@@ -38,6 +38,7 @@ export type MassUpdatePreviewRow = {
   after: string;
   lower_than_before: boolean;
   valid: boolean;
+  via_status?: AskPartsStatus;
   error?: string;
   /** Change to the job total in dollars (positive = total goes up). Treated as 0 when missing. */
   amount_delta?: number;
@@ -111,8 +112,101 @@ export type JobSummaryResponse = JobSummaryStaleResponse & {
   model: string;
 };
 
+/** POST /ai-tools/ask/new-conversation: the server summarizes and forgets the current Ask conversation. */
+export type AskNewConversationResponse = {
+  ok: boolean;
+  /** True when a short summary of the old conversation was saved (kept 2 days). */
+  summarized: boolean;
+};
+
 /** POST /ai-tools/ask/interpret: the Management Ask chat classifies a message (no data, no writes). */
-export type AskIntent = "customer_jobs" | "update_jobs" | "parts_requests" | "charges_summary" | "unknown";
+export type AskIntent =
+  | "customer_jobs"
+  | "update_jobs"
+  | "parts_requests"
+  | "charges_summary"
+  | "parts_update"
+  | "jobs_waiting_parts"
+  | "search_equipment"
+  | "job_details"
+  | "repair_history"
+  | "add_repair_log"
+  | "add_labour"
+  | "complete_job"
+  | "parts_invoice"
+  | "create_parts_request"
+  | "unknown";
+
+export type AskPartsStatus = "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
+
+/** One parts request change (before → after). Apply PATCHes the request with updated_at. */
+export type AskPartsChange = {
+  parts_purchase_request_id: number;
+  reference_id: number;
+  item_name: string;
+  quantity: number;
+  source: "online" | "supplier";
+  old_status: AskPartsStatus;
+  new_status: AskPartsStatus;
+  old_price: number;
+  new_price: number;
+  old_source_url: string | null;
+  new_source_url: string | null;
+  updated_at: string | null;
+  valid: boolean;
+  via_status?: AskPartsStatus;
+  error?: string;
+};
+
+export type AskPartsChoice = {
+  parts_purchase_request_id: number;
+  reference_id: number;
+  item_name: string;
+  quantity: number;
+  status: AskPartsStatus;
+  total_price: number;
+};
+
+export type AskPartsPreview = {
+  action: "" | "approve" | "order" | "arrive" | "cancel" | "set_price" | "approve_order";
+  changes: AskPartsChange[];
+  /** Set when Ask needs the user to say which request (no changes then). */
+  choices?: AskPartsChoice[];
+};
+
+export type AskRepairLogPreview = { reference_id: number; details: string; hours_used: number };
+
+export type AskLabourPreview = {
+  reference_id: number;
+  /** Hours as typed by the user (shown only; never used to work out money). */
+  hours: number | null;
+  /** Money the user gave; the labour total grows by exactly this. */
+  amount: number;
+  /** Mass Update row (set_labour_total); Apply sends row.operation to /ai-tools/mass-update/apply. */
+  row: MassUpdatePreviewRow;
+  note?: string;
+};
+
+export type AskWaitingParts = { status_id: number; status_name: string; total: number };
+/** search_equipment: jobs whose item matches the typed make / model / serial (capped). */
+export type AskEquipmentSearch = {
+  brand: string; model_number: string; serial: string; total: number;
+  rows: { reference_id: number; status_name: string; customer_name: string; brand: string; model_number: string; serial_number: string }[];
+};
+
+export type AskInvoicePreview = {
+  invoice_number: string;
+  lines: { text: string; price: number | null; match: "matched" | "ambiguous" | "unmatched"; change?: AskPartsChange; candidates?: AskPartsChoice[] }[];
+};
+export type AskPartsCreatePreview = {
+  reference_id: number; item_name: string; quantity: number; total_price: number;
+  source: "online" | "supplier"; source_url: string | null;
+  status: AskPartsStatus; preset_match: boolean;
+};
+export type AskCompleteJobPreview = {
+  target_status_id: number; target_status_name: string; target_source: string;
+  jobs: { reference_id: number; current_status_id: number | null; current_status_name: string; already: boolean }[];
+};
 
 export type AskInterpretResponse = {
   intent: AskIntent;
@@ -131,6 +225,17 @@ export type AskInterpretResponse = {
   missing_ids?: number[];
   /** Short line shown above the answer, e.g. "Found #275. No job #15." */
   notice?: string;
+  parts_preview?: AskPartsPreview;
+  repair_log_preview?: AskRepairLogPreview;
+  labour_preview?: AskLabourPreview;
+  waiting_parts?: AskWaitingParts;
+  equipment_search?: AskEquipmentSearch;
+  charges_focus?: "labour";
+  invoice_preview?: AskInvoicePreview;
+  parts_create_preview?: AskPartsCreatePreview;
+  complete_job_preview?: AskCompleteJobPreview;
+  /** A portal page the reply points to, e.g. New Job. */
+  link?: { label: string; href: string };
 };
 
 /** ✎ AI help actions for POST /ai-tools/email-rewrite. */

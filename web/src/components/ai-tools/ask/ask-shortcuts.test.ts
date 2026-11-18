@@ -74,3 +74,12 @@ describe("mention text", () => {
     expect(customerName({ label: "Customer #9", first_name: null, last_name: null })).toBe("Customer #9");
   });
 });
+
+describe("ASK_SKILL_PROMPTS", () => {
+  it("offers the new skills as editable prompts", async () => {
+    const { ASK_SKILL_PROMPTS } = await import("@/components/ai-tools/ask/ask-shortcuts");
+    const labels = ASK_SKILL_PROMPTS.map((s) => s.label);
+    for (const l of ["Approve parts request", "Mark parts arrived", "Add repair log", "Add labour", "Jobs waiting on parts"]) expect(labels).toContain(l);
+    for (const s of ASK_SKILL_PROMPTS) expect(s.prompt.trim().length).toBeGreaterThan(0);
+  });
+});

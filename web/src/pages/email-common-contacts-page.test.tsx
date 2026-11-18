@@ -63,7 +63,7 @@ describe("EmailCommonContactsPage", () => {
     render(<EmailCommonContactsPage />);
     const rows = await screen.findAllByRole("row");
     expect(within(rows[1]).getByText("Big Boss")).toBeInTheDocument();
-    expect(within(rows[1]).getByText("Boss 老闆")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("Boss")).toBeInTheDocument();
     expect(within(rows[1]).getByText("Pinned")).toBeInTheDocument();
     expect(within(rows[2]).getByText("Zed")).toBeInTheDocument();
   });

@@ -104,12 +104,20 @@ func TestAskInterpretHandler(t *testing.T) {
 	}
 }
 
+// Invalid JSON twice: a friendly "unknown" answer (200), not a 502.
 func TestAskInterpretHandlerBadLLMOutput(t *testing.T) {
 	useMockLLM(t, mockLLMServer(t, "no json here"))
 	router := aiToolsRouter(t, searchStub())
 	resp := partsAuditRequest(t, router, http.MethodPost, "/ai-tools/ask/interpret", `{"message":"hello"}`, []string{permUpdate})
-	if resp.Code != http.StatusBadGateway {
+	if resp.Code != http.StatusOK {
 		t.Fatalf("got %d %s", resp.Code, resp.Body.String())
+	}
+	var body askInterpretResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Intent != askIntentUnknown || body.Reply != askNotUnderstoodReply {
+		t.Fatalf("body = %+v", body)
 	}
 }
 

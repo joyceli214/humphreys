@@ -125,9 +125,12 @@ func TestAskPromptEmptyContext(t *testing.T) {
 	llm.answer(askIntentUnknown)
 	askAs(t, router, askUserA, "hello")
 	p := llm.lastUserPrompt(t)
-	want := "Saved context from this user's recent Ask answers (may be empty):\n" +
+	want := "PAST_CONVERSATIONS: (none)\n" +
+		"Saved context from this user's recent Ask answers (may be empty):\n" +
 		"SAVED_TOPIC: none\nSAVED_JOBS:\nSAVED_CUSTOMER:\n" +
-		"Recent conversation (oldest first):\n(none)\nRequest: hello\n"
+		"Recent conversation (oldest first):\n(none)\n" +
+		"LIVE_JOBS: (none)\n" +
+		"Request: hello\n"
 	if p != want {
 		t.Fatalf("prompt = %q\nwant     %q", p, want)
 	}

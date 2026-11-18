@@ -13,10 +13,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// askContextTTL is the sliding window for Management Ask follow-ups: a saved
-// context counts only while it was updated within the last 5 days, and every
-// answer slides the window forward.
-const askContextTTL = 5 * 24 * time.Hour
+// askContextTTL is the retention of a saved Ask context row: it counts only
+// while it was updated within the last 2 days (every answer slides the window
+// forward), and older rows are deleted. Within that, a conversation's turns
+// and saved jobs are dropped after askConversationIdle without a message
+// (they are condensed into a summary first; see ai_tools_ask_summaries.go).
+const askContextTTL = 2 * 24 * time.Hour
 
 // askNoContextReply answers a follow-up ("update both") when there is nothing
 // recent to refer to.
@@ -25,9 +27,10 @@ const askNoContextReply = "I don't have recent jobs to refer to. Tell me the job
 // askNoJobsReply answers when every job number named does not exist.
 const askNoJobsReply = "Check the job numbers and try again."
 
-// askPartsStatusNotice is shown when a follow-up asks to change the status of
-// parts requests: Ask has no parts-status write tool.
-const askPartsStatusNotice = "Ask can't change parts request status yet. Change it from each job's Parts list."
+// askPartsStatusNotice is shown when a follow-up asks to change parts requests
+// to a status Ask can't set (e.g. "pending"): Ask can approve, mark ordered,
+// mark arrived, cancel or price them (ai_tools_ask_skills.go).
+const askPartsStatusNotice = "Ask can approve, mark ordered, mark arrived or cancel parts requests, or set a price — e.g. “approve request 480”. Other changes: use each job's Parts list."
 
 // Context topics: what the last answer was about. A follow-up update after a
 // parts answer must never become a job-field Mass Update unless it clearly
@@ -58,9 +61,27 @@ type askContext struct {
 	ReferenceIDs  []int64
 	CustomerQuery string
 	// Topic is askTopicJobs or askTopicParts ("" counts as jobs).
-	Topic     string
-	Turns     []askTurn
+	Topic string
+	Turns []askTurn
+	// Pending is a question Ask asked and is waiting on (labour amount,
+	// repair log hours); only the next message can answer it.
+	Pending   *askPending
 	UpdatedAt time.Time
+}
+
+// Pending question kinds.
+const (
+	askPendingLabour    = "labour"
+	askPendingRepairLog = "repair_log"
+)
+
+// askPending is what Ask remembers about a question it asked: the job and
+// whatever the user already gave (hours for labour, the text of a repair log).
+type askPending struct {
+	Kind        string   `json:"kind"`
+	ReferenceID int64    `json:"reference_id"`
+	Hours       *float64 `json:"hours,omitempty"`
+	Text        string   `json:"text,omitempty"`
 }
 
 // normalizeAskTopic maps anything but "parts" to "jobs".
@@ -97,6 +118,18 @@ type askContextStore interface {
 	// DeleteExpiredAskContext deletes the row only if it was last updated at or
 	// before cutoff (so a save from another device in between is kept).
 	DeleteExpiredAskContext(ctx context.Context, userID string, cutoff time.Time) error
+	// DeleteExpiredAskContexts deletes every user's row last updated at or
+	// before cutoff.
+	DeleteExpiredAskContexts(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// Conversation summaries (table ai_ask_conversation_summaries).
+	InsertAskSummary(ctx context.Context, userID, summary string, createdAt time.Time) error
+	// ListAskSummaries returns up to limit of the user's summaries created
+	// after since, newest first.
+	ListAskSummaries(ctx context.Context, userID string, since time.Time, limit int) ([]askSummary, error)
+	// DeleteExpiredAskSummaries deletes every user's summaries created at or
+	// before cutoff.
+	DeleteExpiredAskSummaries(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 // askJobCustomer is the customer a job belongs to.
@@ -123,10 +156,10 @@ type pgAskStore struct{ db *pgxpool.Pool }
 
 func (s *pgAskStore) LoadAskContext(ctx context.Context, userID string) (askContext, bool, error) {
 	var ac askContext
-	var turns []byte
+	var turns, pending []byte
 	err := s.db.QueryRow(ctx,
-		`SELECT reference_ids, customer_query, topic, turns, updated_at FROM public.ai_ask_context WHERE user_id = $1::uuid`,
-		userID).Scan(&ac.ReferenceIDs, &ac.CustomerQuery, &ac.Topic, &turns, &ac.UpdatedAt)
+		`SELECT reference_ids, customer_query, topic, turns, pending, updated_at FROM public.ai_ask_context WHERE user_id = $1::uuid`,
+		userID).Scan(&ac.ReferenceIDs, &ac.CustomerQuery, &ac.Topic, &turns, &pending, &ac.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return askContext{}, false, nil
 	}
@@ -138,6 +171,14 @@ func (s *pgAskStore) LoadAskContext(ctx context.Context, userID string) (askCont
 		if err := json.Unmarshal(turns, &ac.Turns); err != nil {
 			log.Printf("[ai] ask context turns: %v", err)
 			ac.Turns = nil
+		}
+	}
+	if len(pending) > 0 && string(pending) != "null" {
+		var p askPending
+		if err := json.Unmarshal(pending, &p); err != nil {
+			log.Printf("[ai] ask context pending: %v", err)
+		} else if p.ReferenceID > 0 {
+			ac.Pending = &p
 		}
 	}
 	return ac, true, nil
@@ -159,16 +200,26 @@ func (s *pgAskStore) SaveAskContext(ctx context.Context, userID string, ac askCo
 	if err != nil {
 		return err
 	}
+	var pendingJSON *string
+	if ac.Pending != nil {
+		b, err := json.Marshal(ac.Pending)
+		if err != nil {
+			return err
+		}
+		v := string(b)
+		pendingJSON = &v
+	}
 	_, err = s.db.Exec(ctx,
-		`INSERT INTO public.ai_ask_context (user_id, reference_ids, customer_query, topic, turns, updated_at)
-		 VALUES ($1::uuid, $2::bigint[], $3, $4, $5::jsonb, now())
+		`INSERT INTO public.ai_ask_context (user_id, reference_ids, customer_query, topic, turns, pending, updated_at)
+		 VALUES ($1::uuid, $2::bigint[], $3, $4, $5::jsonb, $6::jsonb, now())
 		 ON CONFLICT (user_id) DO UPDATE
 		   SET reference_ids = EXCLUDED.reference_ids,
 		       customer_query = EXCLUDED.customer_query,
 		       topic = EXCLUDED.topic,
 		       turns = EXCLUDED.turns,
+		       pending = EXCLUDED.pending,
 		       updated_at = now()`,
-		userID, ids, ac.CustomerQuery, normalizeAskTopic(ac.Topic), string(turnsJSON))
+		userID, ids, ac.CustomerQuery, normalizeAskTopic(ac.Topic), string(turnsJSON), pendingJSON)
 	return err
 }
 

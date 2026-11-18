@@ -137,6 +137,9 @@ func RegisterAIToolsRoutes(authed *gin.RouterGroup, h *Handler) {
 	group.POST("/email-draft", perm, llm, h.EmailDraft)
 	// Management Ask chat: classify only; reads/writes go through existing endpoints.
 	group.POST("/ask/interpret", perm, llm, h.AskInterpret)
+	// Ends the Ask conversation (summary + clear). No llm middleware: the
+	// handler charges one slot itself only when it calls the model.
+	group.POST("/ask/new-conversation", perm, h.AskNewConversation)
 	// Management Email pen helper: rewrite on request, blanks must survive.
 	group.POST("/email-rewrite", perm, llm, h.EmailRewrite)
 }
