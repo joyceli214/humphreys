@@ -249,7 +249,7 @@ export const EMAIL_TEMPLATE_VARIABLES: EmailTemplateVariable[] = [
   { token: "{{labour_discount}}", label: "Labour Discount" },
   { token: "{{labour_net_total}}", label: "Labour Net Total" },
   { token: "{{total_before_deposit}}", label: "Total Before Deposit" },
-  { token: "{{deposit}}", label: "Deposit" },
+  { token: "{{deposit}}", label: "Assessment fee / Deposit" },
   { token: "{{total_payable}}", label: "Total Payable" },
   { token: "{{payment_method_names}}", label: "Payment Methods" },
   { token: "{{worker_names}}", label: "Workers" }

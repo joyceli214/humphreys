@@ -1409,8 +1409,8 @@ export default function WorkOrderDetailPage() {
     const deposit = Number(totalsForm.deposit.trim() || "0");
 
     if (Number.isNaN(deposit)) {
-      setFieldErrors((prev) => ({ ...prev, deposit: "Deposit must be a valid number" }));
-      alerts.error("Invalid totals", "Deposit must be a valid number");
+      setFieldErrors((prev) => ({ ...prev, deposit: "Assessment fee / Deposit must be a valid number" }));
+      alerts.error("Invalid totals", "Assessment fee / Deposit must be a valid number");
       return;
     }
 
@@ -2508,12 +2508,12 @@ export default function WorkOrderDetailPage() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <SingleSearchableDropdown
-                      label="Deposit Payment Method"
+                      label="Assessment fee / Deposit Payment Method"
                       value={workNotesForm.payment_method_ids[0] ?? null}
                       valueLabel={item.payment_method_names[0] ?? undefined}
                       onChange={(value) => { void handleDepositPaymentMethodChange(value); }}
                       loadOptions={loadPaymentMethodOptions}
-                      placeholder="Select deposit payment method"
+                      placeholder="Select assessment fee / deposit payment method"
                       onAddNew={isDropdownFrozen("payment_methods") ? undefined : (label) => apiClient.createPaymentMethod(label)}
                     />
                     <SingleSearchableDropdown
@@ -2582,7 +2582,7 @@ export default function WorkOrderDetailPage() {
                 </div>
               ) : (
                 <>
-                  {detailRow("Deposit Payment Method", item.payment_method_names[0] ?? "-")}
+                  {detailRow("Assessment fee / Deposit Payment Method", item.payment_method_names[0] ?? "-")}
                   {detailRow("Final Payment Method", item.payment_method_names[1] ?? "-")}
                   {detailRow("Parts", formatCurrency(item.parts_total))}
                   {detailRow("Delivery", formatCurrency(item.delivery_total))}

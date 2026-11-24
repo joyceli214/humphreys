@@ -696,12 +696,12 @@ export default function WorkOrderCreatePage() {
   const validatePaymentStep = () => {
     const parsedDeposit = Number(deposit.trim());
     if (!Number.isFinite(parsedDeposit) || parsedDeposit < 0) {
-      alerts.error("Invalid deposit", "Deposit must be zero or greater.");
+      alerts.error("Invalid assessment fee / deposit", "Assessment fee / Deposit must be zero or greater.");
       return false;
     }
     const parsedDepositPaymentMethodID = Number(depositPaymentMethodId);
     if (parsedDeposit > 0 && (!Number.isInteger(parsedDepositPaymentMethodID) || parsedDepositPaymentMethodID <= 0)) {
-      alerts.error("Payment method required", "Select a deposit payment method.");
+      alerts.error("Payment method required", "Select an assessment fee / deposit payment method.");
       return false;
     }
     return true;
@@ -1173,7 +1173,7 @@ export default function WorkOrderCreatePage() {
               <div className="space-y-3">
                 <p className="text-sm font-medium text-slate-700">Assessment fee / Deposit</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <Input placeholder="Deposit Amount" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
+                  <Input placeholder="Assessment fee / Deposit Amount" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
                   <select
                     className="h-10 rounded-md border border-input bg-white px-3 py-2 text-sm"
                     value={depositPaymentMethodId}
