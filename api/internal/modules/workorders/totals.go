@@ -5,7 +5,14 @@ import (
 	"math"
 )
 
-type Totals struct{ LabourDiscount, NetLabour, Subtotal, HST, Total, Payable float64 }
+type Totals struct {
+	LabourDiscount float64 `json:"labour_discount"`
+	NetLabour      float64 `json:"net_labour"`
+	Subtotal       float64 `json:"subtotal"`
+	HST            float64 `json:"hst"`
+	Total          float64 `json:"total"`
+	Payable        float64 `json:"payable"`
+}
 
 func round2(v float64) float64 { return math.Round((v+math.Copysign(1e-9, v))*100) / 100 }
 func CalculateTotals(item domain.WorkOrderDetail) Totals {

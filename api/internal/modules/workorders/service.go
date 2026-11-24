@@ -122,10 +122,11 @@ type LineItemUpsertInput struct {
 	LineTotalText *string
 }
 
+// TotalsUpdateInput: a field left unset keeps its stored value.
 type TotalsUpdateInput struct {
-	DeliveryTotal *float64
-	LabourTotal   *float64
-	Deposit       float64
+	DeliveryTotal OptionalFloat
+	LabourTotal   OptionalFloat
+	Deposit       OptionalFloat
 }
 
 type CustomerUpdateInput struct {
@@ -156,6 +157,8 @@ type CreatePartsPurchaseRequestInput struct {
 	TotalPrice      float64
 	ItemName        string
 	Quantity        int32
+	ActualPaidTotal *float64
+	CanApprove      bool
 	CreatedByUserID string
 }
 
@@ -175,6 +178,8 @@ type UpdatePartsPurchaseRequestInput struct {
 	TotalPrice  float64
 	ItemName    string
 	Quantity    int32
+	// ActualPaid: unset keeps the stored value; Set with nil clears it.
+	ActualPaid OptionalFloat
 }
 
 type CustomerLookupOption struct {
@@ -437,10 +442,54 @@ func (s *Service) UpdateLineItems(ctx context.Context, referenceID int, lineItem
 }
 
 func (s *Service) UpdateTotals(ctx context.Context, referenceID int, input TotalsUpdateInput) (domain.WorkOrderDetail, error) {
+	input = normalizeTotalsInput(input)
 	if err := s.repo.UpdateTotals(ctx, referenceID, input); err != nil {
 		return domain.WorkOrderDetail{}, err
 	}
 	return s.GetWorkOrderDetail(ctx, referenceID)
+}
+
+// normalizeTotalsInput: deposit is not nullable, so an explicit null means 0 (as before).
+func normalizeTotalsInput(input TotalsUpdateInput) TotalsUpdateInput {
+	if input.Deposit.Set && input.Deposit.Value == nil {
+		zero := 0.0
+		input.Deposit.Value = &zero
+	}
+	return input
+}
+
+// PreviewLineItems returns the work order as it would look after the change
+// without saving anything.
+func (s *Service) PreviewLineItems(ctx context.Context, referenceID int, lineItems []LineItemUpsertInput) (domain.WorkOrderDetail, error) {
+	detail, err := s.GetWorkOrderDetail(ctx, referenceID)
+	if err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+	partsTotal, lines, err := s.repo.PreviewLineItems(ctx, referenceID, lineItems)
+	if err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+	detail.PartsTotal, detail.LineItems = partsTotal, lines
+	return detail, nil
+}
+
+// PreviewTotals applies the proposed totals in memory only.
+func (s *Service) PreviewTotals(ctx context.Context, referenceID int, input TotalsUpdateInput) (domain.WorkOrderDetail, error) {
+	input = normalizeTotalsInput(input)
+	detail, err := s.GetWorkOrderDetail(ctx, referenceID)
+	if err != nil {
+		return domain.WorkOrderDetail{}, err
+	}
+	if input.DeliveryTotal.Set {
+		detail.DeliveryTotal = input.DeliveryTotal.Value
+	}
+	if input.LabourTotal.Set {
+		detail.LabourTotal = input.LabourTotal.Value
+	}
+	if input.Deposit.Set {
+		detail.Deposit = *input.Deposit.Value
+	}
+	return detail, nil
 }
 
 func (s *Service) UpdateCustomer(ctx context.Context, referenceID int, input CustomerUpdateInput) (domain.WorkOrderDetail, error) {
@@ -515,6 +564,12 @@ func (s *Service) CreatePartsPurchaseRequest(ctx context.Context, referenceID in
 	if !validPartsStatus(status) {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsStatus
 	}
+	if partsStatusNeedsApprove(status) && !input.CanApprove {
+		return domain.PartsPurchaseRequest{}, ErrPartsApprovalPermission
+	}
+	if input.ActualPaidTotal != nil && *input.ActualPaidTotal < 0 {
+		return domain.PartsPurchaseRequest{}, ErrInvalidPartsTotalPrice
+	}
 
 	itemName := strings.TrimSpace(input.ItemName)
 	if itemName == "" {
@@ -534,6 +589,7 @@ func (s *Service) CreatePartsPurchaseRequest(ctx context.Context, referenceID in
 		TotalPrice:      input.TotalPrice,
 		ItemName:        itemName,
 		Quantity:        input.Quantity,
+		ActualPaidTotal: input.ActualPaidTotal,
 		CreatedByUserID: input.CreatedByUserID,
 	})
 }
@@ -576,7 +632,7 @@ func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID in
 	if input.Quantity < 1 {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsQuantity
 	}
-	if input.TotalPrice < 0 {
+	if input.TotalPrice < 0 || input.ActualPaid.Set && input.ActualPaid.Value != nil && *input.ActualPaid.Value < 0 {
 		return domain.PartsPurchaseRequest{}, ErrInvalidPartsTotalPrice
 	}
 	return s.repo.UpdatePartsPurchaseRequest(ctx, referenceID, partsPurchaseRequestID, UpdatePartsPurchaseRequestInput{
@@ -589,6 +645,7 @@ func (s *Service) UpdatePartsPurchaseRequest(ctx context.Context, referenceID in
 		TotalPrice:  input.TotalPrice,
 		ItemName:    itemName,
 		Quantity:    input.Quantity,
+		ActualPaid:  input.ActualPaid,
 	})
 }
 

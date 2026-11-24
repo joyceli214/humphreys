@@ -182,6 +182,7 @@ export interface PartsPurchaseRequest {
   source_url: string | null;
   status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
   total_price: number;
+  actual_paid_total: number | null;
   item_name: string;
   quantity: number;
   created_by_user_id: string;
@@ -195,7 +196,7 @@ export interface PartsAuditEntry {
   parts_purchase_request_id: number;
   reference_id: number;
   action: "create" | "update" | "delete";
-  field: "status" | "total_price" | "quantity" | "item_name" | "source" | "source_url";
+  field: "status" | "total_price" | "actual_paid_total" | "quantity" | "item_name" | "source" | "source_url";
   old_value: string | null;
   new_value: string | null;
   changed_by_user_id: string;

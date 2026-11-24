@@ -134,7 +134,11 @@ func TestPartsAuditActorsAndAllowedActions(t *testing.T) {
 		{http.MethodDelete, path + "/7", permPartsDelete, http.StatusNoContent},
 	} {
 		repo.actor = ""
-		response := partsAuditRequest(t, router, tc.method, tc.path, body, []string{tc.permission})
+		permissions := []string{tc.permission}
+		if tc.method == http.MethodPost { // creating directly as "approved" needs approve (G2)
+			permissions = append(permissions, permPartsApprove)
+		}
+		response := partsAuditRequest(t, router, tc.method, tc.path, body, permissions)
 		if response.Code != tc.status || repo.actor != "00000000-0000-0000-0000-000000000001" {
 			t.Fatalf("%s: status=%d actor=%s body=%s", tc.method, response.Code, repo.actor, response.Body.String())
 		}

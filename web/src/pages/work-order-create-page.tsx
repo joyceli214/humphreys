@@ -1171,7 +1171,7 @@ export default function WorkOrderCreatePage() {
 
               {paymentStep !== null && createStep === paymentStep && (
               <div className="space-y-3">
-                <p className="text-sm font-medium text-slate-700">Deposit</p>
+                <p className="text-sm font-medium text-slate-700">Assessment fee / Deposit</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   <Input placeholder="Deposit Amount" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
                   <select
@@ -1250,7 +1250,7 @@ export default function WorkOrderCreatePage() {
                     </div>
                     <div className="space-y-1">
                       <p className="text-lg font-semibold text-slate-700">Payment</p>
-                      <p><span className="font-medium">Deposit:</span> {deposit.trim() || "0"}</p>
+                      <p><span className="font-medium">Assessment fee / Deposit:</span> {deposit.trim() || "0"}</p>
                       <p><span className="font-medium">Payment Method:</span> {paymentMethods.find((x) => String(x.id) === depositPaymentMethodId)?.label ?? "-"}</p>
                     </div>
                   </div>

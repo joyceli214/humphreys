@@ -11,6 +11,34 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    WorkOrderTotals:
+      type: object
+      required: [labour_discount, net_labour, subtotal, hst, total, payable]
+      properties:
+        labour_discount: { type: number }
+        net_labour: { type: number }
+        subtotal: { type: number }
+        hst: { type: number }
+        total: { type: number }
+        payable: { type: number, description: Total minus deposit. }
+    DryRunResult:
+      type: object
+      required: [dry_run, totals, work_order]
+      properties:
+        dry_run: { type: boolean, enum: [true] }
+        totals: { $ref: '#/components/schemas/WorkOrderTotals' }
+        work_order: { type: object, description: The work order as it would look after the change. Nothing was saved. }
+    RepairLogSearchItem:
+      type: object
+      required: [repair_log_id, reference_id, repair_date, hours_used, created_by_user_id, snippet]
+      properties:
+        repair_log_id: { type: integer, format: int64 }
+        reference_id: { type: integer }
+        repair_date: { type: string, format: date-time, nullable: true }
+        hours_used: { type: number }
+        created_by_user_id: { type: string }
+        created_by_name: { type: string, nullable: true }
+        snippet: { type: string, description: Details without markdown images or raw URLs, about 200 characters around the first match. }
     LookupOption:
       type: object
       required: [id, label]
@@ -222,6 +250,128 @@ paths:
     patch:
       security: [{ bearerAuth: [] }]
       responses: { '200': { description: OK } }
+  /work-orders/{reference_id}:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: Get a work order
+      description: Requires work_orders:read. Callers that also have work_orders_sensitive:read get a `totals` object computed by the server (labour discount, net labour, subtotal, HST, total, payable). Other callers get no `totals` key.
+      parameters:
+        - { in: path, name: reference_id, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Work order detail; `totals` is present only with work_orders_sensitive:read.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totals: { $ref: '#/components/schemas/WorkOrderTotals' }
+        '404': { description: Work order not found. }
+  /work-orders/{reference_id}/line-items:
+    patch:
+      security: [{ bearerAuth: [] }]
+      summary: Replace a work order's line items
+      description: Requires work_orders:update. With dry_run=1 (or true) the same validation runs inside a transaction that is always rolled back; nothing is saved and the response is a DryRunResult.
+      parameters:
+        - { in: path, name: reference_id, required: true, schema: { type: integer } }
+        - { in: query, name: dry_run, schema: { type: string, enum: ['1', 'true'] } }
+      responses:
+        '200':
+          description: Updated work order, or a DryRunResult when dry_run is set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DryRunResult' }
+        '404': { description: Work order or line item not found. }
+  /work-orders/{reference_id}/totals:
+    patch:
+      security: [{ bearerAuth: [] }]
+      summary: Update delivery total, labour total and deposit
+      description: Requires work_orders:update. Each field is optional; an omitted field keeps its stored value. Explicit null clears delivery_total and labour_total and means 0 for deposit. With dry_run=1 (or true) nothing is saved and the response is a DryRunResult computed from the proposed values.
+      parameters:
+        - { in: path, name: reference_id, required: true, schema: { type: integer } }
+        - { in: query, name: dry_run, schema: { type: string, enum: ['1', 'true'] } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                delivery_total: { type: number, nullable: true }
+                labour_total: { type: number, nullable: true }
+                deposit: { type: number, nullable: true }
+      responses:
+        '200':
+          description: Updated work order, or a DryRunResult when dry_run is set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DryRunResult' }
+        '404': { description: Work order not found. }
+  /work-orders/{reference_id}/parts-purchase-requests:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Create a parts purchase request
+      description: Requires parts_purchase_requests:create. Creating with any status other than draft or waiting_approval also requires parts_purchase_requests:approve (403 otherwise). Optional actual_paid_total (number >= 0, CAD) is the amount actually paid and is separate from the total_price estimate.
+      parameters:
+        - { in: path, name: reference_id, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actual_paid_total: { type: number, minimum: 0, nullable: true }
+      responses:
+        '201': { description: Created request (includes actual_paid_total). }
+        '403': { description: Status needs parts_purchase_requests:approve. }
+  /work-orders/{reference_id}/parts-purchase-requests/{parts_purchase_request_id}:
+    patch:
+      security: [{ bearerAuth: [] }]
+      summary: Update a parts purchase request
+      description: Requires parts_purchase_requests:update. Once a request has been approved (approved, ordered, arrived, used) total_price and quantity can only be changed with parts_purchase_requests:approve (403 otherwise); status changes and other fields keep their usual rules. actual_paid_total is not locked; omitted keeps the stored value, null clears it. Changes to it are audited like total_price.
+      parameters:
+        - { in: path, name: reference_id, required: true, schema: { type: integer } }
+        - { in: path, name: parts_purchase_request_id, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actual_paid_total: { type: number, minimum: 0, nullable: true }
+      responses:
+        '200': { description: Updated request (includes actual_paid_total). }
+        '403': { description: Needs parts_purchase_requests:approve. }
+        '409': { description: Request changed since updated_at. }
+  /repair-logs/search:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: Search repair logs across all jobs
+      description: Requires repair_logs:read and work_orders:read. q is a case-insensitive literal substring of details (%, _ and \ are matched literally), at least 2 characters unless job is given. Sorted by repair_date then repair_log_id, newest first.
+      parameters:
+        - { in: query, name: q, schema: { type: string, minLength: 2 } }
+        - { in: query, name: from, description: Inclusive start date YYYY-MM-DD., schema: { type: string, format: date } }
+        - { in: query, name: to, description: Inclusive end date YYYY-MM-DD., schema: { type: string, format: date } }
+        - { in: query, name: job, description: Only this reference_id., schema: { type: integer } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+      responses:
+        '200':
+          description: One page of matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, page_size, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/RepairLogSearchItem' }
+                  page: { type: integer }
+                  page_size: { type: integer }
+                  total: { type: integer }
+        '400': { description: Invalid q, date, job, page or page_size. }
+        '401': { description: Authentication required. }
+        '403': { description: Requires repair_logs:read and work_orders:read. }
   /resources:
     get:
       security: [{ bearerAuth: [] }]

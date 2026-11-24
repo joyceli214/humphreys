@@ -365,6 +365,7 @@ type PartsPurchaseRequestForm = {
   source: "online" | "supplier";
   source_url: string;
   total_price: string;
+  actual_paid_total: string;
   item_name: string;
   quantity: string;
 };
@@ -545,6 +546,7 @@ export default function WorkOrderDetailPage() {
     source: "online",
     source_url: "",
     total_price: "",
+    actual_paid_total: "",
     item_name: "",
     quantity: "1"
   });
@@ -1535,6 +1537,12 @@ export default function WorkOrderDetailPage() {
     if (editingPartsRequestID !== null ? !canUpdatePartsRequests : !canCreatePartsRequests) return;
     const quantity = Number(partsRequestForm.quantity.trim());
     const totalPrice = Number(partsRequestForm.total_price.trim() || "0");
+    const actualPaidRaw = partsRequestForm.actual_paid_total.trim();
+    const actualPaid = actualPaidRaw === "" ? null : Number(actualPaidRaw);
+    if (actualPaid !== null && (!Number.isFinite(actualPaid) || actualPaid < 0)) {
+      alerts.error("Invalid parts request", "Actual paid must be zero or greater");
+      return;
+    }
     if (!partsRequestForm.item_name.trim()) {
       alerts.error("Invalid parts request", "Item name is required");
       return;
@@ -1565,6 +1573,7 @@ export default function WorkOrderDetailPage() {
           source_url: blankToNull(partsRequestForm.source_url),
           status: effectiveStatus,
           total_price: totalPrice,
+          actual_paid_total: actualPaid,
           item_name: partsRequestForm.item_name.trim(),
           quantity
         });
@@ -1574,6 +1583,7 @@ export default function WorkOrderDetailPage() {
           source_url: blankToNull(partsRequestForm.source_url),
           status: effectiveStatus,
           total_price: totalPrice,
+          ...(actualPaid !== null ? { actual_paid_total: actualPaid } : {}),
           item_name: partsRequestForm.item_name.trim(),
           quantity
         });
@@ -1582,6 +1592,7 @@ export default function WorkOrderDetailPage() {
         source: "online",
         source_url: "",
         total_price: "",
+        actual_paid_total: "",
         item_name: "",
         quantity: "1"
       });
@@ -1640,6 +1651,7 @@ export default function WorkOrderDetailPage() {
       source: "online",
       source_url: "",
       total_price: "",
+      actual_paid_total: "",
       item_name: "",
       quantity: "1"
     });
@@ -1654,6 +1666,7 @@ export default function WorkOrderDetailPage() {
       source: request.source,
       source_url: request.source_url ?? "",
       total_price: String(request.total_price),
+      actual_paid_total: request.actual_paid_total == null ? "" : String(request.actual_paid_total),
       item_name: request.item_name,
       quantity: String(request.quantity)
     });
@@ -2546,7 +2559,7 @@ export default function WorkOrderDetailPage() {
                       <Input value={formatCurrency(editTotal)} disabled />
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm text-muted-foreground">Deposit</label>
+                      <label className="mb-1 block text-sm text-muted-foreground">Assessment fee / Deposit</label>
                       <Input
                         value={totalsForm.deposit}
                         className={cn(fieldErrors.deposit && "border-destructive focus-visible:ring-destructive")}
@@ -2579,7 +2592,7 @@ export default function WorkOrderDetailPage() {
                   {detailRow("Subtotal", formatCurrency(viewSubtotal))}
                   {detailRow("HST (13%)", formatCurrency(viewTax))}
                   {detailRow("Total", formatCurrency(viewTotal))}
-                  {detailRow("Deposit", formatCurrency(item.deposit))}
+                  {detailRow("Assessment fee / Deposit", formatCurrency(item.deposit))}
                   {detailRow("Total Payable", formatCurrency(viewTotalPayable))}
                 </>
               )}
@@ -2736,6 +2749,16 @@ export default function WorkOrderDetailPage() {
                           onChange={(e) => setPartsRequestForm((prev) => ({ ...prev, total_price: e.target.value }))}
                         />
                       </div>
+                      <div>
+                        <label className="mb-1 block text-sm text-muted-foreground">Actual paid (CAD)</label>
+                        <Input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={partsRequestForm.actual_paid_total}
+                          onChange={(e) => setPartsRequestForm((prev) => ({ ...prev, actual_paid_total: e.target.value }))}
+                        />
+                      </div>
                       <div className="md:col-span-2 flex justify-end gap-2">
                         <Button
                           variant="outline"
@@ -2809,7 +2832,12 @@ export default function WorkOrderDetailPage() {
                           <PartsRequestWarnings flags={request.audit_flags} />
                           {partsStatusDate(request) && <span className="ml-2 text-xs text-muted-foreground">{formatDateTime(partsStatusDate(request))}</span>}
                         </Td>
-                        <Td>{formatCurrency(request.total_price)}</Td>
+                        <Td>
+                          {formatCurrency(request.total_price)}
+                          {request.actual_paid_total != null && (
+                            <div className="text-xs text-muted-foreground">Actual paid (CAD): {formatCurrency(request.actual_paid_total)}</div>
+                          )}
+                        </Td>
                         <Td>
                           {request.source_url ? (
                             <a href={request.source_url} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">

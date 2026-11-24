@@ -603,6 +603,7 @@ export class APIClient {
       source_url: string | null;
       status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
       total_price: number;
+      actual_paid_total?: number | null;
       item_name: string;
       quantity: number;
     }
@@ -622,6 +623,7 @@ export class APIClient {
       source_url: string | null;
       status: "draft" | "waiting_approval" | "approved" | "ordered" | "arrived" | "used" | "cancelled";
       total_price: number;
+      actual_paid_total?: number | null;
       item_name: string;
       quantity: number;
     }
