@@ -317,7 +317,7 @@ export function ChargesAnswer({ referenceIds, customerQuery, focus }: { referenc
               {focus === "labour" && <><th className="text-right">Labour before discount</th><th className="text-right">Labour discount</th></>}
               <th className="text-right">Labour</th>
               <th className="text-right">Parts</th>
-              <th className="text-right">Deposit</th>
+              <th className="text-right">Assessment fee / Deposit</th>
               <th className="text-right">Balance</th>
             </tr>
           </thead>

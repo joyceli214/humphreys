@@ -54,7 +54,7 @@ func partsAuditTestDB(t *testing.T, beforeWorkflow ...func(*pgxpool.Pool)) *pgxp
 		CREATE TABLE public.work_order_line_items(reference_id integer);`); err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range []string{"001_init.sql", "005_repair_logs_and_parts_purchase_requests.sql", "036_parts_request_status_workflow.sql", "038_parts_purchase_request_audit.sql"} {
+	for _, file := range []string{"001_init.sql", "005_repair_logs_and_parts_purchase_requests.sql", "036_parts_request_status_workflow.sql", "038_parts_purchase_request_audit.sql", "050_parts_actual_paid.sql"} {
 		if file == "036_parts_request_status_workflow.sql" {
 			for _, setup := range beforeWorkflow {
 				setup(db)
@@ -85,7 +85,7 @@ func TestPartsAuditPostgres(t *testing.T) {
 	create := func(referenceID int, status string) domain.PartsPurchaseRequest {
 		t.Helper()
 		item, err := service.CreatePartsPurchaseRequest(ctx, referenceID, CreatePartsPurchaseRequestInput{
-			Source: "supplier", SourceURL: strPtr("https://example.com/a_b"), Status: &status, ItemName: "Capacitor", Quantity: 1, TotalPrice: 10, CreatedByUserID: creator,
+			Source: "supplier", SourceURL: strPtr("https://example.com/a_b"), Status: &status, ItemName: "Capacitor", Quantity: 1, TotalPrice: 10, CreatedByUserID: creator, CanApprove: true,
 		})
 		if err != nil {
 			t.Fatal(err)

@@ -1,9 +1,26 @@
 package workorders
 
-import "errors"
+import (
+	"errors"
+
+	"humphreys/api/internal/domain"
+)
 
 var ErrInvalidPartsTransition = errors.New("invalid parts status transition")
 var ErrPartsApprovalPermission = errors.New("parts_purchase_requests:approve permission required")
+
+var ErrPartsCostLocked = errors.New("parts_purchase_requests:approve permission required to change price or quantity after approval")
+
+// partsStatusNeedsApprove: creating a request directly in any status other than
+// draft / waiting_approval needs the approve permission.
+func partsStatusNeedsApprove(status string) bool {
+	return status != "draft" && status != "waiting_approval"
+}
+
+// partsAfterApproval is the "after approval" rule used by the audit log.
+func partsAfterApproval(item domain.PartsPurchaseRequest) bool {
+	return item.ApprovedAt != nil || item.Status == "approved"
+}
 
 func validPartsStatus(status string) bool {
 	switch status {

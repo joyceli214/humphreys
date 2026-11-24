@@ -275,7 +275,7 @@ it("answers labour questions with live gross labour, discount and total", async 
   expect(await screen.findByText(/Labour on these jobs: \$100.00/)).toBeInTheDocument();
   const table = screen.getByRole("table");
   expect(within(table).getAllByRole("columnheader").map(cell => cell.textContent)).toEqual([
-    "Job #", "Labour before discount", "Labour discount", "Labour", "Parts", "Deposit", "Balance"
+    "Job #", "Labour before discount", "Labour discount", "Labour", "Parts", "Assessment fee / Deposit", "Balance"
   ]);
   const rows = within(table).getAllByRole("row");
   expect(within(rows[1]).getAllByRole("cell").map(cell => cell.textContent)).toEqual([

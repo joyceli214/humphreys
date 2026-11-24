@@ -6,7 +6,7 @@ import { apiClient } from "@/lib/api/client";
 import type { PartsAuditEntry, PartsPurchaseRequest } from "@/lib/api/generated/types";
 
 const fieldLabels: Record<PartsAuditEntry["field"], string> = {
-  status: "Status", total_price: "Total price", quantity: "Quantity",
+  status: "Status", total_price: "Total price", actual_paid_total: "Actual paid (CAD)", quantity: "Quantity",
   item_name: "Item name", source: "Source", source_url: "Source URL"
 };
 
@@ -27,7 +27,7 @@ export function PartsRequestWarnings({ flags }: { flags: string[] | null | undef
 
 function auditValue(value: string | null, field: PartsAuditEntry["field"]) {
   if (value === null) return "—";
-  if (field === "total_price") {
+  if (field === "total_price" || field === "actual_paid_total") {
     return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(Number(value));
   }
   return field === "status" ? value.replace(/_/g, " ") : value;

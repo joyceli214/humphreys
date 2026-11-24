@@ -39,7 +39,13 @@ type partsAuditRow struct {
 }
 
 func priceString(v float64) string { return strconv.FormatFloat(math.Round(v*100)/100, 'f', 2, 64) }
-func strPtr(s string) *string      { return &s }
+func actualPaidString(v *float64) *string {
+	if v == nil {
+		return nil
+	}
+	return strPtr(priceString(*v))
+}
+func strPtr(s string) *string { return &s }
 
 // partsAuditValues snapshots every editable field, preserving NULL source URLs.
 func partsAuditValues(item domain.PartsPurchaseRequest) []partsAuditRow {
@@ -50,6 +56,7 @@ func partsAuditValues(item domain.PartsPurchaseRequest) []partsAuditRow {
 		{Field: "item_name", New: strPtr(item.ItemName)},
 		{Field: "source", New: strPtr(item.Source)},
 		{Field: "source_url", New: item.SourceURL},
+		{Field: "actual_paid_total", New: actualPaidString(item.ActualPaidTotal)},
 	}
 }
 
@@ -62,7 +69,7 @@ func sameAuditValue(a, b *string) bool {
 func diffPartsAudit(old, updated domain.PartsPurchaseRequest) []partsAuditRow {
 	before, after := partsAuditValues(old), partsAuditValues(updated)
 	rows := []partsAuditRow{}
-	for _, i := range []int{1, 2, 3, 4, 5, 0} {
+	for _, i := range []int{1, 2, 3, 4, 5, 6, 0} {
 		if !sameAuditValue(before[i].New, after[i].New) {
 			rows = append(rows, partsAuditRow{Action: "update", Field: after[i].Field, Old: before[i].New, New: after[i].New})
 		}
@@ -71,17 +78,25 @@ func diffPartsAudit(old, updated domain.PartsPurchaseRequest) []partsAuditRow {
 }
 
 func createPartsAuditRows(item domain.PartsPurchaseRequest) []partsAuditRow {
-	rows := partsAuditValues(item)
-	for i := range rows {
-		rows[i].Action = "create"
+	rows := []partsAuditRow{}
+	for _, row := range partsAuditValues(item) {
+		if row.Field == "actual_paid_total" && row.New == nil {
+			continue // nothing recorded yet
+		}
+		row.Action = "create"
+		rows = append(rows, row)
 	}
 	return rows
 }
 
 func deletePartsAuditRows(item domain.PartsPurchaseRequest) []partsAuditRow {
-	rows := partsAuditValues(item)
-	for i := range rows {
-		rows[i].Action, rows[i].Old, rows[i].New = "delete", rows[i].New, nil
+	rows := []partsAuditRow{}
+	for _, row := range partsAuditValues(item) {
+		if row.Field == "actual_paid_total" && row.New == nil {
+			continue
+		}
+		row.Action, row.Old, row.New = "delete", row.New, nil
+		rows = append(rows, row)
 	}
 	return rows
 }

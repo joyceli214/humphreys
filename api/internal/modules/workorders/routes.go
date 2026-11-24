@@ -33,6 +33,14 @@ func RegisterRoutes(authed *gin.RouterGroup, h *Handler) {
 		h.ListAllPartsPurchaseRequests,
 	)
 
+	// Cross-job repair log search; outside /work-orders so it can't clash with /:reference_id.
+	authed.GET(
+		"/repair-logs/search",
+		middleware.RequirePermission(permRepairLogsRead),
+		middleware.RequirePermission(permRead),
+		h.SearchRepairLogs,
+	)
+
 	group := authed.Group("/work-orders")
 	group.GET("/customers", middleware.RequirePermission(permRead), h.ListCustomers)
 	group.GET("/dashboard", middleware.RequirePermission(permRead), h.Dashboard)

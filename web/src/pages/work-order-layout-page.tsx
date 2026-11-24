@@ -138,7 +138,7 @@ function blockPreview(id: WorkOrderLayoutBlockID) {
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <PreviewField label="Deposit Payment Method" value="Credit Card" />
+          <PreviewField label="Assessment fee / Deposit Payment Method" value="Credit Card" />
           <PreviewField label="Final Payment Method" value="Debit" />
           <PreviewField label="Parts" value="$84.00" />
           <PreviewField label="Delivery" value="$0.00" />
@@ -146,7 +146,7 @@ function blockPreview(id: WorkOrderLayoutBlockID) {
           <PreviewField label="Subtotal" value="$204.00" />
           <PreviewField label="HST (13%)" value="$26.52" />
           <PreviewField label="Total" value="$230.52" />
-          <PreviewField label="Deposit" value="$50.00" />
+          <PreviewField label="Assessment fee / Deposit" value="$50.00" />
           <PreviewField label="Total Payable" value="$180.52" />
         </div>
         <PreviewTable>

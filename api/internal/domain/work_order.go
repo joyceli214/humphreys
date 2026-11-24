@@ -119,6 +119,7 @@ type PartsPurchaseRequest struct {
 	SourceURL              *string    `json:"source_url"`
 	Status                 string     `json:"status"`
 	TotalPrice             float64    `json:"total_price"`
+	ActualPaidTotal        *float64   `json:"actual_paid_total"`
 	ItemName               string     `json:"item_name"`
 	Quantity               int32      `json:"quantity"`
 	CreatedByUserID        string     `json:"created_by_user_id"`

@@ -97,10 +97,22 @@ type lineItemInput struct {
 	LineTotalText *string  `json:"line_total_text"`
 }
 
+// Omitted fields keep their stored value; explicit null clears delivery/labour
+// (nullable columns) and means 0 for deposit.
 type updateTotalsRequest struct {
-	DeliveryTotal *float64 `json:"delivery_total"`
-	LabourTotal   *float64 `json:"labour_total"`
-	Deposit       float64  `json:"deposit"`
+	DeliveryTotal OptionalFloat `json:"delivery_total"`
+	LabourTotal   OptionalFloat `json:"labour_total"`
+	Deposit       OptionalFloat `json:"deposit"`
+}
+
+func isDryRun(c *gin.Context) bool {
+	v := strings.ToLower(c.Query("dry_run"))
+	return v == "1" || v == "true"
+}
+
+type workOrderDetailResponse struct {
+	domain.WorkOrderDetail
+	Totals *Totals `json:"totals,omitempty"`
 }
 
 type updateCustomerRequest struct {
@@ -212,6 +224,8 @@ type createPartsPurchaseRequest struct {
 	TotalPrice float64 `json:"total_price"`
 	ItemName   string  `json:"item_name" binding:"required"`
 	Quantity   int32   `json:"quantity" binding:"required,gte=1"`
+	// ActualPaidTotal: optional amount actually paid, separate from the estimate.
+	ActualPaidTotal *float64 `json:"actual_paid_total"`
 }
 
 type updateRepairLogRequest struct {
@@ -228,6 +242,8 @@ type updatePartsPurchaseRequest struct {
 	TotalPrice float64   `json:"total_price"`
 	ItemName   string    `json:"item_name" binding:"required"`
 	Quantity   int32     `json:"quantity" binding:"required,gte=1"`
+	// ActualPaidTotal: omitted keeps the stored value, null clears it.
+	ActualPaidTotal OptionalFloat `json:"actual_paid_total"`
 }
 
 type dashboardResponse struct {
@@ -472,7 +488,12 @@ func (h *Handler) GetWorkOrder(c *gin.Context) {
 		item = sanitizeWorkOrderDetail(item)
 	}
 	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
-	c.JSON(http.StatusOK, item)
+	resp := workOrderDetailResponse{WorkOrderDetail: item}
+	if hasPermission(c, permSensitiveRead) {
+		totals := CalculateTotals(item)
+		resp.Totals = &totals
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 func (h *Handler) SendCustomerEmail(c *gin.Context) {
@@ -930,11 +951,14 @@ func (h *Handler) UpdateTotals(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.UpdateTotals(c.Request.Context(), referenceID, TotalsUpdateInput{
-		DeliveryTotal: req.DeliveryTotal,
-		LabourTotal:   req.LabourTotal,
-		Deposit:       req.Deposit,
-	})
+	input := TotalsUpdateInput{DeliveryTotal: req.DeliveryTotal, LabourTotal: req.LabourTotal, Deposit: req.Deposit}
+	var item domain.WorkOrderDetail
+	dryRun := isDryRun(c)
+	if dryRun {
+		item, err = h.service.PreviewTotals(c.Request.Context(), referenceID, input)
+	} else {
+		item, err = h.service.UpdateTotals(c.Request.Context(), referenceID, input)
+	}
 	if errors.Is(err, ErrWorkOrderNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
 		return
@@ -948,6 +972,10 @@ func (h *Handler) UpdateTotals(c *gin.Context) {
 		return
 	}
 	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
+	if dryRun {
+		c.JSON(http.StatusOK, gin.H{"dry_run": true, "totals": CalculateTotals(item), "work_order": item})
+		return
+	}
 	c.JSON(http.StatusOK, item)
 }
 
@@ -975,7 +1003,13 @@ func (h *Handler) UpdateLineItems(c *gin.Context) {
 		})
 	}
 
-	item, err := h.service.UpdateLineItems(c.Request.Context(), referenceID, items)
+	var item domain.WorkOrderDetail
+	dryRun := isDryRun(c)
+	if dryRun {
+		item, err = h.service.PreviewLineItems(c.Request.Context(), referenceID, items)
+	} else {
+		item, err = h.service.UpdateLineItems(c.Request.Context(), referenceID, items)
+	}
 	if errors.Is(err, ErrWorkOrderNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
 		return
@@ -989,6 +1023,10 @@ func (h *Handler) UpdateLineItems(c *gin.Context) {
 		return
 	}
 	h.signWorkOrderDetailMarkdown(c.Request.Context(), &item)
+	if dryRun {
+		c.JSON(http.StatusOK, gin.H{"dry_run": true, "totals": CalculateTotals(item), "work_order": item})
+		return
+	}
 	c.JSON(http.StatusOK, item)
 }
 
@@ -1253,9 +1291,15 @@ func (h *Handler) CreatePartsPurchaseRequest(c *gin.Context) {
 		TotalPrice:      req.TotalPrice,
 		ItemName:        req.ItemName,
 		Quantity:        req.Quantity,
+		ActualPaidTotal: req.ActualPaidTotal,
+		CanApprove:      hasPermission(c, permPartsApprove),
 		CreatedByUserID: claims.UserID,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPartsApprovalPermission) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, ErrInvalidPartsSource) ||
 			errors.Is(err, ErrInvalidPartsStatus) ||
 			errors.Is(err, ErrInvalidPartsItemName) ||
@@ -1302,13 +1346,14 @@ func (h *Handler) UpdatePartsPurchaseRequest(c *gin.Context) {
 		TotalPrice:  req.TotalPrice,
 		ItemName:    req.ItemName,
 		Quantity:    req.Quantity,
+		ActualPaid:  req.ActualPaidTotal,
 	})
 	if err != nil {
 		if errors.Is(err, ErrPartsPurchaseRequestConflict) {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, ErrPartsApprovalPermission) {
+		if errors.Is(err, ErrPartsApprovalPermission) || errors.Is(err, ErrPartsCostLocked) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}

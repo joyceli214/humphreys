@@ -24,12 +24,14 @@ type Repository interface {
 	UpdateEquipment(ctx context.Context, referenceID int, input EquipmentUpdateInput) error
 	UpdateWorkNotes(ctx context.Context, referenceID int, input WorkNotesUpdateInput) error
 	UpdateLineItems(ctx context.Context, referenceID int, lineItems []LineItemUpsertInput) error
+	PreviewLineItems(ctx context.Context, referenceID int, lineItems []LineItemUpsertInput) (*float64, []domain.WorkOrderLineItem, error)
 	UpdateLabourDiscount(context.Context, int, *string, *float64, string) error
 	LabourDiscountHistory(context.Context, int) ([]LabourDiscountAudit, error)
 	UpdateTotals(ctx context.Context, referenceID int, input TotalsUpdateInput) error
 	UpdateCustomer(ctx context.Context, referenceID int, input CustomerUpdateInput) error
 	ListAllPartsPurchaseRequests(ctx context.Context) ([]domain.PartsPurchaseRequest, error)
 	ListRepairLogs(ctx context.Context, referenceID int) ([]domain.RepairLog, error)
+	SearchRepairLogs(ctx context.Context, p RepairLogSearchParams) ([]RepairLogSearchItem, int, error)
 	CreateRepairLog(ctx context.Context, referenceID int, repairDate *string, hoursUsed *float64, details, createdByUserID string) (domain.RepairLog, error)
 	UpdateRepairLog(ctx context.Context, referenceID int, repairLogID int64, repairDate *string, hoursUsed *float64, details *string) (domain.RepairLog, error)
 	DeleteRepairLog(ctx context.Context, referenceID int, repairLogID int64) error
@@ -989,7 +991,47 @@ func (r *storeRepository) UpdateLineItems(ctx context.Context, referenceID int, 
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	if err := r.applyLineItemsTx(ctx, tx, referenceID, lineItems); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
+// PreviewLineItems applies the same change inside a transaction that is always
+// rolled back and returns the resulting parts total and line items.
+func (r *storeRepository) PreviewLineItems(ctx context.Context, referenceID int, lineItems []LineItemUpsertInput) (*float64, []domain.WorkOrderLineItem, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+	if err := r.applyLineItemsTx(ctx, tx, referenceID, lineItems); err != nil {
+		return nil, nil, err
+	}
+	var partsTotal *float64
+	if err := tx.QueryRow(ctx, `SELECT parts_total::double precision FROM public.work_orders WHERE reference_id = $1`, referenceID).Scan(&partsTotal); err != nil {
+		return nil, nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT line_item_id, item_name, unit_price::double precision, quantity_text, line_total_text
+		FROM public.work_order_line_items WHERE reference_id = $1 ORDER BY line_item_id`, referenceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	lines := []domain.WorkOrderLineItem{}
+	for rows.Next() {
+		var l domain.WorkOrderLineItem
+		if err := rows.Scan(&l.LineItemID, &l.ItemName, &l.UnitPrice, &l.QuantityText, &l.LineTotalText); err != nil {
+			return nil, nil, err
+		}
+		lines = append(lines, l)
+	}
+	return partsTotal, lines, rows.Err()
+}
+
+func (r *storeRepository) applyLineItemsTx(ctx context.Context, tx pgx.Tx, referenceID int, lineItems []LineItemUpsertInput) error {
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM public.work_orders WHERE reference_id = $1)`, referenceID).Scan(&exists); err != nil {
 		return err
@@ -1082,29 +1124,24 @@ func (r *storeRepository) UpdateLineItems(ctx context.Context, referenceID int, 
 		}
 	}
 
-	if err := r.recalculatePartsTotalTx(ctx, tx, referenceID); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	return nil
+	return r.recalculatePartsTotalTx(ctx, tx, referenceID)
 }
 
 func (r *storeRepository) UpdateTotals(ctx context.Context, referenceID int, input TotalsUpdateInput) error {
+	// A field that was not sent keeps its stored value; an explicit null on
+	// delivery/labour clears it (those columns are nullable), as before.
 	cmd, err := r.db.Exec(ctx, `
 		UPDATE public.work_orders
 		SET
-			delivery_total = $1,
-			labour_total = $2,
-			deposit = $3,
+			delivery_total = CASE WHEN $1 THEN $2::numeric ELSE delivery_total END,
+			labour_total = CASE WHEN $3 THEN $4::numeric ELSE labour_total END,
+			deposit = CASE WHEN $5 THEN $6::numeric ELSE deposit END,
 			updated_at = now()
-		WHERE reference_id = $4
+		WHERE reference_id = $7
 	`,
-		input.DeliveryTotal,
-		input.LabourTotal,
-		input.Deposit,
+		input.DeliveryTotal.Set, input.DeliveryTotal.Value,
+		input.LabourTotal.Set, input.LabourTotal.Value,
+		input.Deposit.Set, input.Deposit.Value,
 		referenceID,
 	)
 	if err != nil {
@@ -1343,6 +1380,7 @@ func (r *storeRepository) ListAllPartsPurchaseRequests(ctx context.Context) ([]d
 			pr.source_url,
 			pr.status,
 			pr.total_price::double precision,
+			pr.actual_paid_total::double precision,
 			pr.item_name,
 			pr.quantity,
 			pr.created_by_user_id,
@@ -1373,6 +1411,7 @@ func (r *storeRepository) ListAllPartsPurchaseRequests(ctx context.Context) ([]d
 			&item.SourceURL,
 			&item.Status,
 			&item.TotalPrice,
+			&item.ActualPaidTotal,
 			&item.ItemName,
 			&item.Quantity,
 			&item.CreatedByUserID,
@@ -1701,6 +1740,7 @@ func (r *storeRepository) ListPartsPurchaseRequests(ctx context.Context, referen
 			ppr.source_url,
 			ppr.status,
 			ppr.total_price::double precision,
+			ppr.actual_paid_total::double precision,
 			ppr.item_name,
 			ppr.quantity,
 			ppr.created_by_user_id::text,
@@ -1732,6 +1772,7 @@ func (r *storeRepository) ListPartsPurchaseRequests(ctx context.Context, referen
 			&item.SourceURL,
 			&item.Status,
 			&item.TotalPrice,
+			&item.ActualPaidTotal,
 			&item.ItemName,
 			&item.Quantity,
 			&item.CreatedByUserID,
@@ -1774,7 +1815,8 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 			total_price,
 			item_name,
 			quantity,
-			created_by_user_id
+			created_by_user_id,
+			actual_paid_total
 		)
 		VALUES(
 			$1,
@@ -1784,7 +1826,8 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 			$5,
 			BTRIM($6),
 			$7,
-			$8::uuid
+			$8::uuid,
+			$9::numeric
 		)
 		RETURNING
 			parts_purchase_request_id,
@@ -1793,6 +1836,7 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 			source_url,
 			status,
 			total_price::double precision,
+			actual_paid_total::double precision,
 			item_name,
 			quantity,
 			created_by_user_id::text,
@@ -1812,6 +1856,7 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 		input.ItemName,
 		input.Quantity,
 		input.CreatedByUserID,
+		input.ActualPaidTotal,
 	).Scan(
 		&inserted.PartsPurchaseRequestID,
 		&inserted.ReferenceID,
@@ -1819,6 +1864,7 @@ func (r *storeRepository) CreatePartsPurchaseRequest(ctx context.Context, refere
 		&inserted.SourceURL,
 		&inserted.Status,
 		&inserted.TotalPrice,
+		&inserted.ActualPaidTotal,
 		&inserted.ItemName,
 		&inserted.Quantity,
 		&inserted.CreatedByUserID,
@@ -1858,9 +1904,9 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 	}
 	defer tx.Rollback(ctx)
 	var current domain.PartsPurchaseRequest
-	err = tx.QueryRow(ctx, `SELECT status, total_price::double precision, quantity, item_name, source, source_url, approved_at, updated_at
+	err = tx.QueryRow(ctx, `SELECT status, total_price::double precision, actual_paid_total::double precision, quantity, item_name, source, source_url, approved_at, updated_at
 		FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2 FOR UPDATE`, referenceID, partsPurchaseRequestID).
-		Scan(&current.Status, &current.TotalPrice, &current.Quantity, &current.ItemName, &current.Source, &current.SourceURL, &current.ApprovedAt, &current.UpdatedAt)
+		Scan(&current.Status, &current.TotalPrice, &current.ActualPaidTotal, &current.Quantity, &current.ItemName, &current.Source, &current.SourceURL, &current.ApprovedAt, &current.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.PartsPurchaseRequest{}, ErrPartsPurchaseRequestNotFound
 	}
@@ -1872,6 +1918,11 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 	}
 	if err := validatePartsTransition(current.Status, input.Status, input.CanApprove); err != nil {
 		return domain.PartsPurchaseRequest{}, err
+	}
+	// Once approved, the estimate and quantity are locked unless the caller may approve.
+	if partsAfterApproval(current) && !input.CanApprove &&
+		(priceString(input.TotalPrice) != priceString(current.TotalPrice) || input.Quantity != current.Quantity) {
+		return domain.PartsPurchaseRequest{}, ErrPartsCostLocked
 	}
 	var updated domain.PartsPurchaseRequest
 	cmdErr := tx.QueryRow(ctx, `
@@ -1888,6 +1939,7 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 			total_price = $6,
 			item_name = BTRIM($7),
 			quantity = $8,
+			actual_paid_total = CASE WHEN $9 THEN $10::numeric ELSE actual_paid_total END,
 			updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 		WHERE reference_id = $1 AND parts_purchase_request_id = $2
 		RETURNING
@@ -1897,6 +1949,7 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 			source_url,
 			status,
 			total_price::double precision,
+			actual_paid_total::double precision,
 			item_name,
 			quantity,
 			created_by_user_id::text,
@@ -1916,6 +1969,8 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 		input.TotalPrice,
 		input.ItemName,
 		input.Quantity,
+		input.ActualPaid.Set,
+		input.ActualPaid.Value,
 	).Scan(
 		&updated.PartsPurchaseRequestID,
 		&updated.ReferenceID,
@@ -1923,6 +1978,7 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 		&updated.SourceURL,
 		&updated.Status,
 		&updated.TotalPrice,
+		&updated.ActualPaidTotal,
 		&updated.ItemName,
 		&updated.Quantity,
 		&updated.CreatedByUserID,
@@ -1945,7 +2001,7 @@ func (r *storeRepository) UpdatePartsPurchaseRequest(ctx context.Context, refere
 	}
 	auditRows := diffPartsAudit(current, updated)
 	for i := range auditRows {
-		auditRows[i].AfterApproval = auditRows[i].Field == "total_price" && (current.ApprovedAt != nil || current.Status == "approved")
+		auditRows[i].AfterApproval = auditRows[i].Field == "total_price" && partsAfterApproval(current)
 	}
 	if err := insertPartsAudit(ctx, tx, partsPurchaseRequestID, referenceID, input.ActorUserID, auditRows); err != nil {
 		return domain.PartsPurchaseRequest{}, err
@@ -1968,7 +2024,7 @@ func (r *storeRepository) DeletePartsPurchaseRequest(ctx context.Context, refere
 	}
 	defer tx.Rollback(ctx)
 	var deleted domain.PartsPurchaseRequest
-	err = tx.QueryRow(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2 RETURNING status, total_price::double precision, quantity, item_name, source, source_url`, referenceID, partsPurchaseRequestID).Scan(&deleted.Status, &deleted.TotalPrice, &deleted.Quantity, &deleted.ItemName, &deleted.Source, &deleted.SourceURL)
+	err = tx.QueryRow(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1 AND parts_purchase_request_id = $2 RETURNING status, total_price::double precision, actual_paid_total::double precision, quantity, item_name, source, source_url`, referenceID, partsPurchaseRequestID).Scan(&deleted.Status, &deleted.TotalPrice, &deleted.ActualPaidTotal, &deleted.Quantity, &deleted.ItemName, &deleted.Source, &deleted.SourceURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrPartsPurchaseRequestNotFound
 	}
@@ -1997,14 +2053,14 @@ func (r *storeRepository) DeleteWorkOrder(ctx context.Context, referenceID int, 
 	if _, err := tx.Exec(ctx, `DELETE FROM public.repair_logs WHERE reference_id = $1`, referenceID); err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1 RETURNING parts_purchase_request_id, status, total_price::double precision, quantity, item_name, source, source_url`, referenceID)
+	rows, err := tx.Query(ctx, `DELETE FROM public.parts_purchase_requests WHERE reference_id = $1 RETURNING parts_purchase_request_id, status, total_price::double precision, actual_paid_total::double precision, quantity, item_name, source, source_url`, referenceID)
 	if err != nil {
 		return err
 	}
 	var deleted []domain.PartsPurchaseRequest
 	for rows.Next() {
 		var item domain.PartsPurchaseRequest
-		if err := rows.Scan(&item.PartsPurchaseRequestID, &item.Status, &item.TotalPrice, &item.Quantity, &item.ItemName, &item.Source, &item.SourceURL); err != nil {
+		if err := rows.Scan(&item.PartsPurchaseRequestID, &item.Status, &item.TotalPrice, &item.ActualPaidTotal, &item.Quantity, &item.ItemName, &item.Source, &item.SourceURL); err != nil {
 			rows.Close()
 			return err
 		}

@@ -6,7 +6,7 @@ import type { PartsAuditEntry, PartsPurchaseRequest } from "@/lib/api/generated/
 
 const request: PartsPurchaseRequest = {
   parts_purchase_request_id: 7, reference_id: 123, source: "supplier", source_url: null,
-  status: "approved", total_price: 25, item_name: "Capacitor", quantity: 1,
+  status: "approved", total_price: 25, actual_paid_total: null, item_name: "Capacitor", quantity: 1,
   created_by_user_id: "creator-id", created_by_name: "Creator", created_at: null, updated_at: null,
   approved_at: null, ordered_at: null, arrived_at: null, used_at: null, cancelled_at: null, audit_flags: []
 };
@@ -67,6 +67,18 @@ describe("parts request audit", () => {
       expect(screen.getByText(label)).toBeVisible();
     }
     expect(screen.getByText("editor-id")).toHaveAttribute("title", "editor-id");
+  });
+
+  it("labels actual paid changes in the history", async () => {
+    vi.mocked(apiClient.getPartsPurchaseRequestHistory).mockResolvedValueOnce([
+      { id: 9, parts_purchase_request_id: 7, reference_id: 123, action: "update", field: "actual_paid_total",
+        old_value: null, new_value: "18.50", changed_by_user_id: "editor-id", changed_by_name: "Editor",
+        changed_at: "2026-10-09T15:00:00Z", after_approval: false }
+    ]);
+    render(<PartsRequestHistory referenceID={123} requests={requests} />);
+    fireEvent.click(screen.getByText("Parts request history"));
+    expect(await screen.findByText("Actual paid (CAD)")).toBeVisible();
+    expect(screen.getByText(/18\.50/)).toBeVisible();
   });
 
   it("refreshes history after a request change", async () => {
