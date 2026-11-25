@@ -89,7 +89,15 @@ func (h *Handler) ListEmailPhotos(c *gin.Context) {
 	if len(photos) > 0 {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
-		for _, info := range h.emailPhotos.List(ctx, photos) {
+		// light=1 (the job photo gallery) only needs links, so skip the
+		// download-and-decode that computes the email size of every photo.
+		var infos []emailphotos.Info
+		if c.Query("light") == "1" {
+			infos = h.emailPhotos.ListLight(photos)
+		} else {
+			infos = h.emailPhotos.List(ctx, photos)
+		}
+		for _, info := range infos {
 			response.Items = append(response.Items, emailPhotoResponse{
 				ID: info.ID, URL: info.URL, Name: info.Name, Source: info.Source,
 				OriginalBytes: info.OriginalBytes, SendBytes: info.SendBytes, OriginalType: info.OriginalType,

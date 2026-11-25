@@ -62,7 +62,7 @@ export function JobPhotosCard({ referenceId, canView, canAdd, refreshKey, onPhot
     setLoading(true);
     setError("");
     try {
-      const res = await apiClient.listWorkOrderEmailPhotos(referenceId);
+      const res = await apiClient.listWorkOrderEmailPhotos(referenceId, { light: true });
       if (requestId !== requestRef.current) return;
       setPhotos(res.items ?? []);
     } catch (err) {

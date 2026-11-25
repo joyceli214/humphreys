@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,11 +29,15 @@ import (
 )
 
 const (
-	maxImageUploadBytes  int64         = 10 * 1024 * 1024
-	tempPrefix                         = "markdown-temp/"
-	permPrefix                         = "markdown/"
-	tempCleanupInterval time.Duration = 1 * time.Hour
-	tempRetentionTTL    time.Duration = 24 * time.Hour
+	maxImageUploadBytes int64 = 10 * 1024 * 1024
+	// maxUploadRequestBytes caps the whole upload request body: the image plus
+	// multipart framing. Without it the server reads an arbitrarily large body
+	// before the image size check ever runs.
+	maxUploadRequestBytes int64         = maxImageUploadBytes + 1024*1024
+	tempPrefix                          = "markdown-temp/"
+	permPrefix                          = "markdown/"
+	tempCleanupInterval   time.Duration = 1 * time.Hour
+	tempRetentionTTL      time.Duration = 24 * time.Hour
 )
 
 var markdownImageURLPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|<img[^>]*\s+src=["']([^"']+)["'][^>]*>`)
@@ -108,8 +114,14 @@ func (h *Handler) UploadMarkdownImage(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadRequestBytes)
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image is too large (max 10MB)"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing file"})
 		return
 	}
@@ -129,11 +141,14 @@ func (h *Handler) UploadMarkdownImage(c *gin.Context) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, maxImageUploadBytes+1))
-	if err != nil {
+	// Size the buffer up front: io.ReadAll grows by doubling and briefly holds
+	// about twice the image in memory.
+	buf := bytes.NewBuffer(make([]byte, 0, fileHeader.Size+1))
+	if _, err := buf.ReadFrom(io.LimitReader(file, maxImageUploadBytes+1)); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read file"})
 		return
 	}
+	data := buf.Bytes()
 	if int64(len(data)) > maxImageUploadBytes {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image is too large (max 10MB)"})
 		return
@@ -474,12 +489,46 @@ func (h *Handler) listObjects(ctx context.Context, prefix string) ([]listBucketO
 	return objects, nil
 }
 
+// copyObject copies an object inside the bucket. It asks the storage service
+// to do the copy (no image bytes pass through this process); if the service
+// refuses or does not support that, it falls back to download + upload.
 func (h *Handler) copyObject(ctx context.Context, sourceKey, destinationKey string) error {
+	err := h.copyObjectServerSide(ctx, sourceKey, destinationKey)
+	if err == nil {
+		return nil
+	}
+	log.Printf("[uploads] server-side copy failed, copying through the API instead: %v", err)
 	data, contentType, err := h.getObject(ctx, sourceKey)
 	if err != nil {
 		return err
 	}
 	return h.putObject(ctx, destinationKey, contentType, data)
+}
+
+// copyObjectServerSide is S3 CopyObject: a PUT with x-amz-copy-source and no body.
+func (h *Handler) copyObjectServerSide(ctx context.Context, sourceKey, destinationKey string) error {
+	canonicalURI := "/" + h.bucket + "/" + escapeObjectKey(destinationKey)
+	copySource := "/" + h.bucket + "/" + escapeObjectKey(sourceKey)
+	req, err := h.buildSignedRequestWithHeaders(ctx, http.MethodPut, canonicalURI, nil, nil, "", map[string]string{
+		"x-amz-copy-source": copySource,
+	})
+	if err != nil {
+		return err
+	}
+	res, err := h.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("s3 copy failed: status=%d body=%q", res.StatusCode, string(body))
+	}
+	// S3 can answer 200 and still report a failure in the XML body.
+	if bytes.Contains(body, []byte("<Error>")) {
+		return fmt.Errorf("s3 copy failed: body=%q", string(body))
+	}
+	return nil
 }
 
 func (h *Handler) getObject(ctx context.Context, key string) ([]byte, string, error) {
@@ -497,10 +546,20 @@ func (h *Handler) getObject(ctx context.Context, key string) ([]byte, string, er
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 2048))
 		return nil, "", fmt.Errorf("s3 get failed: status=%d body=%q", res.StatusCode, string(body))
 	}
-	data, err := io.ReadAll(io.LimitReader(res.Body, maxImageUploadBytes+1))
-	if err != nil {
+	if res.ContentLength > maxImageUploadBytes {
+		return nil, "", fmt.Errorf("s3 object too large")
+	}
+	// Size the buffer from Content-Length when known, instead of letting
+	// io.ReadAll grow (and briefly double) it.
+	capacity := int64(512)
+	if res.ContentLength > 0 {
+		capacity = res.ContentLength + 1
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, capacity))
+	if _, err := buf.ReadFrom(io.LimitReader(res.Body, maxImageUploadBytes+1)); err != nil {
 		return nil, "", err
 	}
+	data := buf.Bytes()
 	if int64(len(data)) > maxImageUploadBytes {
 		return nil, "", fmt.Errorf("s3 object too large")
 	}
@@ -558,6 +617,21 @@ func (h *Handler) buildSignedRequest(
 	body []byte,
 	contentType string,
 ) (*http.Request, error) {
+	return h.buildSignedRequestWithHeaders(ctx, method, canonicalURI, query, body, contentType, nil)
+}
+
+// buildSignedRequestWithHeaders is buildSignedRequest plus extra headers that
+// are part of the signature (S3 requires every x-amz-* header to be signed).
+// Header names must be lowercase.
+func (h *Handler) buildSignedRequestWithHeaders(
+	ctx context.Context,
+	method string,
+	canonicalURI string,
+	query url.Values,
+	body []byte,
+	contentType string,
+	extraHeaders map[string]string,
+) (*http.Request, error) {
 	now := time.Now().UTC()
 	amzDate := now.Format("20060102T150405Z")
 	dateStamp := now.Format("20060102")
@@ -568,8 +642,25 @@ func (h *Handler) buildSignedRequest(
 
 	payloadHash := sha256Hex(body)
 	host := h.endpoint
-	canonicalHeaders := "host:" + host + "\n" + "x-amz-content-sha256:" + payloadHash + "\n" + "x-amz-date:" + amzDate + "\n"
-	signedHeaders := "host;x-amz-content-sha256;x-amz-date"
+	signed := map[string]string{
+		"host":                 host,
+		"x-amz-content-sha256": payloadHash,
+		"x-amz-date":           amzDate,
+	}
+	for name, value := range extraHeaders {
+		signed[name] = strings.TrimSpace(value)
+	}
+	names := make([]string, 0, len(signed))
+	for name := range signed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var canonicalHeadersBuilder strings.Builder
+	for _, name := range names {
+		canonicalHeadersBuilder.WriteString(name + ":" + signed[name] + "\n")
+	}
+	canonicalHeaders := canonicalHeadersBuilder.String()
+	signedHeaders := strings.Join(names, ";")
 	canonicalRequest := method + "\n" + canonicalURI + "\n" + canonicalQuery + "\n" + canonicalHeaders + "\n" + signedHeaders + "\n" + payloadHash
 
 	credentialScope := dateStamp + "/" + h.region + "/s3/aws4_request"
@@ -591,6 +682,9 @@ func (h *Handler) buildSignedRequest(
 	}
 	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
 	req.Header.Set("X-Amz-Date", amzDate)
+	for name, value := range extraHeaders {
+		req.Header.Set(name, strings.TrimSpace(value))
+	}
 	if len(body) > 0 {
 		req.Header.Set("Content-Length", strconv.Itoa(len(body)))
 		if strings.TrimSpace(contentType) != "" {

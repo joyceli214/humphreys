@@ -434,8 +434,14 @@ export class APIClient {
     });
   }
 
-  listWorkOrderEmailPhotos(referenceID: number) {
-    return this.request<{ items: EmailPhoto[]; max_photos: number; max_total_bytes: number }>(`/work-orders/${referenceID}/email-photos`);
+  /**
+   * Lists a job's photos. `light` returns only links (no email size, width or
+   * height) and costs the server almost nothing, so use it for galleries. The
+   * default does the real conversion for the email size counter and is heavy.
+   */
+  listWorkOrderEmailPhotos(referenceID: number, options?: { light?: boolean }) {
+    const query = options?.light ? "?light=1" : "";
+    return this.request<{ items: EmailPhoto[]; max_photos: number; max_total_bytes: number }>(`/work-orders/${referenceID}/email-photos${query}`);
   }
 
   deleteWorkOrder(referenceID: number) {

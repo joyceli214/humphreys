@@ -101,10 +101,26 @@ type Service struct {
 	mu    sync.Mutex
 	cache map[string]cacheEntry
 	group singleflight.Group
+
+	// shrinkSlots limits how many photos are downloaded and decoded at once,
+	// across every request. A decoded phone photo is tens of MB of raw pixels,
+	// so unbounded parallelism turned a few page views into hundreds of MB.
+	shrinkSlots chan struct{}
 }
 
+// maxConcurrentShrinks is how many photos may be in memory as decoded pixels
+// at the same time, process-wide.
+const maxConcurrentShrinks = 1
+
 func NewService(store Store) *Service {
-	return &Service{store: store, ttl: 30 * time.Minute, maxBytes: 200_000_000, maxTotalBytes: MaxTotalBytes, cache: make(map[string]cacheEntry)}
+	return &Service{
+		store:         store,
+		ttl:           30 * time.Minute,
+		maxBytes:      60_000_000,
+		maxTotalBytes: MaxTotalBytes,
+		cache:         make(map[string]cacheEntry),
+		shrinkSlots:   make(chan struct{}, maxConcurrentShrinks),
+	}
 }
 
 func (s *Service) Store() Store { return s.store }
@@ -120,6 +136,13 @@ func (s *Service) Prepare(ctx context.Context, photo Photo) (Prepared, error) {
 	s.mu.Unlock()
 
 	value, err, _ := s.group.Do(photo.Key, func() (any, error) {
+		// Wait for a slot before downloading, so queued photos hold no memory.
+		select {
+		case s.shrinkSlots <- struct{}{}:
+			defer func() { <-s.shrinkSlots }()
+		case <-ctx.Done():
+			return Prepared{}, fmt.Errorf("read photo: %w", ctx.Err())
+		}
 		data, _, err := s.store.GetObjectBytes(ctx, photo.Key)
 		if err != nil {
 			return Prepared{}, fmt.Errorf("read photo: %w", err) // not cached: storage errors are retried
@@ -167,7 +190,28 @@ func (s *Service) remember(key string, entry cacheEntry) {
 	}
 }
 
-// List returns every photo on the work order with its real send size.
+// ListLight returns every photo on the work order with a link to the stored
+// original and nothing else. It never downloads or decodes a photo, so it costs
+// no memory; use it for the job photo gallery. The send size, dimensions and
+// "supported" check need List, which does the real conversion.
+func (s *Service) ListLight(photos []Photo) []Info {
+	infos := make([]Info, len(photos))
+	for i, photo := range photos {
+		info := Info{Photo: photo, Supported: true}
+		if url, err := s.store.PresignedGetURL(photo.Key, time.Hour); err == nil {
+			info.URL = url
+		} else {
+			info.Supported = false
+			info.Reason = "This photo could not be loaded"
+		}
+		infos[i] = info
+	}
+	return infos
+}
+
+// List returns every photo on the work order with its real send size. Photos
+// are converted one at a time (see shrinkSlots), so a long list is slow but
+// never holds more than one decoded photo in memory.
 func (s *Service) List(ctx context.Context, photos []Photo) []Info {
 	infos := make([]Info, len(photos))
 	var wg sync.WaitGroup

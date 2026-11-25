@@ -94,13 +94,15 @@ func Shrink(data []byte, name string) (Prepared, error) {
 
 	// Scale first (cheap to rotate afterwards). Draw onto white so transparent
 	// PNG/GIF areas don't turn black in the JPEG.
-	scaled := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.Draw(scaled, scaled.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	var scaled *image.RGBA
 	if width == bounds.Dx() && height == bounds.Dy() {
+		scaled = image.NewRGBA(image.Rect(0, 0, width, height))
+		draw.Draw(scaled, scaled.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
 		draw.Draw(scaled, scaled.Bounds(), src, bounds.Min, draw.Over)
 	} else {
-		draw.CatmullRom.Scale(scaled, scaled.Bounds(), src, bounds, draw.Over, nil)
+		scaled = scaleTo(src, width, height)
 	}
+	src = nil // the full-size pixels are no longer needed; let them be collected
 	dst := applyOrientation(scaled, orientation)
 	width, height = dst.Bounds().Dx(), dst.Bounds().Dy()
 
@@ -144,20 +146,47 @@ func jpegName(name string) string {
 	return base + ".jpg"
 }
 
+// scaleTo shrinks src to width x height (onto white, so transparency does not
+// turn black) without x/image's CatmullRom/BiLinear scalers: those allocate a
+// temporary float buffer of target-width x source-height pixels, about 150 MB
+// for a 12 MP photo. Instead it halves the image while it is still at least
+// twice the target (averaging 2x2 blocks) and finishes with a single cheap
+// ApproxBiLinear step of less than 2x, which needs no temporary buffer.
+func scaleTo(src image.Image, width, height int) *image.RGBA {
+	cur := src
+	for {
+		b := cur.Bounds()
+		halfW, halfH := b.Dx()/2, b.Dy()/2
+		if halfW < width || halfH < height {
+			break
+		}
+		half := image.NewRGBA(image.Rect(0, 0, halfW, halfH))
+		draw.ApproxBiLinear.Scale(half, half.Bounds(), cur, b, draw.Src, nil)
+		cur = half
+	}
+	out := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(out, out.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	draw.ApproxBiLinear.Scale(out, out.Bounds(), cur, cur.Bounds(), draw.Over, nil)
+	return out
+}
+
 // applyOrientation rotates/flips an image according to its EXIF orientation.
-func applyOrientation(src image.Image, orientation int) image.Image {
+// It copies RGBA pixel bytes directly: the old version went through the
+// image.Image interface for every pixel, which allocated millions of small
+// color values per photo.
+func applyOrientation(src *image.RGBA, orientation int) *image.RGBA {
 	if orientation <= 1 || orientation > 8 {
 		return src
 	}
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
-	swap := orientation >= 5
 	dw, dh := w, h
-	if swap {
+	if orientation >= 5 {
 		dw, dh = h, w
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
 	for y := 0; y < h; y++ {
+		srcRow := src.Pix[y*src.Stride : y*src.Stride+w*4]
 		for x := 0; x < w; x++ {
 			var dx, dy int
 			switch orientation {
@@ -176,7 +205,7 @@ func applyOrientation(src image.Image, orientation int) image.Image {
 			case 8:
 				dx, dy = y, w-1-x
 			}
-			dst.Set(dx, dy, src.At(b.Min.X+x, b.Min.Y+y))
+			copy(dst.Pix[dy*dst.Stride+dx*4:dy*dst.Stride+dx*4+4], srcRow[x*4:x*4+4])
 		}
 	}
 	return dst
@@ -187,8 +216,7 @@ func applyOrientation(src image.Image, orientation int) image.Image {
 func encodeThumbnail(src image.Image) ([]byte, error) {
 	bounds := src.Bounds()
 	width, height := fitWithin(bounds.Dx(), bounds.Dy(), ThumbnailEdge)
-	thumb := image.NewRGBA(image.Rect(0, 0, width, height))
-	draw.ApproxBiLinear.Scale(thumb, thumb.Bounds(), src, bounds, draw.Src, nil)
+	thumb := scaleTo(src, width, height)
 	var out bytes.Buffer
 	if err := jpeg.Encode(&out, thumb, &jpeg.Options{Quality: 70}); err != nil {
 		return nil, fmt.Errorf("encode thumbnail: %w", err)

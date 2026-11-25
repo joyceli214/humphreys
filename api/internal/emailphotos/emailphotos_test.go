@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"math/rand"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -219,5 +220,108 @@ func TestListReportsSendSizeAndCaches(t *testing.T) {
 	}
 	if store.reads.Load() != readsBefore {
 		t.Fatal("expected cached shrink result to be reused")
+	}
+}
+
+func TestListLightNeverReadsPhotos(t *testing.T) {
+	store := &fakeStore{objects: map[string][]byte{"a.jpg": noisyJPEG(t, 800, 600, 1)}}
+	service := NewService(store)
+	photos := Collect(store, []Source{{Label: "Problem", Markdown: "managed:a.jpg managed:b.png"}})
+	infos := service.ListLight(photos)
+	if len(infos) != 2 {
+		t.Fatalf("expected 2 infos, got %d", len(infos))
+	}
+	for _, info := range infos {
+		if !info.Supported || !strings.HasPrefix(info.URL, "https://storage.example/") {
+			t.Fatalf("expected a plain link: %+v", info)
+		}
+		if info.Source != "Problem" || info.ID == "" || info.Name == "" {
+			t.Fatalf("expected identity fields to be set: %+v", info)
+		}
+	}
+	if store.reads.Load() != 0 {
+		t.Fatalf("light listing must not download photos, got %d reads", store.reads.Load())
+	}
+}
+
+// slowStore tracks how many downloads are in flight at once.
+type slowStore struct {
+	fakeStore
+	inFlight, maxInFlight atomic.Int32
+}
+
+func (s *slowStore) GetObjectBytes(ctx context.Context, key string) ([]byte, string, error) {
+	n := s.inFlight.Add(1)
+	for {
+		cur := s.maxInFlight.Load()
+		if n <= cur || s.maxInFlight.CompareAndSwap(cur, n) {
+			break
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	s.inFlight.Add(-1)
+	return s.fakeStore.GetObjectBytes(ctx, key)
+}
+
+func TestListConvertsOnePhotoAtATime(t *testing.T) {
+	store := &slowStore{fakeStore: fakeStore{objects: map[string][]byte{}}}
+	var markdown []string
+	for i := 0; i < 8; i++ {
+		key := string(rune('a'+i)) + ".jpg"
+		store.objects[key] = noisyJPEG(t, 300, 200, int64(i))
+		markdown = append(markdown, "managed:"+key)
+	}
+	service := NewService(store)
+	photos := Collect(store, []Source{{Markdown: strings.Join(markdown, " ")}})
+	// Two lists at once, like two people opening jobs together.
+	done := make(chan []Info, 2)
+	for i := 0; i < 2; i++ {
+		go func() { done <- service.List(context.Background(), photos) }()
+	}
+	for i := 0; i < 2; i++ {
+		for _, info := range <-done {
+			if !info.Supported {
+				t.Fatalf("expected supported photo: %+v", info)
+			}
+		}
+	}
+	if got := store.maxInFlight.Load(); got != maxConcurrentShrinks {
+		t.Fatalf("expected at most %d photo in memory at once, saw %d", maxConcurrentShrinks, got)
+	}
+}
+
+func TestScaleToFlattensTransparencyOnWhite(t *testing.T) {
+	// Large enough to go through the halving steps.
+	src := image.NewNRGBA(image.Rect(0, 0, 3200, 2400)) // fully transparent
+	out := scaleTo(src, 800, 600)
+	if out.Bounds().Dx() != 800 || out.Bounds().Dy() != 600 {
+		t.Fatalf("unexpected size %v", out.Bounds())
+	}
+	for _, p := range [][2]int{{0, 0}, {400, 300}, {799, 599}} {
+		if got := out.RGBAAt(p[0], p[1]); got != (color.RGBA{255, 255, 255, 255}) {
+			t.Fatalf("transparent area must become white, got %v at %v", got, p)
+		}
+	}
+}
+
+// Shrinking used to allocate ~180 MB for one 12 MP photo (a 150 MB scaler
+// buffer), which is what made memory spike when several photos were opened.
+// Keep a generous budget so an accidental return to that scaler is caught.
+func TestShrinkMemoryBudgetFor12MegapixelPhoto(t *testing.T) {
+	data := withExif(noisyJPEG(t, 4000, 3000, 11), 6)
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	prepared, err := Shrink(data, "big.jpg")
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Width != 1200 || prepared.Height != 1600 {
+		t.Fatalf("expected a rotated 1200x1600 result, got %dx%d", prepared.Width, prepared.Height)
+	}
+	allocatedMB := (after.TotalAlloc - before.TotalAlloc) >> 20
+	if allocatedMB > 100 {
+		t.Fatalf("shrinking one 12 MP photo allocated %d MB (budget 100 MB)", allocatedMB)
 	}
 }

@@ -46,7 +46,8 @@ describe("JobPhotosCard", () => {
   it("lists the job's photos and opens a zoomable lightbox with next/previous", async () => {
     render(<JobPhotosCard referenceId={42} canView canAdd={false} refreshKey="1" />);
     expect(await screen.findByRole("button", { name: "Open photo 1 from Problem" })).toBeInTheDocument();
-    expect(listWorkOrderEmailPhotos).toHaveBeenCalledWith(42);
+    // The gallery must use the light listing: the full one decodes every photo on the server.
+    expect(listWorkOrderEmailPhotos).toHaveBeenCalledWith(42, { light: true });
     expect(screen.getByText("Job photos (2)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Take photo/ })).toBeNull();
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -28,8 +29,18 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// defaultSoftMemoryLimit makes the Go garbage collector work harder as the
+// process approaches this size, so freed memory goes back sooner instead of
+// sitting in the process. It is a soft limit: it never kills or fails anything.
+// An explicit GOMEMLIMIT environment variable (set in Railway) overrides it.
+const defaultSoftMemoryLimit = 400 << 20
+
 func main() {
 	_ = godotenv.Load()
+
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(defaultSoftMemoryLimit)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -69,6 +80,9 @@ func main() {
 	workOrdersHandler.SetUploadsHandler(uploadsHandler)
 
 	r := gin.New()
+	// Gin keeps up to this much of an uploaded file in RAM and spills the rest
+	// to a temp file (the default is 32 MiB per request).
+	r.MaxMultipartMemory = 8 << 20
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.ErrorLogger())
